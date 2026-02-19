@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Payment Order Request</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <h1>Payment Order Request</h1>
+        <p class="subhead">
+          Complete the form and add it to the submitted list. Entries are saved
+          in your browser (localStorage).
+        </p>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card" aria-labelledby="form-title">
+        <h2 id="form-title">Request Form</h2>
+
+        <form id="paymentOrderForm" novalidate>
+          <div class="grid">
+            <div class="field">
+              <label for="paymentOrderNo"
+                >Payment Order No.<span class="req" aria-hidden="true"
+                  >*</span
+                ></label
+              >
+              <input
+                id="paymentOrderNo"
+                name="paymentOrderNo"
+                type="text"
+                autocomplete="off"
+                required
+              />
+              <div
+                class="error"
+                id="error-paymentOrderNo"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="date"
+                >Date<span class="req" aria-hidden="true">*</span></label
+              >
+              <input id="date" name="date" type="date" required />
+              <div
+                class="error"
+                id="error-date"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="name"
+                >Name<span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="name"
+                name="name"
+                type="text"
+                autocomplete="name"
+                required
+              />
+              <div
+                class="error"
+                id="error-name"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="euro"
+                >Euro<span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="euro"
+                name="euro"
+                type="number"
+                inputmode="decimal"
+                step="0.01"
+                min="0"
+                required
+              />
+              <div
+                class="error"
+                id="error-euro"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="usd"
+                >USD<span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="usd"
+                name="usd"
+                type="number"
+                inputmode="decimal"
+                step="0.01"
+                min="0"
+                required
+              />
+              <div
+                class="error"
+                id="error-usd"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field field--span2">
+              <label for="address"
+                >Address<span class="req" aria-hidden="true">*</span></label
+              >
+              <textarea
+                id="address"
+                name="address"
+                rows="3"
+                required
+              ></textarea>
+              <div
+                class="error"
+                id="error-address"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="iban"
+                >IBAN<span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="iban"
+                name="iban"
+                type="text"
+                autocomplete="off"
+                required
+              />
+              <div
+                class="error"
+                id="error-iban"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="bic"
+                >BIC<span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="bic"
+                name="bic"
+                type="text"
+                autocomplete="off"
+                required
+              />
+              <div
+                class="error"
+                id="error-bic"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field field--span2">
+              <label for="specialInstructions"
+                >Special Instructions<span class="req" aria-hidden="true"
+                  >*</span
+                ></label
+              >
+              <textarea
+                id="specialInstructions"
+                name="specialInstructions"
+                rows="3"
+                required
+              ></textarea>
+              <div
+                class="error"
+                id="error-specialInstructions"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="budgetNumber"
+                >Budget Number<span class="req" aria-hidden="true"
+                  >*</span
+                ></label
+              >
+              <input
+                id="budgetNumber"
+                name="budgetNumber"
+                type="text"
+                autocomplete="off"
+                required
+              />
+              <div
+                class="error"
+                id="error-budgetNumber"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field field--span2">
+              <label for="purpose"
+                >Purpose<span class="req" aria-hidden="true">*</span></label
+              >
+              <textarea
+                id="purpose"
+                name="purpose"
+                rows="3"
+                required
+              ></textarea>
+              <div
+                class="error"
+                id="error-purpose"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="submit" class="btn btn--primary">Add to List</button>
+            <button type="button" id="resetBtn" class="btn btn--ghost">
+              Reset
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="list-title">
+        <div class="list-header">
+          <h2 id="list-title">Submitted Requests</h2>
+          <div class="list-actions">
+            <button type="button" id="clearAllBtn" class="btn btn--danger">
+              Clear All
+            </button>
+          </div>
+        </div>
+
+        <div
+          class="table-wrap"
+          role="region"
+          aria-label="Submitted requests table"
+          tabindex="0"
+        >
+          <table class="table" aria-describedby="list-help">
+            <caption id="list-help" class="sr-only">
+              Newest requests appear first. Use the Actions column to view
+              details or delete an entry.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Payment Order No.</th>
+                <th scope="col">Date</th>
+                <th scope="col">Name</th>
+                <th scope="col" class="num">Euro</th>
+                <th scope="col" class="num">USD</th>
+                <th scope="col">Budget Number</th>
+                <th scope="col">Purpose</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTbody">
+              <!-- rows inserted by app.js -->
+            </tbody>
+          </table>
+        </div>
+
+        <div id="emptyState" class="empty" hidden>
+          No requests submitted yet.
+        </div>
+      </section>
+    </main>
+
+    <!-- Simple modal for “View” -->
+    <div class="modal" id="detailsModal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalTitle"
+      >
+        <div class="modal__header">
+          <h3 id="modalTitle">Request Details</h3>
+          <button
+            type="button"
+            class="icon-btn"
+            data-modal-close
+            aria-label="Close details"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body" id="modalBody">
+          <!-- content inserted by app.js -->
+        </div>
+        <div class="modal__footer">
+          <button type="button" class="btn btn--primary" data-modal-close>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

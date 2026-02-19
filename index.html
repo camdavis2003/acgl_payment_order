@@ -9,16 +9,33 @@
   <body>
     <header class="site-header">
       <div class="container">
-        <h1>Payment Order Request</h1>
+        <div class="header-top">
+          <h1>Payment Order Request</h1>
+          <label class="switch" for="themeToggle">
+            <input
+              type="checkbox"
+              id="themeToggle"
+              class="switch__input"
+              role="switch"
+              aria-label="Dark mode"
+            />
+            <span class="switch__track" aria-hidden="true"></span>
+            <span class="switch__text">Dark mode</span>
+          </label>
+        </div>
         <p class="subhead">
           Complete the form and add it to the submitted list. Entries are saved
           in your browser (localStorage).
         </p>
+
+        <nav class="menu" aria-label="Pages">
+          <a class="menu__link" href="menu.html">View Submitted Requests</a>
+        </nav>
       </div>
     </header>
 
     <main class="container">
-      <section class="card" aria-labelledby="form-title">
+      <section id="request-form" class="card" aria-labelledby="form-title">
         <h2 id="form-title">Request Form</h2>
 
         <form id="paymentOrderForm" novalidate>
@@ -58,6 +75,52 @@
             </div>
 
             <div class="field">
+              <label for="euro"
+                >Euro (€) (click to itemize)
+                <span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="euro"
+                name="euro"
+                type="text"
+                inputmode="decimal"
+                class="currency-input"
+                placeholder="Click to itemize"
+                readonly
+                aria-readonly="true"
+              />
+              <div
+                class="error"
+                id="error-euro"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="usd"
+                >USD ($) (click to itemize)
+                <span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="usd"
+                name="usd"
+                type="text"
+                inputmode="decimal"
+                class="currency-input"
+                placeholder="Click to itemize"
+                readonly
+                aria-readonly="true"
+              />
+              <div
+                class="error"
+                id="error-usd"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
               <label for="name"
                 >Name<span class="req" aria-hidden="true">*</span></label
               >
@@ -71,48 +134,6 @@
               <div
                 class="error"
                 id="error-name"
-                role="alert"
-                aria-live="polite"
-              ></div>
-            </div>
-
-            <div class="field">
-              <label for="euro"
-                >Euro<span class="req" aria-hidden="true">*</span></label
-              >
-              <input
-                id="euro"
-                name="euro"
-                type="number"
-                inputmode="decimal"
-                step="0.01"
-                min="0"
-                required
-              />
-              <div
-                class="error"
-                id="error-euro"
-                role="alert"
-                aria-live="polite"
-              ></div>
-            </div>
-
-            <div class="field">
-              <label for="usd"
-                >USD<span class="req" aria-hidden="true">*</span></label
-              >
-              <input
-                id="usd"
-                name="usd"
-                type="number"
-                inputmode="decimal"
-                step="0.01"
-                min="0"
-                required
-              />
-              <div
-                class="error"
-                id="error-usd"
                 role="alert"
                 aria-live="polite"
               ></div>
@@ -240,84 +261,20 @@
               Reset
             </button>
           </div>
+
+          <div class="form-note" aria-live="polite">
+            <span id="itemsStatus">Items: 0</span>
+            <span class="muted">— click Euro or USD above to edit items</span>
+            <span
+              class="error"
+              id="error-items"
+              role="alert"
+              aria-live="polite"
+            ></span>
+          </div>
         </form>
       </section>
-
-      <section class="card" aria-labelledby="list-title">
-        <div class="list-header">
-          <h2 id="list-title">Submitted Requests</h2>
-          <div class="list-actions">
-            <button type="button" id="clearAllBtn" class="btn btn--danger">
-              Clear All
-            </button>
-          </div>
-        </div>
-
-        <div
-          class="table-wrap"
-          role="region"
-          aria-label="Submitted requests table"
-          tabindex="0"
-        >
-          <table class="table" aria-describedby="list-help">
-            <caption id="list-help" class="sr-only">
-              Newest requests appear first. Use the Actions column to view
-              details or delete an entry.
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Payment Order No.</th>
-                <th scope="col">Date</th>
-                <th scope="col">Name</th>
-                <th scope="col" class="num">Euro</th>
-                <th scope="col" class="num">USD</th>
-                <th scope="col">Budget Number</th>
-                <th scope="col">Purpose</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="ordersTbody">
-              <!-- rows inserted by app.js -->
-            </tbody>
-          </table>
-        </div>
-
-        <div id="emptyState" class="empty" hidden>
-          No requests submitted yet.
-        </div>
-      </section>
     </main>
-
-    <!-- Simple modal for “View” -->
-    <div class="modal" id="detailsModal" aria-hidden="true">
-      <div class="modal__backdrop" data-modal-close></div>
-      <div
-        class="modal__dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modalTitle"
-      >
-        <div class="modal__header">
-          <h3 id="modalTitle">Request Details</h3>
-          <button
-            type="button"
-            class="icon-btn"
-            data-modal-close
-            aria-label="Close details"
-          >
-            ×
-          </button>
-        </div>
-        <div class="modal__body" id="modalBody">
-          <!-- content inserted by app.js -->
-        </div>
-        <div class="modal__footer">
-          <button type="button" class="btn btn--primary" data-modal-close>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
 
     <script src="app.js" defer></script>
   </body>

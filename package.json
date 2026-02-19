@@ -1,0 +1,10 @@
+{
+  "name": "acgl-payment-order",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Plain HTML/CSS/JS Payment Order Request (no backend).",
+  "scripts": {
+    "dev": "node dev-server.js",
+    "start": "node dev-server.js"
+  }
+}

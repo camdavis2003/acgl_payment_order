@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Submitted Requests</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <div class="header-top">
+          <h1>Submitted Requests</h1>
+          <label class="switch" for="themeToggle">
+            <input
+              type="checkbox"
+              id="themeToggle"
+              class="switch__input"
+              role="switch"
+              aria-label="Dark mode"
+            />
+            <span class="switch__track" aria-hidden="true"></span>
+            <span class="switch__text">Dark mode</span>
+          </label>
+        </div>
+        <p class="subhead">
+          This page lists completed Payment Order requests saved in your browser
+          (localStorage).
+        </p>
+
+        <nav class="menu" aria-label="Pages">
+          <a class="menu__link" href="index.html">New Request Form</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <section
+        id="submitted-requests"
+        class="card"
+        aria-labelledby="list-title"
+      >
+        <div class="list-header">
+          <h2 id="list-title">Submitted Requests</h2>
+          <div class="list-actions">
+            <button type="button" id="clearAllBtn" class="btn btn--danger">
+              Clear All
+            </button>
+          </div>
+        </div>
+
+        <div
+          class="table-wrap"
+          role="region"
+          aria-label="Submitted requests table"
+          tabindex="0"
+        >
+          <table class="table" aria-describedby="list-help">
+            <caption id="list-help" class="sr-only">
+              Newest requests appear first. Use the leftmost column to delete an
+              entry, and the Actions column to view details or open items.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" class="col-delete">
+                  <span class="sr-only">Delete</span>
+                </th>
+                <th scope="col">Payment Order No.</th>
+                <th scope="col">Date</th>
+                <th scope="col">Name</th>
+                <th scope="col" class="num">Euro (€)</th>
+                <th scope="col" class="num">USD ($)</th>
+                <th scope="col">Budget Number</th>
+                <th scope="col">Purpose</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="ordersTbody">
+              <!-- rows inserted by app.js -->
+            </tbody>
+          </table>
+        </div>
+
+        <div id="emptyState" class="empty" hidden>
+          No requests submitted yet.
+        </div>
+      </section>
+    </main>
+
+    <!-- Simple modal for “View” -->
+    <div class="modal" id="detailsModal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalTitle"
+      >
+        <div class="modal__body" id="modalBody">
+          <h3 id="modalTitle" class="sr-only">Request Details</h3>
+          <!-- content inserted by app.js -->
+        </div>
+        <div class="modal__footer">
+          <button type="button" id="editOrderBtn" class="btn btn--ghost">
+            Edit
+          </button>
+          <button type="button" class="btn btn--primary" data-modal-close>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

@@ -9,15 +9,71 @@
   'use strict';
 
   const STORAGE_KEY = 'payment_orders';
+  const PAYMENT_ORDERS_LEGACY_MIGRATED_KEY = 'payment_orders_legacy_migrated_v1';
   const THEME_KEY = 'payment_order_theme';
   const DRAFT_KEY = 'payment_order_draft';
   const DRAFT_ITEMS_KEY = 'payment_order_draft_items';
   const EDIT_ORDER_ID_KEY = 'payment_order_edit_order_id';
+  const EDIT_ORDER_YEAR_KEY = 'payment_order_edit_order_year_v1';
   const NUMBERING_KEY = 'payment_order_numbering';
   const FLASH_TOKEN_KEY = 'payment_order_flash_token';
   const BUDGET_TABLE_HTML_KEY = 'payment_order_budget_table_html_v1';
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
+
+  function getPaymentOrdersKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    if (y < 1900 || y > 3000) return null;
+    return `payment_orders_${y}_v1`;
+  }
+
+  function migrateLegacyOrdersIfNeeded(targetYear) {
+    try {
+      if (localStorage.getItem(PAYMENT_ORDERS_LEGACY_MIGRATED_KEY)) return;
+
+      const legacyRaw = localStorage.getItem(STORAGE_KEY);
+      if (!legacyRaw) {
+        localStorage.setItem(
+          PAYMENT_ORDERS_LEGACY_MIGRATED_KEY,
+          JSON.stringify({ at: new Date().toISOString(), year: Number(targetYear) || null, count: 0 })
+        );
+        return;
+      }
+
+      let legacyParsed = [];
+      try {
+        const parsed = JSON.parse(legacyRaw);
+        legacyParsed = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        legacyParsed = [];
+      }
+
+      if (legacyParsed.length === 0) {
+        localStorage.setItem(
+          PAYMENT_ORDERS_LEGACY_MIGRATED_KEY,
+          JSON.stringify({ at: new Date().toISOString(), year: Number(targetYear) || null, count: 0 })
+        );
+        return;
+      }
+
+      const key = getPaymentOrdersKeyForYear(targetYear);
+      if (!key) return;
+
+      // If the target year already has orders, do not merge automatically.
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, JSON.stringify(legacyParsed));
+      }
+
+      // Keep the legacy key as a backup; mark migration as done.
+      localStorage.setItem(
+        PAYMENT_ORDERS_LEGACY_MIGRATED_KEY,
+        JSON.stringify({ at: new Date().toISOString(), year: Number(targetYear) || null, count: legacyParsed.length })
+      );
+    } catch {
+      // ignore
+    }
+  }
 
   function getCurrentBudgetYearFromDate(d) {
     const date = d instanceof Date ? d : new Date();
@@ -151,7 +207,6 @@
     })();
     return [
       { label: 'New Request Form', href: 'index.html' },
-      { label: 'Payment Orders', href: 'menu.html' },
       {
         key: 'budget',
         label: 'Budget',
@@ -160,6 +215,15 @@
           label: String(year),
           href: `budget.html?year=${encodeURIComponent(String(year))}`,
           isActiveBudgetYear: activeYear === year,
+        })),
+      },
+      {
+        key: 'orders',
+        label: 'Payment Orders',
+        href: `menu.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: years.map((year) => ({
+          label: String(year),
+          href: `menu.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
       { label: 'Settings', href: 'settings.html' },
@@ -625,15 +689,27 @@
 
   function getEditOrderId() {
     const id = localStorage.getItem(EDIT_ORDER_ID_KEY);
-    return id && typeof id === 'string' ? id : null;
+    if (!id || typeof id !== 'string') return null;
+
+    const currentYear = getActiveBudgetYear();
+    const storedYear = Number(localStorage.getItem(EDIT_ORDER_YEAR_KEY));
+    if (Number.isInteger(storedYear) && storedYear !== currentYear) {
+      localStorage.removeItem(EDIT_ORDER_ID_KEY);
+      localStorage.removeItem(EDIT_ORDER_YEAR_KEY);
+      return null;
+    }
+
+    return id;
   }
 
   function setEditOrderId(id) {
     if (!id) {
       localStorage.removeItem(EDIT_ORDER_ID_KEY);
+      localStorage.removeItem(EDIT_ORDER_YEAR_KEY);
       return;
     }
     localStorage.setItem(EDIT_ORDER_ID_KEY, id);
+    localStorage.setItem(EDIT_ORDER_YEAR_KEY, String(getActiveBudgetYear()));
   }
 
   // Itemize page elements
@@ -715,9 +791,13 @@
   }
 
   /** @returns {Array<Object>} */
-  function loadOrders() {
+  function loadOrders(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    migrateLegacyOrdersIfNeeded(resolvedYear);
+    const storageKey = getPaymentOrdersKeyForYear(resolvedYear);
+    if (!storageKey) return [];
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed : [];
@@ -727,8 +807,11 @@
   }
 
   /** @param {Array<Object>} orders */
-  function saveOrders(orders) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
+  function saveOrders(orders, year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const storageKey = getPaymentOrdersKeyForYear(resolvedYear);
+    if (!storageKey) return;
+    localStorage.setItem(storageKey, JSON.stringify(orders));
   }
 
   function loadDraft() {
@@ -978,7 +1061,8 @@
 
     const editId = getEditOrderId();
     if (editId) {
-      const existing = getOrderById(editId);
+      const year = getActiveBudgetYear();
+      const existing = getOrderById(editId, year);
       if (existing && existing.paymentOrderNo) setPaymentOrderNoField(existing.paymentOrderNo);
       return;
     }
@@ -1013,7 +1097,8 @@
   function openItemizeDraft() {
     clearItemsError();
     saveFormToDraft();
-    window.location.href = 'itemize.html?draft=1';
+    const year = getActiveBudgetYear();
+    window.location.href = `itemize.html?draft=1&year=${encodeURIComponent(String(year))}`;
   }
 
   function showItemsError(message) {
@@ -1409,16 +1494,496 @@
     return next;
   }
 
+  function formatEuroValue(n, opts) {
+    const num = Number(n);
+    const isNeg = num < 0;
+    const abs = Math.abs(num);
+    const fmt = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(abs);
+    const prefix = opts && opts.prefix ? String(opts.prefix) : '';
+    const suffix = opts && opts.suffix ? String(opts.suffix) : '';
+    return `${isNeg ? '-' : ''}${prefix}${fmt}${suffix}`;
+  }
+
+  function buildBudgetTbodyHtmlFromLines(section1, section2) {
+    const sec1Lines = Array.isArray(section1) ? section1 : [];
+    const sec2Lines = Array.isArray(section2) ? section2 : [];
+
+    function normalizeLine(line) {
+      const safe = line && typeof line === 'object' ? line : {};
+      const inCode = String(safe.inCode || '').trim();
+      const outCode = String(safe.outCode || '').trim();
+      const desc = String(safe.desc || '').trim();
+      const approved = Number(safe.approved || 0);
+      const receipts = Number(safe.receipts || 0);
+      const expenditures = Number(safe.expenditures || 0);
+      return {
+        inCode: /^\d{4}$/.test(inCode) ? inCode : '',
+        outCode: /^\d{4}$/.test(outCode) ? outCode : '',
+        desc,
+        approved: Number.isFinite(approved) ? approved : 0,
+        receipts: Number.isFinite(receipts) ? receipts : 0,
+        expenditures: Number.isFinite(expenditures) ? expenditures : 0,
+      };
+    }
+
+    function lineRowHtml(line, kind) {
+      const l = normalizeLine(line);
+      const balance =
+        kind === 'anticipated'
+          ? l.approved - l.receipts - l.expenditures
+          : l.approved + l.receipts - l.expenditures;
+
+      const approvedText = `EUR ${formatEuroValue(l.approved)}`;
+      const receiptsText = `${formatEuroValue(l.receipts)} €`;
+      const expText = `${formatEuroValue(l.expenditures)} €`;
+      const balText = `${formatEuroValue(balance)} €`;
+
+      return `
+        <tr>
+          <td class="num">${escapeHtml(l.inCode)}</td>
+          <td class="num">${escapeHtml(l.outCode)}</td>
+          <td>${escapeHtml(l.desc)}</td>
+          <td class="num budgetTable__euro">${escapeHtml(approvedText)}</td>
+          <td class="num budgetTable__euro">${escapeHtml(receiptsText)}</td>
+          <td class="num budgetTable__euro">${escapeHtml(expText)}</td>
+          <td class="num budgetTable__bal">${escapeHtml(balText)}</td>
+          <td class="budgetTable__usdSign">$</td>
+          <td class="num budgetTable__usd">-</td>
+          <td class="budgetTable__usdSign">$</td>
+          <td class="num budgetTable__usd">-</td>
+        </tr>
+      `.trim();
+    }
+
+    function sumSection(lines, kind) {
+      const totals = { approved: 0, receipts: 0, expenditures: 0, balance: 0 };
+      for (const line of lines) {
+        const l = normalizeLine(line);
+        totals.approved += l.approved;
+        totals.receipts += l.receipts;
+        totals.expenditures += l.expenditures;
+        totals.balance += kind === 'anticipated'
+          ? (l.approved - l.receipts - l.expenditures)
+          : (l.approved + l.receipts - l.expenditures);
+      }
+      return totals;
+    }
+
+    const s1 = sumSection(sec1Lines, 'anticipated');
+    const s2 = sumSection(sec2Lines, 'budget');
+
+    const remaining = s2.receipts + s1.balance - s2.expenditures;
+    const receiptsChecksum = s1.receipts - s2.receipts;
+    const expendituresChecksum = s1.expenditures - s2.expenditures;
+
+    const sec1Html = sec1Lines.map((l) => lineRowHtml(l, 'anticipated')).join('\n');
+    const sec2Html = sec2Lines.map((l) => lineRowHtml(l, 'budget')).join('\n');
+
+    const sec1TotalRow = `
+      <tr class="budgetTable__total">
+        <td></td>
+        <td></td>
+        <td><strong>Total Anticipated Values</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.approved)} €`)}</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.receipts)} €`)}</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.expenditures)} €`)}</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.balance)} €`)}</strong></td>
+        <td class="budgetTable__usdSign"></td>
+        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+        <td class="budgetTable__usdSign"></td>
+        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+      </tr>
+    `.trim();
+
+    const sec2TotalRow = `
+      <tr class="budgetTable__total">
+        <td></td>
+        <td></td>
+        <td><strong>Total Budget, Receipts, Expenditures</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.approved)} €`)}</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.receipts)} €`)}</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.expenditures)} €`)}</strong></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.balance)} €`)}</strong></td>
+        <td class="budgetTable__usdSign"></td>
+        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+        <td class="budgetTable__usdSign"></td>
+        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+      </tr>
+    `.trim();
+
+    const remainingRow = `
+      <tr class="budgetTable__remaining">
+        <td></td>
+        <td></td>
+        <td><strong>Remaining funds of balance</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(remaining)} €`)}</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+    `.trim();
+
+    const checksumSpacer = `
+      <tr class="budgetTable__spacer budgetTable__checksumSpacer">
+        <td colspan="11"></td>
+      </tr>
+    `.trim();
+
+    const receiptsChecksumRow = `
+      <tr class="budgetTable__checksum" data-checksum-kind="receipts">
+        <td></td>
+        <td></td>
+        <td><strong>Receipts Checksum</strong></td>
+        <td></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(receiptsChecksum)} €`)}</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+    `.trim();
+
+    const expendituresChecksumRow = `
+      <tr class="budgetTable__checksum" data-checksum-kind="expenditures">
+        <td></td>
+        <td></td>
+        <td><strong>Expenditures Checksum</strong></td>
+        <td></td>
+        <td></td>
+        <td class="num"><strong>${escapeHtml(`${formatEuroValue(expendituresChecksum)} €`)}</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      </tr>
+    `.trim();
+
+    return [
+      sec1Html,
+      '<tr class="budgetTable__spacer"><td colspan="11"></td></tr>',
+      sec1TotalRow,
+      '<tr class="budgetTable__spacer"><td colspan="11"></td></tr>',
+      sec2Html,
+      sec2TotalRow,
+      remainingRow,
+      checksumSpacer,
+      receiptsChecksumRow,
+      expendituresChecksumRow,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  function seedMockData2025IfDev() {
+    if (!isDevEnvironment()) return;
+
+    const targetYear = 2025;
+
+    // Seed a full budget for 2025 if missing.
+    const budgetKey = getBudgetTableKeyForYear(targetYear);
+    if (budgetKey && !String(localStorage.getItem(budgetKey) || '').trim()) {
+      let sourceHtml = null;
+
+      // Prefer cloning from an existing saved budget year (if any).
+      const years = migrateLegacyBudgetIfNeeded();
+      const candidates = [];
+      const active = loadActiveBudgetYear();
+      if (active && Number.isInteger(active)) candidates.push(active);
+      for (const y of years) candidates.push(y);
+
+      for (const y of Array.from(new Set(candidates))) {
+        const k = getBudgetTableKeyForYear(y);
+        const h = k ? localStorage.getItem(k) : null;
+        if (h && String(h).trim()) {
+          sourceHtml = String(h);
+          break;
+        }
+      }
+
+      // If we happen to be on the budget page, fall back to the current template.
+      if (!sourceHtml) {
+        const existingTbody = document.querySelector('table.budgetTable tbody');
+        if (existingTbody && existingTbody.innerHTML) sourceHtml = existingTbody.innerHTML;
+      }
+
+      // Final fallback: generate a complete budget from a small curated set.
+      if (!sourceHtml) {
+        const anticipated = [
+          { inCode: '1030', outCode: '2030', desc: 'Lodge Per Capita Dues', approved: 67000, receipts: 25614, expenditures: 0 },
+          { inCode: '1060', outCode: '2060', desc: 'Grand Lodge - Charity - Specified', approved: 0, receipts: 500, expenditures: 0 },
+          { inCode: '1065', outCode: '2065', desc: "Grand Master's Charity", approved: 0, receipts: 9791.23, expenditures: 5000 },
+          { inCode: '1071', outCode: '2071', desc: 'Annual Registration Receipts', approved: 25000, receipts: 5250, expenditures: 0 },
+          { inCode: '1020', outCode: '2020', desc: 'New Lodge Petitions & Charter fees', approved: 0, receipts: 0, expenditures: 0 },
+        ];
+
+        const budget = [
+          { inCode: '1100', outCode: '2100', desc: 'Expendable Supplies', approved: 1500, receipts: 0, expenditures: 218 },
+          { inCode: '1120', outCode: '2120', desc: 'IT & Digitization', approved: 3500, receipts: 140, expenditures: 635.08 },
+          { inCode: '1200', outCode: '2200', desc: 'Per Diem and Travel Expenses', approved: 15000, receipts: 0, expenditures: 7285.75 },
+          { inCode: '2243', outCode: '2243', desc: 'Bank Charges & Fees', approved: 1200, receipts: 0, expenditures: 842.15 },
+          { inCode: '2280', outCode: '2280', desc: 'Miscellaneous Reimbursable Items', approved: 2500, receipts: 0, expenditures: 1200 },
+          { inCode: '2170', outCode: '2170', desc: 'Audit and Legal Fees', approved: 4000, receipts: 0, expenditures: 3050 },
+          { inCode: '2140', outCode: '2140', desc: 'Publications & Printing Account (certificates)', approved: 150, receipts: 971.85, expenditures: 0 },
+          { inCode: '1998', outCode: '2998', desc: 'Charity', approved: 4950, receipts: 0, expenditures: 1000 },
+        ];
+
+        sourceHtml = buildBudgetTbodyHtmlFromLines(anticipated, budget);
+      }
+
+      ensureBudgetYearExists(targetYear, sourceHtml);
+    }
+
+    // Seed 2025 Payment Orders (year-scoped) if missing / too few.
+    const ordersKey = getPaymentOrdersKeyForYear(targetYear);
+    if (ordersKey) {
+      let existing = [];
+      try {
+        const raw = localStorage.getItem(ordersKey);
+        const parsed = raw ? JSON.parse(raw) : null;
+        existing = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        existing = [];
+      }
+
+      const existingCanon = new Set(existing.map((o) => canonicalizePaymentOrderNo(o && o.paymentOrderNo)));
+
+      const year2 = String(targetYear % 100).padStart(2, '0');
+      const baseMs = Date.UTC(targetYear, 1, 20, 12, 0, 0); // Feb 20, YYYY
+
+      const templates = [
+        {
+          status: 'Paid',
+          with: 'Archives',
+          date: `${targetYear}-01-08`,
+          name: 'Morgan Example',
+          budgetNumber: '2100',
+          purpose: 'Supplies reimbursement (stationery + shipping).',
+          currency: 'EUR',
+          items: [
+            { title: 'Office supplies', euro: 84.5 },
+            { title: 'Shipping', euro: 18.25 },
+          ],
+        },
+        {
+          status: 'Approved',
+          with: 'Grand Treasurer',
+          date: `${targetYear}-01-22`,
+          name: 'Casey Example',
+          budgetNumber: '2120',
+          purpose: 'Software subscription (annual renewal).',
+          currency: 'EUR',
+          items: [
+            { title: 'Service subscription', euro: 240.0 },
+          ],
+        },
+        {
+          status: 'Review',
+          with: 'Grand Secretary',
+          date: `${targetYear}-02-05`,
+          name: 'Riley Example',
+          budgetNumber: '2243',
+          purpose: 'Bank fee adjustment for prior month.',
+          currency: 'EUR',
+          items: [
+            { title: 'Bank fees', euro: 35.0 },
+          ],
+        },
+        {
+          status: 'Paid',
+          with: 'Grand Treasurer',
+          date: `${targetYear}-02-18`,
+          name: 'Taylor Example',
+          budgetNumber: '2200',
+          purpose: 'Travel reimbursement (rail + lodging).',
+          currency: 'EUR',
+          items: [
+            { title: 'Rail tickets', euro: 156.8 },
+            { title: 'Hotel (1 night)', euro: 119.0 },
+          ],
+        },
+        {
+          status: 'Submitted',
+          with: 'Requestor',
+          date: `${targetYear}-03-02`,
+          name: 'Jordan Example',
+          budgetNumber: '2280',
+          purpose: 'Miscellaneous reimbursable items.',
+          currency: 'EUR',
+          items: [
+            { title: 'Replacement adapter', euro: 22.9 },
+            { title: 'Small tools', euro: 16.1 },
+          ],
+        },
+        {
+          status: 'Approved',
+          with: 'Grand Master',
+          date: `${targetYear}-03-15`,
+          name: 'Avery Example',
+          budgetNumber: '2140',
+          purpose: 'Certificate printing (small batch).',
+          currency: 'EUR',
+          items: [
+            { title: 'Printing', euro: 65.0 },
+          ],
+        },
+        {
+          status: 'Review',
+          with: 'Grand Secretary',
+          date: `${targetYear}-04-03`,
+          name: 'Alex Example',
+          budgetNumber: '2170',
+          purpose: 'Legal consult (invoice #LE-2025-04).',
+          currency: 'EUR',
+          items: [
+            { title: 'Consultation fee', euro: 180.0 },
+          ],
+        },
+        {
+          status: 'Paid',
+          with: 'Grand Treasurer',
+          date: `${targetYear}-05-09`,
+          name: 'Sam Example',
+          budgetNumber: '2246',
+          purpose: 'International transfer fees (USD wire).',
+          currency: 'USD',
+          items: [
+            { title: 'Wire transfer fee', usd: 25.0 },
+            { title: 'Processing', usd: 10.0 },
+          ],
+        },
+        {
+          status: 'Approved',
+          with: 'Grand Treasurer',
+          date: `${targetYear}-06-12`,
+          name: 'Quinn Example',
+          budgetNumber: '2120',
+          purpose: 'Digitization equipment purchase.',
+          currency: 'USD',
+          items: [
+            { title: 'Scanner accessory', usd: 79.99 },
+            { title: 'Cables', usd: 14.5 },
+          ],
+        },
+        {
+          status: 'Submitted',
+          with: 'Requestor',
+          date: `${targetYear}-07-01`,
+          name: 'Jamie Example',
+          budgetNumber: '2250',
+          purpose: 'Grand Master expense (meal receipt).',
+          currency: 'EUR',
+          items: [
+            { title: 'Meal', euro: 42.0 },
+          ],
+        },
+      ];
+
+      const generated = templates
+        .map((t, idx) => {
+          const createdAt = new Date(baseMs - idx * 1000 * 60 * 60 * 24 * 10).toISOString();
+          const updatedAt = new Date(baseMs - idx * 1000 * 60 * 60 * 24 * 10 + 1000 * 60 * 25).toISOString();
+
+          const items = (t.items || []).map((it, j) => ({
+            id: `mock_${targetYear}_${idx + 1}_i${j + 1}`,
+            title: it.title,
+            euro: it.euro !== undefined ? (it.euro ?? null) : null,
+            usd: it.usd !== undefined ? (it.usd ?? null) : null,
+          }));
+
+          const totals = sumItems(items);
+          const mode = inferCurrencyModeFromItems(items);
+
+          const paymentOrderNo = `PO ${year2}-${String(idx + 1).padStart(2, '0')}`;
+          const timeline = [{ at: createdAt, with: t.with, status: t.status }];
+
+          return {
+            id: `mock_${targetYear}_${idx + 1}_${baseMs}`,
+            createdAt,
+            updatedAt,
+            status: normalizeOrderStatus(t.status),
+            with: normalizeWith(t.with),
+            paymentOrderNo,
+            date: t.date,
+            name: t.name,
+            euro: mode === 'EUR' ? totals.euro : null,
+            usd: mode === 'USD' ? totals.usd : null,
+            items,
+            address: '123 Example Street\nExample City',
+            iban: 'DE00 0000 0000 0000 0000 00',
+            bic: 'EXAMPLED1XXX',
+            specialInstructions: '',
+            budgetNumber: String(t.budgetNumber || '').trim(),
+            purpose: t.purpose,
+            timeline,
+          };
+        })
+        .filter((o) => {
+          const canon = canonicalizePaymentOrderNo(o && o.paymentOrderNo);
+          return canon && !existingCanon.has(canon);
+        });
+
+      const next = [...existing, ...generated];
+
+      // If we still don't have enough unique orders, top up with generic entries.
+      let seq = templates.length + 1;
+      while (next.length < 10) {
+        const paymentOrderNo = `PO ${year2}-${String(seq).padStart(2, '0')}`;
+        const canon = canonicalizePaymentOrderNo(paymentOrderNo);
+        if (canon && !existingCanon.has(canon)) {
+          const createdAt = new Date(baseMs - next.length * 1000 * 60 * 60 * 24 * 7).toISOString();
+          const item = { id: `mock_${targetYear}_topup_${seq}_i1`, title: 'Misc reimbursement', euro: 25.0, usd: null };
+          next.push({
+            id: `mock_${targetYear}_topup_${seq}_${baseMs}`,
+            createdAt,
+            updatedAt: createdAt,
+            status: 'Submitted',
+            with: 'Requestor',
+            paymentOrderNo,
+            date: `${targetYear}-08-01`,
+            name: 'Pat Example',
+            euro: 25.0,
+            usd: null,
+            items: [item],
+            address: '123 Example Street\nExample City',
+            iban: 'DE00 0000 0000 0000 0000 00',
+            bic: 'EXAMPLED1XXX',
+            specialInstructions: '',
+            budgetNumber: '2280',
+            purpose: 'Top-up mock payment order.',
+            timeline: [{ at: createdAt, with: 'Requestor', status: 'Submitted' }],
+          });
+          existingCanon.add(canon);
+        }
+        seq += 1;
+        if (seq > 99) break;
+      }
+
+      if (existing.length >= 10) return;
+      localStorage.setItem(ordersKey, JSON.stringify(next));
+    }
+  }
+
   function seedMockOrdersIfDev() {
     if (!isDevEnvironment()) return;
 
-    const existing = loadOrders();
+    const year = getActiveBudgetYear();
+    const existing = loadOrders(year);
     const storedVersion = localStorage.getItem(MOCK_VERSION_KEY);
 
     // Fresh seed
     if (existing.length === 0) {
       const now = Date.now();
-      saveOrders(makeMockOrders(now));
+      saveOrders(makeMockOrders(now), year);
       localStorage.setItem(MOCK_VERSION_KEY, MOCK_VERSION);
       return;
     }
@@ -1443,7 +2008,7 @@
       return ensureMockItemsAndTotals(base);
     });
 
-    saveOrders(upgraded);
+    saveOrders(upgraded, year);
     localStorage.setItem(MOCK_VERSION_KEY, MOCK_VERSION);
   }
 
@@ -1693,7 +2258,8 @@
     if (!Array.isArray(orderForView.timeline) || orderForView.timeline.length === 0) {
       const seeded = ensureOrderTimeline(orderForView);
       orderForView = { ...orderForView, timeline: seeded };
-      upsertOrder(orderForView);
+      const year = getActiveBudgetYear();
+      upsertOrder(orderForView, year);
     }
 
     currentViewedOrderId = orderForView.id;
@@ -1832,19 +2398,46 @@
   }
 
   function deleteOrderById(id) {
-    const orders = loadOrders();
+    const year = getActiveBudgetYear();
+    const orders = loadOrders(year);
     const next = orders.filter((o) => o.id !== id);
-    saveOrders(next);
+    saveOrders(next, year);
     renderOrders(next);
   }
 
   function clearAll() {
-    const orders = loadOrders();
+    const year = getActiveBudgetYear();
+    const orders = loadOrders(year);
     if (orders.length === 0) return;
     const ok = window.confirm('Clear all payment orders? This cannot be undone.');
     if (!ok) return;
-    saveOrders([]);
+    saveOrders([], year);
     renderOrders([]);
+  }
+
+  function initPaymentOrdersListPage() {
+    if (!tbody) return;
+    const year = getActiveBudgetYear();
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'menu.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(year));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    const titleEl = document.querySelector('[data-payment-orders-title]');
+    if (titleEl) titleEl.textContent = `${year} Payment Orders`;
+
+    const listTitleEl = document.querySelector('[data-payment-orders-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${year} Payment Orders`;
+
+    document.title = `${year} Payment Orders`;
   }
 
   function initBudgetEditor() {
@@ -3611,6 +4204,9 @@
 
   installNavAutoSync();
 
+  // Dev-only: seed 2025 mock budget + payment orders.
+  seedMockData2025IfDev();
+
   // Theme toggle works on both pages
   applyTheme(getPreferredTheme());
   if (themeToggle) {
@@ -3686,7 +4282,10 @@
       if (firstNumberInput) firstNumberInput.value = String(nextSeq);
 
       // Close settings after save
-      window.location.href = 'menu.html';
+      {
+        const year = getActiveBudgetYear();
+        window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
+      }
     });
   }
 
@@ -3735,7 +4334,10 @@
         clearDraft();
         void clearDraftAttachments();
         setEditOrderId(null);
-        window.location.href = 'menu.html';
+        {
+          const year = getActiveBudgetYear();
+          window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
+        }
       });
     }
 
@@ -3795,8 +4397,10 @@
       };
 
       const editId = getEditOrderId();
+      const year = getActiveBudgetYear();
+
       if (editId) {
-        const existing = getOrderById(editId);
+        const existing = getOrderById(editId, year);
         if (!existing) {
           showItemsError('Could not find the submission to edit.');
           return;
@@ -3812,7 +4416,7 @@
           createdAt: existing.createdAt,
           updatedAt: new Date().toISOString(),
         };
-        upsertOrder(updated);
+        upsertOrder(updated, year);
 
         // Show the same token after Save Changes (displayed on Payment Orders page)
         setFlashToken('Thank you, your update has been saved.');
@@ -3820,7 +4424,7 @@
         // Enforce next Payment Order No. from settings
         const generatedPo = getNextPaymentOrderNo();
         const generatedCanon = canonicalizePaymentOrderNo(generatedPo);
-        const existingPos = loadOrders().some((o) => canonicalizePaymentOrderNo(o && o.paymentOrderNo) === generatedCanon);
+        const existingPos = loadOrders(year).some((o) => canonicalizePaymentOrderNo(o && o.paymentOrderNo) === generatedCanon);
         if (existingPos) {
           showItemsError('Next Payment Order No. is already used. Update Settings to set the year/starting number.');
           return;
@@ -3828,11 +4432,11 @@
 
         orderValues.paymentOrderNo = generatedPo;
         const order = buildPaymentOrder(orderValues);
-        const orders = loadOrders();
+        const orders = loadOrders(year);
 
         // Save newest first
         orders.unshift(order);
-        saveOrders(orders);
+        saveOrders(orders, year);
 
         // Increment sequence for the next new request
         advancePaymentOrderSequence();
@@ -3860,7 +4464,7 @@
         // no-op
       }
       if (editId) {
-        window.location.href = 'menu.html';
+        window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
       }
 
       // Optional: you can navigate to the menu page manually using the header link.
@@ -3889,18 +4493,20 @@
     editOrderBtn.addEventListener('click', () => {
       const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
       if (!id) return;
-      const order = getOrderById(id);
+      const year = getActiveBudgetYear();
+      const order = getOrderById(id, year);
       if (!order) return;
       beginEditingOrder(order);
       closeModal();
-      window.location.href = 'index.html';
+      window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
     });
   }
 
   if (saveOrderBtn) {
     saveOrderBtn.addEventListener('click', () => {
       const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
-      const latest = id ? getOrderById(id) : null;
+      const year = getActiveBudgetYear();
+      const latest = id ? getOrderById(id, year) : null;
 
       const withSelect = modalBody ? modalBody.querySelector('#modalWithSelect') : null;
       const statusSelect = modalBody ? modalBody.querySelector('#modalStatusSelect') : null;
@@ -3919,8 +4525,8 @@
             updatedAt: nowIso,
             timeline: appendTimelineEvent(latest, { at: nowIso, with: nextWith, status: nextStatus }),
           };
-          upsertOrder(updated);
-          renderOrders(loadOrders());
+          upsertOrder(updated, year);
+          renderOrders(loadOrders(year));
         }
       }
 
@@ -3945,17 +4551,18 @@
       const id = row.getAttribute('data-id');
       const action = btn.getAttribute('data-action');
 
-      const orders = loadOrders();
+      const year = getActiveBudgetYear();
+      const orders = loadOrders(year);
       const order = orders.find((o) => o.id === id);
       if (!order) return;
 
       if (action === 'view') {
         openModalWithOrder(order);
       } else if (action === 'items') {
-        window.location.href = `itemize.html?orderId=${encodeURIComponent(id)}`;
+        window.location.href = `itemize.html?orderId=${encodeURIComponent(id)}&year=${encodeURIComponent(String(year))}`;
       } else if (action === 'edit') {
         beginEditingOrder(order);
-        window.location.href = 'index.html';
+        window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
       } else if (action === 'delete') {
         const ok = window.confirm('Delete this request?');
         if (!ok) return;
@@ -3980,8 +4587,12 @@
   });
 
   // Initial render for list page
-  seedMockOrdersIfDev();
-  renderOrders(loadOrders());
+  if (tbody) {
+    initPaymentOrdersListPage();
+    seedMockOrdersIfDev();
+    const year = getActiveBudgetYear();
+    renderOrders(loadOrders(year));
+  }
 
   // ---- Itemize page logic ----
 
@@ -3999,15 +4610,15 @@
     return null;
   }
 
-  function getOrderById(orderId) {
-    const orders = loadOrders();
+  function getOrderById(orderId, year) {
+    const orders = loadOrders(year);
     return orders.find((o) => o.id === orderId) || null;
   }
 
-  function upsertOrder(updatedOrder) {
-    const orders = loadOrders();
+  function upsertOrder(updatedOrder, year) {
+    const orders = loadOrders(year);
     const next = orders.map((o) => (o.id === updatedOrder.id ? updatedOrder : o));
-    saveOrders(next);
+    saveOrders(next, year);
   }
 
   function clearItemErrors() {
@@ -4147,7 +4758,8 @@
         itemizeContext.textContent = `${label}. Add line items below.`;
       }
     } else if (target.orderId) {
-      const order = getOrderById(target.orderId);
+      const year = getActiveBudgetYear();
+      const order = getOrderById(target.orderId, year);
       boundOrderId = target.orderId;
       mode = currencyModeFromOrderLike(order);
       items = Array.isArray(order?.items) ? order.items : [];
@@ -4305,12 +4917,16 @@
           saveDraft(draft);
           saveDraftItems(items);
           updateItemsStatus();
-          window.location.href = 'index.html';
+          {
+            const year = getActiveBudgetYear();
+            window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
+          }
           return;
         }
 
         if (boundOrderId) {
-          const order = getOrderById(boundOrderId);
+          const year = getActiveBudgetYear();
+          const order = getOrderById(boundOrderId, year);
           if (!order) {
             window.alert('Could not find the payment order to update.');
             return;
@@ -4322,8 +4938,8 @@
             euro: orderMode === 'EUR' ? totals.euro : null,
             usd: orderMode === 'USD' ? totals.usd : null,
           };
-          upsertOrder(updated);
-          window.location.href = 'menu.html';
+          upsertOrder(updated, year);
+          window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
         }
       });
     }

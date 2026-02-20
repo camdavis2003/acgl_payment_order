@@ -13,8 +13,10 @@
   const DRAFT_KEY = 'payment_order_draft';
   const DRAFT_ITEMS_KEY = 'payment_order_draft_items';
   const EDIT_ORDER_ID_KEY = 'payment_order_edit_order_id';
+  const NUMBERING_KEY = 'payment_order_numbering';
 
   const ORDER_STATUSES = ['Submitted', 'Review', 'Returned', 'Rejected', 'Approved', 'Paid'];
+  const WITH_OPTIONS = ['Requestor', 'Grand Secretary', 'Grand Master', 'Grand Treasurer', 'Archives'];
 
   // Elements are page-dependent (form page vs menu/list page)
   const form = document.getElementById('paymentOrderForm');
@@ -27,8 +29,14 @@
   const modal = document.getElementById('detailsModal');
   const modalBody = document.getElementById('modalBody');
   const editOrderBtn = document.getElementById('editOrderBtn');
+  const saveOrderBtn = document.getElementById('saveOrderBtn');
 
   const themeToggle = document.getElementById('themeToggle');
+
+  // Settings page (numbering)
+  const numberingForm = document.getElementById('numberingForm');
+  const masonicYearInput = document.getElementById('masonicYear');
+  const firstNumberInput = document.getElementById('firstNumber');
 
   // Form page helpers
   const itemsStatus = document.getElementById('itemsStatus');
@@ -236,7 +244,143 @@
 
   function normalizeOrderStatus(status) {
     const s = String(status || '').trim();
-    return ORDER_STATUSES.includes(s) ? s : 'Submitted';
+    if (!s) return 'Submitted';
+    const match = ORDER_STATUSES.find((opt) => opt.toLowerCase() === s.toLowerCase());
+    return match || 'Submitted';
+  }
+
+  function normalizeWith(withValue) {
+    const s = String(withValue || '').trim();
+    if (!s) return 'Grand Secretary';
+    const match = WITH_OPTIONS.find((opt) => opt.toLowerCase() === s.toLowerCase());
+    return match || 'Grand Secretary';
+  }
+
+  // ---- Payment Order No. numbering ----
+
+  function getDefaultMasonicYear2() {
+    const yy = new Date().getFullYear() % 100;
+    return String(yy).padStart(2, '0');
+  }
+
+  function normalizeMasonicYear2(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return getDefaultMasonicYear2();
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return getDefaultMasonicYear2();
+    const clamped = Math.max(0, Math.min(99, Math.trunc(n)));
+    return String(clamped).padStart(2, '0');
+  }
+
+  function normalizeSequence(value) {
+    const raw = String(value ?? '').trim();
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return 1;
+    return Math.max(1, Math.trunc(n));
+  }
+
+  function loadNumberingSettings() {
+    try {
+      const raw = localStorage.getItem(NUMBERING_KEY);
+      if (!raw) return { year2: getDefaultMasonicYear2(), nextSeq: 1 };
+      const parsed = JSON.parse(raw);
+      return {
+        year2: normalizeMasonicYear2(parsed && parsed.year2),
+        nextSeq: normalizeSequence(parsed && parsed.nextSeq),
+      };
+    } catch {
+      return { year2: getDefaultMasonicYear2(), nextSeq: 1 };
+    }
+  }
+
+  function saveNumberingSettings(settings) {
+    const year2 = normalizeMasonicYear2(settings && settings.year2);
+    const nextSeq = normalizeSequence(settings && settings.nextSeq);
+    localStorage.setItem(NUMBERING_KEY, JSON.stringify({ year2, nextSeq }));
+  }
+
+  function canonicalizePaymentOrderNo(value) {
+    const s = String(value ?? '').trim().toUpperCase();
+    if (!s) return '';
+    // Treat older formats as equivalent:
+    // - "POYY-##" (no separator)
+    // - "PO-YY-##" (dash)
+    // - "PO YY-##" (space)
+    const noSpaces = s.replace(/\s+/g, '');
+    return noSpaces.replace(/^PO-/, 'PO');
+  }
+
+  function formatPaymentOrderNoForDisplay(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const mYear = raw.match(/^PO(?:\s+|-)?(\d{2})-(\d+)$/i);
+    if (mYear) {
+      const n = Number(mYear[2]);
+      const seqText = Number.isFinite(n) ? (n < 100 ? String(n).padStart(2, '0') : String(n)) : mYear[2];
+      return `PO ${mYear[1]}-${seqText}`;
+    }
+
+    // Normalize "PO-..." to "PO ..." for display.
+    const normalized = raw.replace(/^PO-\s*/i, 'PO ').replace(/^PO\s+/i, 'PO ');
+
+    // For non-year formats like "PO DEV-001", keep the prefix and ensure the numeric sequence
+    // uses 2 digits unless it reaches 100.
+    const mGeneric = normalized.match(/^PO\s+(.+)-(\d+)$/i);
+    if (mGeneric) {
+      const n = Number(mGeneric[2]);
+      const seqText = Number.isFinite(n) ? (n < 100 ? String(n).padStart(2, '0') : String(n)) : mGeneric[2];
+      return `PO ${mGeneric[1]}-${seqText}`;
+    }
+
+    return normalized;
+  }
+
+  function formatPaymentOrderNo(year2, seq) {
+    const y = normalizeMasonicYear2(year2);
+    const n = normalizeSequence(seq);
+    const seqText = n < 100 ? String(n).padStart(2, '0') : String(n);
+    return `PO ${y}-${seqText}`;
+  }
+
+  function getNextPaymentOrderNo() {
+    const s = loadNumberingSettings();
+    return formatPaymentOrderNo(s.year2, s.nextSeq);
+  }
+
+  function advancePaymentOrderSequence() {
+    const s = loadNumberingSettings();
+    const current = normalizeSequence(s.nextSeq);
+    const next = current + 1;
+    saveNumberingSettings({ year2: s.year2, nextSeq: next });
+    return true;
+  }
+
+  function setPaymentOrderNoField(value) {
+    if (!form) return;
+    const el = form.elements.namedItem('paymentOrderNo');
+    if (!el) return;
+    el.value = String(value ?? '');
+    el.readOnly = true;
+    el.setAttribute('aria-readonly', 'true');
+  }
+
+  function maybeAutofillPaymentOrderNo() {
+    if (!form) return;
+
+    const editId = getEditOrderId();
+    if (editId) {
+      const existing = getOrderById(editId);
+      if (existing && existing.paymentOrderNo) setPaymentOrderNoField(existing.paymentOrderNo);
+      return;
+    }
+
+    const draft = loadDraft();
+    if (draft && String(draft.paymentOrderNo || '').trim()) {
+      setPaymentOrderNoField(draft.paymentOrderNo);
+      return;
+    }
+
+    setPaymentOrderNoField(getNextPaymentOrderNo());
   }
 
   function saveFormToDraft() {
@@ -712,16 +856,170 @@
   }
 
   function buildPaymentOrder(values) {
-    return {
+    const createdAt = new Date().toISOString();
+    const built = {
       id: (crypto?.randomUUID ? crypto.randomUUID() : `po_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-      createdAt: new Date().toISOString(),
+      createdAt,
       ...values,
       status: normalizeOrderStatus(values && values.status),
+      with: normalizeWith(values && values.with),
+    };
+    return {
+      ...built,
+      timeline: [
+        {
+          at: createdAt,
+          with: getOrderWithLabel(built),
+          status: getOrderStatusLabel(built),
+        },
+      ],
     };
   }
 
   function getOrderStatusLabel(order) {
     return normalizeOrderStatus(order && order.status);
+  }
+
+  function getOrderWithLabel(order) {
+    return normalizeWith(order && order.with);
+  }
+
+  function formatIsoDateOnly(isoString) {
+    const s = String(isoString || '').trim();
+    if (!s) return '';
+    const ms = toTimeMs(s);
+    if (ms === null) return s.length >= 10 ? s.slice(0, 10) : s;
+    const d = new Date(ms);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function formatIsoDateTimeShort(isoString) {
+    const s = String(isoString || '').trim();
+    if (!s) return '';
+    const ms = toTimeMs(s);
+    if (ms === null) {
+      const base = s.replace('T', ' ');
+      return base.length >= 16 ? base.slice(0, 16) : base;
+    }
+    const d = new Date(ms);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+  }
+
+  function toTimeMs(isoString) {
+    const ms = Date.parse(String(isoString || '').trim());
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  function ensureOrderTimeline(order) {
+    const existing = Array.isArray(order && order.timeline) ? order.timeline : [];
+    if (existing.length > 0) return existing;
+
+    const createdAt = String((order && order.createdAt) || new Date().toISOString());
+    return [
+      {
+        at: createdAt,
+        with: getOrderWithLabel(order),
+        status: getOrderStatusLabel(order),
+      },
+    ];
+  }
+
+  function appendTimelineEvent(order, evt) {
+    const timeline = ensureOrderTimeline(order);
+    return [...timeline, evt];
+  }
+
+  function buildTimelineSegments({ startMs, endMs, initialValue, events, field, normalizeFn }) {
+    const sorted = [...(events || [])]
+      .filter((e) => e && typeof e === 'object' && e.at)
+      .map((e) => ({ ...e, _ms: toTimeMs(e.at) }))
+      .filter((e) => e._ms !== null)
+      .sort((a, b) => a._ms - b._ms);
+
+    let cursorMs = startMs;
+    let currentValue = initialValue;
+
+    const segments = [];
+    for (const e of sorted) {
+      if (e[field] === undefined) continue;
+      const t = Math.max(startMs, Math.min(endMs, e._ms));
+      if (t > cursorMs) {
+        segments.push({ from: cursorMs, to: t, value: currentValue });
+      }
+      currentValue = normalizeFn(e[field]);
+      cursorMs = t;
+    }
+
+    if (endMs > cursorMs) segments.push({ from: cursorMs, to: endMs, value: currentValue });
+    return segments;
+  }
+
+  function renderTimelineGraph(order) {
+    const timeline = ensureOrderTimeline(order);
+
+    const timelineSorted = [...timeline]
+      .filter((e) => e && typeof e === 'object' && e.at)
+      .map((e) => ({ ...e, _ms: toTimeMs(e.at) }))
+      .filter((e) => e._ms !== null)
+      .sort((a, b) => a._ms - b._ms);
+
+    const createdAt = String(order && order.createdAt ? order.createdAt : '').trim();
+    const updatedAt = String(order && order.updatedAt ? order.updatedAt : '').trim();
+    const requestDate = formatDate(order && order.date);
+
+    const startMsRaw = toTimeMs(createdAt) ?? (timelineSorted[0]?._ms ?? Date.now());
+    const lastEvtMs = timelineSorted.length > 0 ? timelineSorted[timelineSorted.length - 1]._ms : null;
+    const endCandidate = Math.max(
+      toTimeMs(updatedAt || createdAt) ?? startMsRaw,
+      lastEvtMs ?? startMsRaw
+    );
+    const endMsRaw = endCandidate;
+    const startMs = startMsRaw;
+    const endMs = endMsRaw > startMsRaw ? endMsRaw : startMsRaw + 1;
+
+    const createdLabel = createdAt ? formatIsoDateOnly(createdAt) : '—';
+    const updatedLabel = updatedAt ? formatIsoDateOnly(updatedAt) : '—';
+    const rangeEndLabel = formatIsoDateOnly(updatedAt || createdAt);
+
+    const eventsHtml = timelineSorted
+      .map((e) => {
+        const t = formatIsoDateTimeShort(e.at);
+        const w = e.with !== undefined ? normalizeWith(e.with) : '—';
+        const s = e.status !== undefined ? normalizeOrderStatus(e.status) : '—';
+        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>With: <strong>${escapeHtml(w)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Status: <strong>${escapeHtml(s)}</strong></span></div>`;
+      })
+      .join('');
+
+    return `
+      <div id="timelineGraphWrap">
+        <div class="timelinegraph" aria-label="Request timeline graph">
+          <div class="timelinegraph__header">
+            <div class="timelinegraph__title">Timeline</div>
+            <div class="timelinegraph__range">${escapeHtml(createdLabel)} → ${escapeHtml(rangeEndLabel)}</div>
+          </div>
+
+          <div class="timelinegraph__meta">
+            <span>Request Date: <strong>${escapeHtml(requestDate)}</strong></span>
+            <span class="timelinegraph__sep">|</span>
+            <span>Created: <strong>${escapeHtml(createdLabel)}</strong></span>
+            <span class="timelinegraph__sep">|</span>
+            <span>Updated: <strong>${escapeHtml(updatedLabel)}</strong></span>
+          </div>
+
+          <div class="timelinegraph__events" aria-label="Timeline events">
+            ${eventsHtml}
+          </div>
+        </div>
+      </div>
+    `.trim();
   }
 
   /** @param {Array<Object>} orders */
@@ -754,17 +1052,19 @@
                 X
               </button>
             </td>
-            <td>${escapeHtml(o.paymentOrderNo)}</td>
+            <td>${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo))}</td>
             <td>${escapeHtml(formatDate(o.date))}</td>
             <td>${escapeHtml(o.name)}</td>
             <td class="num">${escapeHtml(formatCurrency(o.euro, 'EUR'))}</td>
             <td class="num">${escapeHtml(formatCurrency(o.usd, 'USD'))}</td>
             <td>${escapeHtml(o.budgetNumber)}</td>
             <td>${escapeHtml(o.purpose)}</td>
+            <td>${escapeHtml(getOrderWithLabel(o))}</td>
             <td>${escapeHtml(getOrderStatusLabel(o))}</td>
             <td class="actions">
-              <button type="button" class="btn btn--ghost" data-action="items">Items</button>
-              <button type="button" class="btn btn--ghost" data-action="view">View</button>
+              <button type="button" class="btn btn--ghost btn--items" data-action="items">Items</button>
+              <button type="button" class="btn btn--editBlue" data-action="edit">Edit</button>
+              <button type="button" class="btn btn--viewGrey" data-action="view">View</button>
             </td>
           </tr>
         `.trim();
@@ -776,49 +1076,87 @@
 
   function openModalWithOrder(order) {
     if (!modal || !modalBody) return;
-    currentViewedOrderId = order.id;
-    modal.setAttribute('data-order-id', String(order.id));
+    // Backfill/persist an initial timeline entry for older records.
+    let orderForView = order;
+    if (!Array.isArray(orderForView.timeline) || orderForView.timeline.length === 0) {
+      const seeded = ensureOrderTimeline(orderForView);
+      orderForView = { ...orderForView, timeline: seeded };
+      upsertOrder(orderForView);
+    }
 
-    const currentStatus = getOrderStatusLabel(order);
+    currentViewedOrderId = orderForView.id;
+    modal.setAttribute('data-order-id', String(orderForView.id));
+
+    const modalHeaderPo = modal.querySelector('#modalHeaderPo');
+    if (modalHeaderPo) {
+      modalHeaderPo.textContent = `Payment Order No. ${formatPaymentOrderNoForDisplay(orderForView.paymentOrderNo) || ''}`;
+    }
+
+    const modalHeaderDate = modal.querySelector('#modalHeaderDate');
+    if (modalHeaderDate) {
+      const d = formatDate(orderForView.date);
+      modalHeaderDate.textContent = `Request Date: ${d || '—'}`;
+    }
+
+    const currentStatus = getOrderStatusLabel(orderForView);
     const statusOptions = ORDER_STATUSES.map((s) => {
       const selected = s === currentStatus ? ' selected' : '';
       return `<option value="${escapeHtml(s)}"${selected}>${escapeHtml(s)}</option>`;
     }).join('');
 
+    const currentWith = getOrderWithLabel(orderForView);
+    const withOptions = WITH_OPTIONS.map((w) => {
+      const selected = w === currentWith ? ' selected' : '';
+      return `<option value="${escapeHtml(w)}"${selected}>${escapeHtml(w)}</option>`;
+    }).join('');
+
     modalBody.innerHTML = `
       <dl class="kv">
-        <dt>Payment Order No.</dt><dd>${escapeHtml(order.paymentOrderNo)}</dd>
-        <dt>Date</dt><dd>${escapeHtml(formatDate(order.date))}</dd>
-        <dt>Name</dt><dd>${escapeHtml(order.name)}</dd>
-        <dt>Euro (€)</dt><dd>${escapeHtml(formatCurrency(order.euro, 'EUR'))}</dd>
-        <dt>USD ($)</dt><dd>${escapeHtml(formatCurrency(order.usd, 'USD'))}</dd>
-        <dt>Status</dt>
-        <dd>
+        <dt class="modal__nameLabel">Name</dt><dd class="modal__nameValue">${escapeHtml(orderForView.name)}</dd>
+        <dt>Euro (€)</dt><dd>${escapeHtml(formatCurrency(orderForView.euro, 'EUR'))}</dd>
+        <dt>USD ($)</dt><dd>${escapeHtml(formatCurrency(orderForView.usd, 'USD'))}</dd>
+        <dt class="kv__center kv__gapTop">With</dt>
+        <dd class="kv__gapTop">
+          <select id="modalWithSelect" aria-label="With">
+            ${withOptions}
+          </select>
+        </dd>
+        <dt class="kv__center kv__gapTop">Status</dt>
+        <dd class="kv__gapTop">
           <select id="modalStatusSelect" aria-label="Status">
             ${statusOptions}
           </select>
         </dd>
-        <dt>Address</dt><dd>${escapeHtml(order.address)}</dd>
-        <dt>IBAN</dt><dd>${escapeHtml(order.iban)}</dd>
-        <dt>BIC</dt><dd>${escapeHtml(order.bic)}</dd>
-        <dt>Special Instructions</dt><dd>${escapeHtml(order.specialInstructions)}</dd>
-        <dt>Budget Number</dt><dd>${escapeHtml(order.budgetNumber)}</dd>
-        <dt>Purpose</dt><dd>${escapeHtml(order.purpose)}</dd>
-        <dt>Created</dt><dd>${escapeHtml(order.createdAt)}</dd>
+        <dt class="kv__gapTop">Address</dt><dd class="kv__pre kv__gapTop">${escapeHtml(orderForView.address)}</dd>
+        <dt>IBAN</dt><dd>${escapeHtml(orderForView.iban)}</dd>
+        <dt>BIC</dt><dd>${escapeHtml(orderForView.bic)}</dd>
+        <dt>Special Instructions</dt><dd class="kv__pre">${escapeHtml(orderForView.specialInstructions)}</dd>
+        <dt>Budget Number</dt><dd>${escapeHtml(orderForView.budgetNumber)}</dd>
+        <dt>Purpose</dt><dd class="kv__pre">${escapeHtml(orderForView.purpose)}</dd>
+        <dt>Created</dt><dd>${escapeHtml(orderForView.createdAt)}</dd>
       </dl>
+      ${renderTimelineGraph(orderForView)}
     `.trim();
+
+    // Save state for this modal session (only persisted when clicking Save)
+    modal.setAttribute('data-original-with', currentWith);
+    modal.setAttribute('data-original-status', currentStatus);
 
     const statusSelect = modalBody.querySelector('#modalStatusSelect');
     if (statusSelect) {
       statusSelect.addEventListener('change', () => {
-        const boundOrderId = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
-        if (!boundOrderId) return;
-        const latest = getOrderById(boundOrderId);
-        if (!latest) return;
         const nextStatus = normalizeOrderStatus(statusSelect.value);
-        const updated = { ...latest, status: nextStatus };
-        upsertOrder(updated);
-        renderOrders(loadOrders());
+        statusSelect.value = nextStatus;
+        modal.setAttribute('data-pending-status', nextStatus);
+      });
+    }
+
+    const withSelect = modalBody.querySelector('#modalWithSelect');
+    if (withSelect) {
+      withSelect.addEventListener('change', () => {
+        const nextWith = normalizeWith(withSelect.value);
+        withSelect.value = nextWith;
+        modal.setAttribute('data-pending-with', nextWith);
       });
     }
 
@@ -826,7 +1164,7 @@
     modal.setAttribute('aria-hidden', 'false');
 
     // Focus the close button for accessibility
-    const closeBtn = modal.querySelector('[data-modal-close]');
+    const closeBtn = modal.querySelector('button[data-modal-close]');
     if (closeBtn) closeBtn.focus();
   }
 
@@ -835,8 +1173,16 @@
     modal.classList.remove('is-open');
     modal.setAttribute('aria-hidden', 'true');
     modalBody.innerHTML = '';
+    const modalHeaderPo = modal.querySelector('#modalHeaderPo');
+    if (modalHeaderPo) modalHeaderPo.textContent = '';
+    const modalHeaderDate = modal.querySelector('#modalHeaderDate');
+    if (modalHeaderDate) modalHeaderDate.textContent = '';
     currentViewedOrderId = null;
     modal.removeAttribute('data-order-id');
+    modal.removeAttribute('data-pending-with');
+    modal.removeAttribute('data-pending-status');
+    modal.removeAttribute('data-original-with');
+    modal.removeAttribute('data-original-status');
   }
 
   function beginEditingOrder(order) {
@@ -888,6 +1234,44 @@
     });
   }
 
+  if (numberingForm) {
+    const settings = loadNumberingSettings();
+    if (masonicYearInput) masonicYearInput.value = String(Number(settings.year2));
+    if (firstNumberInput) firstNumberInput.value = String(settings.nextSeq);
+
+    numberingForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const yearErr = document.getElementById('error-masonicYear');
+      const seqErr = document.getElementById('error-firstNumber');
+      if (yearErr) yearErr.textContent = '';
+      if (seqErr) seqErr.textContent = '';
+
+      const yearRaw = masonicYearInput ? masonicYearInput.value : '';
+      const seqRaw = firstNumberInput ? firstNumberInput.value : '';
+
+      const yearNum = Number(yearRaw);
+      if (!Number.isFinite(yearNum) || yearNum < 0 || yearNum > 99) {
+        if (yearErr) yearErr.textContent = 'Enter a 2-digit year (0–99).';
+        return;
+      }
+
+      const seqNum = Number(seqRaw);
+      if (!Number.isFinite(seqNum) || seqNum < 1) {
+        if (seqErr) seqErr.textContent = 'Enter a number of 1 or more.';
+        return;
+      }
+
+      const year2 = normalizeMasonicYear2(yearRaw);
+      const nextSeq = normalizeSequence(seqRaw);
+      saveNumberingSettings({ year2, nextSeq });
+
+      // Normalize field display after saving
+      if (masonicYearInput) masonicYearInput.value = String(Number(year2));
+      if (firstNumberInput) firstNumberInput.value = String(nextSeq);
+    });
+  }
+
   if (form) {
     // Restore draft fields (so Itemize -> back to form doesn't lose work)
     const draft = loadDraft();
@@ -910,6 +1294,9 @@
         if (el && draft[key] !== undefined) el.value = draft[key];
       }
     }
+
+    // Ensure Payment Order No. always follows the configured pattern
+    maybeAutofillPaymentOrderNo();
 
     updateItemsStatus();
     syncCurrencyFieldsFromItems();
@@ -981,6 +1368,10 @@
           showItemsError('Could not find the submission to edit.');
           return;
         }
+
+        // Do not allow Payment Order No. to change during edits
+        orderValues.paymentOrderNo = existing.paymentOrderNo;
+
         const updated = {
           ...existing,
           ...orderValues,
@@ -990,12 +1381,25 @@
         };
         upsertOrder(updated);
       } else {
+        // Enforce next Payment Order No. from settings
+        const generatedPo = getNextPaymentOrderNo();
+        const generatedCanon = canonicalizePaymentOrderNo(generatedPo);
+        const existingPos = loadOrders().some((o) => canonicalizePaymentOrderNo(o && o.paymentOrderNo) === generatedCanon);
+        if (existingPos) {
+          showItemsError('Next Payment Order No. is already used. Update Settings to set the year/starting number.');
+          return;
+        }
+
+        orderValues.paymentOrderNo = generatedPo;
         const order = buildPaymentOrder(orderValues);
         const orders = loadOrders();
 
         // Save newest first
         orders.unshift(order);
         saveOrders(orders);
+
+        // Increment sequence for the next new request
+        advancePaymentOrderSequence();
       }
 
       form.reset();
@@ -1007,6 +1411,9 @@
       // Clear the auto-filled currency fields too
       if (euroField) euroField.value = '';
       if (usdField) usdField.value = '';
+
+      // Prepare the next Payment Order No. after submitting a new request
+      maybeAutofillPaymentOrderNo();
 
       // Return to list after editing
       if (getEditOrderId() === null) {
@@ -1031,6 +1438,8 @@
         syncCurrencyFieldsFromItems();
         const submitBtn = form.querySelector('button[type="submit"]');
         if (submitBtn) submitBtn.textContent = 'Add to List';
+
+        maybeAutofillPaymentOrderNo();
       });
     }
   }
@@ -1044,6 +1453,38 @@
       beginEditingOrder(order);
       closeModal();
       window.location.href = 'index.html';
+    });
+  }
+
+  if (saveOrderBtn) {
+    saveOrderBtn.addEventListener('click', () => {
+      const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
+      const latest = id ? getOrderById(id) : null;
+
+      const withSelect = modalBody ? modalBody.querySelector('#modalWithSelect') : null;
+      const statusSelect = modalBody ? modalBody.querySelector('#modalStatusSelect') : null;
+
+      if (latest && withSelect && statusSelect) {
+        const nextWith = normalizeWith(withSelect.value);
+        const nextStatus = normalizeOrderStatus(statusSelect.value);
+
+        const changed = nextWith !== getOrderWithLabel(latest) || nextStatus !== getOrderStatusLabel(latest);
+        if (changed) {
+          const nowIso = new Date().toISOString();
+          const updated = {
+            ...latest,
+            with: nextWith,
+            status: nextStatus,
+            updatedAt: nowIso,
+            timeline: appendTimelineEvent(latest, { at: nowIso, with: nextWith, status: nextStatus }),
+          };
+          upsertOrder(updated);
+          renderOrders(loadOrders());
+        }
+      }
+
+      // Close the view modal after saving
+      closeModal();
     });
   }
 
@@ -1071,6 +1512,9 @@
         openModalWithOrder(order);
       } else if (action === 'items') {
         window.location.href = `itemize.html?orderId=${encodeURIComponent(id)}`;
+      } else if (action === 'edit') {
+        beginEditingOrder(order);
+        window.location.href = 'index.html';
       } else if (action === 'delete') {
         const ok = window.confirm('Delete this request?');
         if (!ok) return;

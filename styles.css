@@ -52,6 +52,11 @@ body {
   padding: 16px;
 }
 
+/* Wider/fluid layout (used on Submitted Requests list page) */
+.container--wide {
+  max-width: 100%;
+}
+
 .site-header {
   background: var(--card);
   border-bottom: 1px solid var(--border);
@@ -336,8 +341,40 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-color: var(--primary-bg);
 }
 
+/* Blue filled Edit button (Submitted Requests list) */
+.btn--editBlue {
+  background: var(--focus);
+  border-color: var(--focus);
+  color: var(--primary-text);
+}
+
+.btn--editBlue:hover {
+  filter: brightness(0.95);
+}
+
 .btn--ghost {
   background: transparent;
+}
+
+/* Accent for Items button (uses existing theme tokens) */
+.btn--items {
+  border-color: var(--focus);
+  color: var(--focus);
+}
+
+.btn--items:hover {
+  background: var(--menu-hover);
+}
+
+/* Grey filled View button (Submitted Requests list) */
+.btn--viewGrey {
+  background: var(--border);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.btn--viewGrey:hover {
+  filter: brightness(0.98);
 }
 
 .btn--danger {
@@ -371,7 +408,9 @@ input:focus, textarea:focus, select:focus, button:focus {
 .table th, .table td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
-  vertical-align: top;
+  border-left: none;
+  border-right: none;
+  vertical-align: middle;
 }
 
 .table thead th {
@@ -389,7 +428,22 @@ input:focus, textarea:focus, select:focus, button:focus {
 }
 
 .table td.actions {
+  /* Override the global .actions flex style so table borders render cleanly */
+  display: table-cell;
   white-space: nowrap;
+}
+
+.table td.actions .btn + .btn {
+  margin-left: 10px;
+}
+
+.table th.col-actions {
+  text-align: left;
+}
+
+.table th.col-actions,
+.table td.actions {
+  width: 1%;
 }
 
 .table th.col-delete,
@@ -408,15 +462,15 @@ input:focus, textarea:focus, select:focus, button:focus {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: none;
+  background: transparent;
   color: var(--danger-text);
   font-weight: 700;
   line-height: 1;
 }
 
 .btn--x:hover {
-  border-color: var(--danger-border);
+  background: var(--menu-hover);
   color: var(--danger-text);
 }
 
@@ -463,6 +517,43 @@ input:focus, textarea:focus, select:focus, button:focus {
   overflow: hidden;
   max-height: calc(100vh - 80px);
 }
+
+.modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px 12px 0;
+  gap: 12px;
+}
+
+.modal__headerText {
+  min-width: 0;
+}
+
+.modal__close {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal__close:hover {
+  background: var(--menu-hover);
+}
+
+.modal__close:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 .modal__footer {
   padding: 12px 14px;
 }
@@ -481,6 +572,184 @@ input:focus, textarea:focus, select:focus, button:focus {
   max-height: calc(100vh - 160px);
 }
 
+.modal__poHeader {
+  margin: 0;
+  font-size: 1.9rem;
+  font-weight: 800;
+}
+
+.modal__poDate {
+  margin: 2px 00 0;
+}
+
+.modal__nameValue {
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.modal__nameLabel {
+  font-size: 1.15rem;
+}
+
+/* View modal timeline bar */
+.timelinebar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+  margin-bottom: 10px;
+}
+
+.timelinebar__cell {
+  padding: 10px 12px;
+}
+
+.timelinebar__cell + .timelinebar__cell {
+  border-left: 1px solid var(--border);
+}
+
+.timelinebar__label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.timelinebar__value {
+  margin-top: 2px;
+  font-weight: 700;
+}
+
+.timelinebar__meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: -2px 0 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.timelinebar__sep {
+  opacity: 0.7;
+}
+
+/* View modal timeline graph (Gantt-style) */
+.timelinegraph {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.timelinegraph__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.timelinegraph__title {
+  font-weight: 800;
+}
+
+.timelinegraph__range {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.timelinegraph__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.timelinegraph__sep {
+  opacity: 0.7;
+}
+
+.timelinegraph__grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 12px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.timelinegraph__label {
+  font-weight: 800;
+}
+
+.timeline-track {
+  position: relative;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--table-head);
+  overflow: hidden;
+  /* subtle vertical grid lines */
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent,
+    transparent calc(20% - 1px),
+    var(--border) calc(20% - 1px),
+    var(--border) 20%
+  );
+}
+
+.timeline-seg {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  font-weight: 800;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-seg--alt {
+  background: var(--menu-hover);
+}
+
+.timelinegraph__events {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.timelinegraph__event {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 3px 0;
+}
+
+.timelinegraph__eventTime {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.timelinegraph__eventSep {
+  opacity: 0.7;
+}
+
 .icon-btn {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -494,7 +763,8 @@ input:focus, textarea:focus, select:focus, button:focus {
 .kv {
   display: grid;
   grid-template-columns: 160px 1fr;
-  gap: 8px 12px;
+  row-gap: 0px;
+  column-gap: 12px;
 }
 
 @media (max-width: 520px) {
@@ -506,9 +776,27 @@ input:focus, textarea:focus, select:focus, button:focus {
   font-weight: 700;
 }
 
+.kv dt.kv__center {
+  align-self: center;
+}
+
+/* Small, opt-in spacing between selected rows in the modal KV grid */
+.kv .kv__gapTop {
+  margin-top: 6px;
+}
+
 .kv dd {
   margin: 0;
+  white-space: normal;
+}
+
+.kv dd.kv__pre {
   white-space: pre-wrap;
+}
+
+/* Make modal dropdown rows more compact */
+.modal__body .kv select {
+  padding: 6px 10px;
 }
 
 .sr-only {

@@ -1,7 +1,7 @@
 /*
   Payment Order Request app (no backend)
   - Validates required fields
-  - Persists submitted requests in localStorage
+  - Persists payment orders in localStorage
   - Renders newest-first table with View/Delete actions
 */
 
@@ -14,9 +14,509 @@
   const DRAFT_ITEMS_KEY = 'payment_order_draft_items';
   const EDIT_ORDER_ID_KEY = 'payment_order_edit_order_id';
   const NUMBERING_KEY = 'payment_order_numbering';
+  const FLASH_TOKEN_KEY = 'payment_order_flash_token';
+  const BUDGET_TABLE_HTML_KEY = 'payment_order_budget_table_html_v1';
+  const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
+  const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
+
+  function getCurrentBudgetYearFromDate(d) {
+    const date = d instanceof Date ? d : new Date();
+    const physicalYear = date.getFullYear();
+    const month = date.getMonth(); // 0=Jan ... 3=Apr
+    // Budget runs roughly Apr→Apr. Apr–Dec belongs to next budget year.
+    return month >= 3 ? physicalYear + 1 : physicalYear;
+  }
+
+  function loadActiveBudgetYear() {
+    try {
+      const raw = localStorage.getItem(ACTIVE_BUDGET_YEAR_KEY);
+      const y = Number(raw);
+      if (!Number.isInteger(y)) return null;
+      if (y < 1900 || y > 3000) return null;
+      return y;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveActiveBudgetYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y) || y < 1900 || y > 3000) return;
+    localStorage.setItem(ACTIVE_BUDGET_YEAR_KEY, String(y));
+  }
+
+  function clearActiveBudgetYear() {
+    try {
+      localStorage.removeItem(ACTIVE_BUDGET_YEAR_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  function getBudgetTableKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_budget_table_html_${y}_v1`;
+  }
+
+  function loadBudgetYears() {
+    try {
+      const raw = localStorage.getItem(BUDGET_YEARS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      const years = parsed
+        .map((v) => Number(v))
+        .filter((v) => Number.isInteger(v));
+      return Array.from(new Set(years)).sort((a, b) => b - a);
+    } catch {
+      return [];
+    }
+  }
+
+  function saveBudgetYears(years) {
+    const normalized = Array.from(new Set((years || []).map((v) => Number(v)).filter((v) => Number.isInteger(v))))
+      .sort((a, b) => b - a);
+    localStorage.setItem(BUDGET_YEARS_KEY, JSON.stringify(normalized));
+    return normalized;
+  }
+
+  function ensureBudgetYearExists(year, initialHtml) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return;
+    const key = getBudgetTableKeyForYear(y);
+    if (!key) return;
+
+    const years = loadBudgetYears();
+    if (!years.includes(y)) saveBudgetYears([y, ...years]);
+
+    if (typeof initialHtml === 'string' && !localStorage.getItem(key)) {
+      localStorage.setItem(key, initialHtml);
+    }
+  }
+
+  function migrateLegacyBudgetIfNeeded() {
+    const years = loadBudgetYears();
+    if (years.length > 0) return years;
+
+    const legacyHtml = localStorage.getItem(BUDGET_TABLE_HTML_KEY);
+    if (!legacyHtml) return [];
+
+    const currentYear = getCurrentBudgetYearFromDate(new Date());
+    const key = getBudgetTableKeyForYear(currentYear);
+    if (key && !localStorage.getItem(key)) {
+      localStorage.setItem(key, legacyHtml);
+    }
+
+    return saveBudgetYears([currentYear]);
+  }
+
+  function getBudgetYearFromUrl() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const y = Number(params.get('year'));
+      if (!Number.isInteger(y)) return null;
+      if (y < 1900 || y > 3000) return null;
+      return y;
+    } catch {
+      return null;
+    }
+  }
+
+  function getActiveBudgetYear() {
+    const fromUrl = getBudgetYearFromUrl();
+    if (fromUrl) return fromUrl;
+    const years = migrateLegacyBudgetIfNeeded();
+
+    const active = loadActiveBudgetYear();
+    if (active && (years.length === 0 || years.includes(active))) return active;
+
+    if (years.length > 0) return years[0];
+    return getCurrentBudgetYearFromDate(new Date());
+  }
+
+  function getNavConfig() {
+    const years = migrateLegacyBudgetIfNeeded();
+    const activeYear = (() => {
+      const stored = loadActiveBudgetYear();
+      if (stored && years.includes(stored)) return stored;
+      return null;
+    })();
+    const resolvedYear = (() => {
+      const storedActive = loadActiveBudgetYear();
+      if (storedActive && years.includes(storedActive)) return storedActive;
+      const candidate = getCurrentBudgetYearFromDate(new Date());
+      if (years.includes(candidate)) return candidate;
+      return years.length ? years[0] : candidate;
+    })();
+    return [
+      { label: 'New Request Form', href: 'index.html' },
+      { label: 'Payment Orders', href: 'menu.html' },
+      {
+        key: 'budget',
+        label: 'Budget',
+        href: `budget_dashboard.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: years.map((year) => ({
+          label: String(year),
+          href: `budget.html?year=${encodeURIComponent(String(year))}`,
+          isActiveBudgetYear: activeYear === year,
+        })),
+      },
+      { label: 'Settings', href: 'settings.html' },
+    ];
+  }
+
+  function getBasename(pathname) {
+    const raw = String(pathname || '').replace(/\\/g, '/');
+    const parts = raw.split('/').filter(Boolean);
+    return parts.length ? parts[parts.length - 1].toLowerCase() : '';
+  }
+
+  function isActiveHref(href) {
+    try {
+      const current = new URL(window.location.href);
+      const target = new URL(String(href || ''), current);
+
+      if (getBasename(current.pathname) !== getBasename(target.pathname)) return false;
+
+      for (const [k, v] of target.searchParams.entries()) {
+        if (current.searchParams.get(k) !== v) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function initNavTree() {
+    const mounts = document.querySelectorAll('[data-nav-tree]');
+    if (!mounts.length) return;
+
+    const config = getNavConfig();
+    let idSeq = 0;
+
+    for (const mount of mounts) {
+      mount.innerHTML = '';
+
+      const list = document.createElement('ul');
+      list.className = 'appNavTree__list';
+
+      for (const item of config) {
+        const li = document.createElement('li');
+        li.className = 'appNavTree__item';
+
+        const children = Array.isArray(item.children) ? item.children : [];
+        const isParent = children.length > 0;
+
+        if (!isParent) {
+          const a = document.createElement('a');
+          a.className = 'appNav__link';
+          a.href = item.href;
+          a.textContent = item.label;
+
+          if (isActiveHref(item.href)) {
+            a.classList.add('is-active');
+            a.setAttribute('aria-current', 'page');
+          }
+
+          li.appendChild(a);
+          list.appendChild(li);
+          continue;
+        }
+
+        // Parent row: link + independent expand/collapse toggle.
+        const row = document.createElement('div');
+        row.className = 'appNavTree__row';
+
+        const parentLink = document.createElement('a');
+        parentLink.className = 'appNav__link';
+        parentLink.href = item.href;
+        parentLink.textContent = item.label;
+
+        const childList = document.createElement('ul');
+        childList.className = 'appNavTree__children';
+        idSeq += 1;
+        childList.id = `navChildren_${idSeq}`;
+
+        let anyChildActive = false;
+        for (const child of children) {
+          const childLi = document.createElement('li');
+          childLi.className = 'appNavTree__childItem';
+
+          const childA = document.createElement('a');
+          childA.className = 'appNav__sublink';
+          childA.href = child.href;
+          childA.textContent = '';
+          childA.appendChild(document.createTextNode(child.label));
+          if (child.isActiveBudgetYear) {
+            const badge = document.createElement('span');
+            badge.className = 'appNavTree__badge';
+            badge.textContent = ' (active)';
+            childA.appendChild(badge);
+          }
+
+          if (isActiveHref(child.href)) {
+            anyChildActive = true;
+            childA.classList.add('is-active');
+            childA.setAttribute('aria-current', 'page');
+          }
+
+          childLi.appendChild(childA);
+          childList.appendChild(childLi);
+        }
+
+        const currentBase = getBasename(window.location.pathname);
+        const parentIsActive =
+          currentBase === getBasename(item.href) ||
+          (item.key === 'budget' && (currentBase === 'budget.html' || currentBase === 'budget_dashboard.html'));
+        if (parentIsActive || anyChildActive) {
+          parentLink.classList.add('is-active');
+        }
+
+        // Default collapsed: the arrow controls open/close.
+        const shouldBeOpen = false;
+        li.classList.toggle('is-open', shouldBeOpen);
+        childList.hidden = true;
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'appNavTree__toggle';
+        toggleBtn.setAttribute('aria-label', `Toggle ${item.label}`);
+        toggleBtn.setAttribute('aria-controls', childList.id);
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.textContent = '▸';
+        toggleBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const nextOpen = !li.classList.contains('is-open');
+          li.classList.toggle('is-open', nextOpen);
+          childList.hidden = !nextOpen;
+          toggleBtn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+        });
+
+        row.appendChild(parentLink);
+        row.appendChild(toggleBtn);
+        li.appendChild(row);
+        li.appendChild(childList);
+        list.appendChild(li);
+      }
+
+      mount.appendChild(list);
+    }
+  }
+
+  let navAutoSyncInstalled = false;
+  function installNavAutoSync() {
+    if (navAutoSyncInstalled) return;
+    navAutoSyncInstalled = true;
+
+    // Keep nav consistent across tabs/windows.
+    // Note: the 'storage' event fires in OTHER documents, not the one doing the write.
+    window.addEventListener('storage', (e) => {
+      const key = e && typeof e.key === 'string' ? e.key : '';
+      if (key === ACTIVE_BUDGET_YEAR_KEY || key === BUDGET_YEARS_KEY) {
+        initNavTree();
+      }
+    });
+  }
+
+  // Backward compatibility for older pages that still call this.
+  function initBudgetYearNav() {
+    initNavTree();
+  }
 
   const ORDER_STATUSES = ['Submitted', 'Review', 'Returned', 'Rejected', 'Approved', 'Paid'];
   const WITH_OPTIONS = ['Requestor', 'Grand Secretary', 'Grand Master', 'Grand Treasurer', 'Archives'];
+
+  const BUDGET_ITEMS = [
+    ['2020', 'New Lodge Petitions & Charter fees'],
+    ['2030', 'Lodge Per Capita Dues'],
+    ['2032', 'Lodge Dues Receipts'],
+    ['2060', 'Grand Lodge - Charity - Specified'],
+    ['2065', "Grand Master's Charity"],
+    ['2061', 'Grand Lodge - Benevolent - Specified'],
+    ['2070', 'Interest Income'],
+    ['2071', 'Annual Registration Receipts'],
+    ['2100', 'Expendable Supplies'],
+    ['2110', 'Postage Account'],
+    ['2120', 'IT & Digitization'],
+    ['2140', 'Publications & Printing Account (certificates)'],
+    ['2145', 'Publications & Printing of Rituals/Codes'],
+    ['2150', 'Equipment Purchases - Repair & Maintenance'],
+    ['2170', 'Audit and Legal Fees'],
+    ['2180', 'Taxes/Insurances/Bonding Fees, etc.:'],
+    ['2190', 'Annual & Semi Annual Expenses'],
+    ['2200', 'Per Diem and Travel Expenses'],
+    ['2201', 'Travel Expenses to VGLvD Senate Meetings'],
+    ['2204', "Grand Master's Conference"],
+    ['2211', 'Grand Secretaries salaries/liabilities'],
+    ['2230', 'VGLvD Per Capita Dues'],
+    ['2242', 'Flowers, Wreaths, Memorials:'],
+    ['2243', 'Bank Charges & Fees'],
+    ['2246', 'Bank Transfers - $ or EURO'],
+    ['2249', 'Dues and Fees Other Than VGLvD'],
+    ['2250', 'Grand Master Expense Account'],
+    ['2280', 'Miscellaneous Reimbursable Items'],
+    ['2998', 'Charity'],
+  ];
+
+  const BUDGET_DESC_BY_CODE = new Map(BUDGET_ITEMS.map(([code, desc]) => [code, desc]));
+
+  function formatBudgetNumberForDisplay(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const m = raw.match(/^(\d{4})(?:\s*-\s*(.*))?$/);
+    if (!m) return raw;
+    const code = m[1];
+    const desc = BUDGET_DESC_BY_CODE.get(code);
+    if (desc) return `${code} - ${desc}`;
+    if (m[2]) return `${code} - ${m[2]}`;
+    return code;
+  }
+
+  function readOutAccountsFromBudgetYear(year) {
+    const key = getBudgetTableKeyForYear(year);
+    const html = key ? localStorage.getItem(key) : null;
+    if (!html) return [];
+
+    const tbody = document.createElement('tbody');
+    tbody.innerHTML = String(html || '');
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const seen = new Set();
+    const outAccounts = [];
+
+    for (const tr of rows) {
+      if (tr.classList.contains('budgetTable__spacer')) continue;
+      if (tr.classList.contains('budgetTable__total')) continue;
+      if (tr.classList.contains('budgetTable__remaining')) continue;
+      if (tr.classList.contains('budgetTable__checksum')) continue;
+
+      const tds = tr.querySelectorAll('td');
+      if (tds.length < 3) continue;
+
+      const outCode = String(tds[1].textContent || '').trim();
+      if (!/^\d{4}$/.test(outCode)) continue;
+
+      if (seen.has(outCode)) continue;
+      seen.add(outCode);
+
+      const desc = String(tds[2].textContent || '').trim();
+      outAccounts.push({ outCode, desc });
+    }
+
+    return outAccounts;
+  }
+
+  function initBudgetNumberSelect() {
+    const select = document.getElementById('budgetNumber');
+    if (!select) return;
+
+    // Preserve current selection when possible.
+    const prevValue = String(select.value || '').trim();
+
+    // Keep the placeholder (value="") option, remove the rest.
+    const options = Array.from(select.querySelectorAll('option'));
+    for (const opt of options) {
+      if (String(opt.value) !== '') opt.remove();
+    }
+
+    const year = getActiveBudgetYear();
+    const outAccounts = readOutAccountsFromBudgetYear(year);
+
+    if (outAccounts.length === 0) {
+      const none = document.createElement('option');
+      none.value = '__none__';
+      none.disabled = true;
+      none.textContent = 'No OUT accounts found in the active budget';
+      select.appendChild(none);
+      return;
+    }
+
+    for (const item of outAccounts) {
+      const opt = document.createElement('option');
+      opt.value = item.outCode;
+      opt.textContent = item.desc ? `${item.outCode} - ${item.desc}` : item.outCode;
+      select.appendChild(opt);
+    }
+
+    if (prevValue && outAccounts.some((i) => i.outCode === prevValue)) {
+      select.value = prevValue;
+    }
+
+    // Cross-tab sync: update the dropdown if the active budget/table changes elsewhere.
+    if (!select.dataset.budgetNumbersBound) {
+      select.dataset.budgetNumbersBound = 'true';
+      window.addEventListener('storage', (e) => {
+        const key = e && typeof e.key === 'string' ? e.key : '';
+        if (
+          key === ACTIVE_BUDGET_YEAR_KEY ||
+          key === BUDGET_YEARS_KEY ||
+          key.startsWith('payment_order_budget_table_html_')
+        ) {
+          initBudgetNumberSelect();
+        }
+      });
+    }
+  }
+
+  function initMasonicYearSelectFromBudgets(preferredYear2) {
+    if (!masonicYearInput) return;
+    if (String(masonicYearInput.tagName || '').toUpperCase() !== 'SELECT') return;
+
+    const preferred = String(Number(preferredYear2 ?? '')).trim();
+    const years = migrateLegacyBudgetIfNeeded();
+
+    // Clear all options.
+    masonicYearInput.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    placeholder.textContent = 'Select a budget…';
+    masonicYearInput.appendChild(placeholder);
+
+    const seenValues = new Set();
+    for (const year of years) {
+      const yy = Number(year) % 100;
+      const value = String(yy);
+      if (seenValues.has(value)) continue;
+      seenValues.add(value);
+
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = `${year} Budget (${String(yy).padStart(2, '0')})`;
+      masonicYearInput.appendChild(opt);
+    }
+
+    // Ensure the current saved setting is always selectable.
+    if (preferred && !seenValues.has(preferred)) {
+      const custom = document.createElement('option');
+      custom.value = preferred;
+      custom.textContent = `${String(Number(preferred)).padStart(2, '0')} (not in budgets)`;
+      masonicYearInput.appendChild(custom);
+    }
+
+    // Select preferred if possible, otherwise fall back to the first real option.
+    if (preferred) {
+      masonicYearInput.value = preferred;
+    }
+    if (!masonicYearInput.value) {
+      const firstReal = masonicYearInput.querySelector('option:not([value=""])');
+      if (firstReal) masonicYearInput.value = firstReal.value;
+    }
+
+    // Keep options up-to-date if budgets change.
+    if (!masonicYearInput.dataset.budgetYearsBound) {
+      masonicYearInput.dataset.budgetYearsBound = 'true';
+      window.addEventListener('storage', (e) => {
+        const key = e && typeof e.key === 'string' ? e.key : '';
+        if (key === BUDGET_YEARS_KEY) {
+          initMasonicYearSelectFromBudgets(masonicYearInput.value);
+        }
+      });
+    }
+  }
 
   // Elements are page-dependent (form page vs menu/list page)
   const form = document.getElementById('paymentOrderForm');
@@ -32,6 +532,82 @@
   const saveOrderBtn = document.getElementById('saveOrderBtn');
 
   const themeToggle = document.getElementById('themeToggle');
+
+  // Request form submission token
+  const submitToken = document.getElementById('submitToken');
+  const cancelEditBtn = document.getElementById('cancelEditBtn');
+
+  // Menu page flash token (one-time message after redirects)
+  const flashToken = document.getElementById('flashToken');
+
+  let submitTokenHideTimer = null;
+  let flashTokenHideTimer = null;
+
+  function positionToast(el) {
+    if (!el) return;
+    // Bottom-right fixed toast
+    el.style.top = 'auto';
+    el.style.left = 'auto';
+    el.style.bottom = '16px';
+    el.style.right = '16px';
+  }
+
+  function hideToast(el, timerKey) {
+    if (!el) return;
+    if (timerKey === 'submit' && submitTokenHideTimer) {
+      window.clearTimeout(submitTokenHideTimer);
+      submitTokenHideTimer = null;
+    }
+    if (timerKey === 'flash' && flashTokenHideTimer) {
+      window.clearTimeout(flashTokenHideTimer);
+      flashTokenHideTimer = null;
+    }
+    el.hidden = true;
+    el.innerHTML = '';
+  }
+
+  function showToast(el, message, timerKey) {
+    if (!el) return;
+    const msg = String(message || '').trim();
+    if (!msg) {
+      hideToast(el, timerKey);
+      return;
+    }
+
+    el.innerHTML = `
+      <span class="token__msg"></span>
+      <button type="button" class="token__close" aria-label="Close">X</button>
+    `.trim();
+
+    const msgEl = el.querySelector('.token__msg');
+    if (msgEl) msgEl.textContent = msg;
+
+    const closeEl = el.querySelector('.token__close');
+    if (closeEl) {
+      closeEl.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hideToast(el, timerKey);
+      });
+    }
+
+    el.hidden = false;
+    positionToast(el);
+
+    if (timerKey === 'submit') {
+      if (submitTokenHideTimer) window.clearTimeout(submitTokenHideTimer);
+      submitTokenHideTimer = window.setTimeout(() => hideToast(el, 'submit'), 4500);
+    } else if (timerKey === 'flash') {
+      if (flashTokenHideTimer) window.clearTimeout(flashTokenHideTimer);
+      flashTokenHideTimer = window.setTimeout(() => hideToast(el, 'flash'), 4500);
+    }
+  }
+
+  // App shell left navigation (optional per page)
+  const appShell = document.querySelector('[data-app-shell]');
+  const navToggleBtn = document.getElementById('navToggle');
+  const appMain = document.querySelector('.appMain');
+  const siteHeader = document.querySelector('.site-header');
 
   // Settings page (numbering)
   const numberingForm = document.getElementById('numberingForm');
@@ -100,9 +676,42 @@
     }
   }
 
+  function updateNavToggleUi() {
+    if (!appShell || !navToggleBtn) return;
+    const isClosed = appShell.classList.contains('appShell--navClosed');
+    navToggleBtn.setAttribute('aria-expanded', String(!isClosed));
+    navToggleBtn.setAttribute('aria-label', isClosed ? 'Open navigation' : 'Close navigation');
+    navToggleBtn.title = isClosed ? 'Open navigation' : 'Close navigation';
+  }
+
   function setTheme(theme) {
     localStorage.setItem(THEME_KEY, theme);
     applyTheme(theme);
+  }
+
+  function showSubmitToken(message) {
+    if (!submitToken) return;
+    showToast(submitToken, message, 'submit');
+  }
+
+  function setFlashToken(message) {
+    const msg = String(message || '').trim();
+    if (!msg) {
+      localStorage.removeItem(FLASH_TOKEN_KEY);
+      return;
+    }
+    localStorage.setItem(FLASH_TOKEN_KEY, msg);
+  }
+
+  function consumeFlashToken() {
+    const msg = String(localStorage.getItem(FLASH_TOKEN_KEY) || '').trim();
+    if (msg) localStorage.removeItem(FLASH_TOKEN_KEY);
+    return msg;
+  }
+
+  function showFlashToken(message) {
+    if (!flashToken) return;
+    showToast(flashToken, message, 'flash');
   }
 
   /** @returns {Array<Object>} */
@@ -427,7 +1036,7 @@
     const errorEls = document.querySelectorAll('.error');
     errorEls.forEach((el) => (el.textContent = ''));
 
-    const inputs = form.querySelectorAll('input, textarea');
+    const inputs = form.querySelectorAll('input, textarea, select');
     inputs.forEach((el) => el.classList.remove('input-error'));
   }
 
@@ -698,7 +1307,7 @@
         iban: 'DE00 0000 0000 0000 0000 00',
         bic: 'EXAMPLED1XXX',
         specialInstructions: 'Urgent reimbursement. Please process this week.',
-        budgetNumber: 'BUD-1001',
+        budgetNumber: '2200',
         purpose: 'Travel reimbursement.',
       },
       {
@@ -719,7 +1328,7 @@
         iban: 'GB00 0000 0000 0000 0000 00',
         bic: 'SAMPLEGB2L',
         specialInstructions: 'Pay in USD only.',
-        budgetNumber: 'BUD-1002',
+        budgetNumber: '2100',
         purpose: 'Supplies reimbursement.',
       },
       {
@@ -738,7 +1347,7 @@
         iban: 'FR00 0000 0000 0000 0000 0000 000',
         bic: 'DEMOFRPPXXX',
         specialInstructions: 'N/A',
-        budgetNumber: 'BUD-1003',
+        budgetNumber: '2280',
         purpose: 'Zero-value test entry.',
       },
     ];
@@ -989,7 +1598,10 @@
     const updatedLabel = updatedAt ? formatIsoDateOnly(updatedAt) : '—';
     const rangeEndLabel = formatIsoDateOnly(updatedAt || createdAt);
 
-    const eventsHtml = timelineSorted
+    // Display newest-first in the event list.
+    const timelineForDisplay = [...timelineSorted].sort((a, b) => b._ms - a._ms);
+
+    const eventsHtml = timelineForDisplay
       .map((e) => {
         const t = formatIsoDateTimeShort(e.at);
         const w = e.with !== undefined ? normalizeWith(e.with) : '—';
@@ -1098,6 +1710,12 @@
       modalHeaderDate.textContent = `Request Date: ${d || '—'}`;
     }
 
+    const modalHeaderBudget = modal.querySelector('#modalHeaderBudget');
+    if (modalHeaderBudget) {
+      const budget = formatBudgetNumberForDisplay(orderForView.budgetNumber);
+      modalHeaderBudget.textContent = `Budget Number: ${budget || '—'}`;
+    }
+
     const currentStatus = getOrderStatusLabel(orderForView);
     const statusOptions = ORDER_STATUSES.map((s) => {
       const selected = s === currentStatus ? ' selected' : '';
@@ -1110,11 +1728,16 @@
       return `<option value="${escapeHtml(w)}"${selected}>${escapeHtml(w)}</option>`;
     }).join('');
 
+    const euroText = formatCurrency(orderForView.euro, 'EUR');
+    const usdText = formatCurrency(orderForView.usd, 'USD');
+    const euroRowHtml = euroText ? `<dt>Euro (€)</dt><dd>${escapeHtml(euroText)}</dd>` : '';
+    const usdRowHtml = usdText ? `<dt>USD ($)</dt><dd>${escapeHtml(usdText)}</dd>` : '';
+
     modalBody.innerHTML = `
       <dl class="kv">
         <dt class="modal__nameLabel">Name</dt><dd class="modal__nameValue">${escapeHtml(orderForView.name)}</dd>
-        <dt>Euro (€)</dt><dd>${escapeHtml(formatCurrency(orderForView.euro, 'EUR'))}</dd>
-        <dt>USD ($)</dt><dd>${escapeHtml(formatCurrency(orderForView.usd, 'USD'))}</dd>
+        ${euroRowHtml}
+        ${usdRowHtml}
         <dt class="kv__center kv__gapTop">With</dt>
         <dd class="kv__gapTop">
           <select id="modalWithSelect" aria-label="With">
@@ -1131,7 +1754,6 @@
         <dt>IBAN</dt><dd>${escapeHtml(orderForView.iban)}</dd>
         <dt>BIC</dt><dd>${escapeHtml(orderForView.bic)}</dd>
         <dt>Special Instructions</dt><dd class="kv__pre">${escapeHtml(orderForView.specialInstructions)}</dd>
-        <dt>Budget Number</dt><dd>${escapeHtml(orderForView.budgetNumber)}</dd>
         <dt>Purpose</dt><dd class="kv__pre">${escapeHtml(orderForView.purpose)}</dd>
         <dt>Created</dt><dd>${escapeHtml(orderForView.createdAt)}</dd>
       </dl>
@@ -1175,6 +1797,8 @@
     modalBody.innerHTML = '';
     const modalHeaderPo = modal.querySelector('#modalHeaderPo');
     if (modalHeaderPo) modalHeaderPo.textContent = '';
+    const modalHeaderBudget = modal.querySelector('#modalHeaderBudget');
+    if (modalHeaderBudget) modalHeaderBudget.textContent = '';
     const modalHeaderDate = modal.querySelector('#modalHeaderDate');
     if (modalHeaderDate) modalHeaderDate.textContent = '';
     currentViewedOrderId = null;
@@ -1217,13 +1841,1775 @@
   function clearAll() {
     const orders = loadOrders();
     if (orders.length === 0) return;
-    const ok = window.confirm('Clear all submitted requests? This cannot be undone.');
+    const ok = window.confirm('Clear all payment orders? This cannot be undone.');
     if (!ok) return;
     saveOrders([]);
     renderOrders([]);
   }
 
+  function initBudgetEditor() {
+    const budgetYear = getActiveBudgetYear();
+    const budgetKey = getBudgetTableKeyForYear(budgetYear);
+    const editLink = document.getElementById('budgetEditLink');
+    const dashboardLink = document.getElementById('budgetDashboardLink');
+    const deactivateLink = document.getElementById('budgetDeactivateLink');
+    const setActiveBtn = document.getElementById('budgetSetActiveBtn');
+    const saveBtn = document.getElementById('budgetSaveBtn');
+    const cancelBtn = document.getElementById('budgetCancelBtn');
+    const newYearLink = document.getElementById('budgetNewYearLink');
+    const addLineLink = document.getElementById('budgetAddLineLink');
+    const removeLineLink = document.getElementById('budgetRemoveLineLink');
+    const exportCsvLink = document.getElementById('budgetExportCsvLink');
+    const downloadTemplateLink = document.getElementById('budgetDownloadTemplateLink');
+    const importCsvLink = document.getElementById('budgetImportCsvLink');
+    const menuBtn = document.getElementById('budgetActionsMenuBtn');
+    const menuPanel = document.getElementById('budgetActionsMenu');
+    const table = document.querySelector('table.budgetTable');
+    if (!editLink || !saveBtn || !table) return;
+
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    // Page title ("YYYY Budget")
+    const titleEl = document.querySelector('[data-budget-title]');
+    if (titleEl) titleEl.textContent = `${budgetYear} Budget`;
+    const subheadEl = document.querySelector('[data-budget-subhead]');
+    if (subheadEl) subheadEl.textContent = `Budget overview table for ${budgetYear}.`;
+    document.title = `${budgetYear} Budget`;
+
+    // Register this year and seed it with the current template (if missing)
+    const templateHtml = tbody.innerHTML;
+    ensureBudgetYearExists(budgetYear, templateHtml);
+    initBudgetYearNav();
+
+    function syncActiveBudgetButton() {
+      if (!setActiveBtn) return;
+      const active = loadActiveBudgetYear();
+      const isActive = active === budgetYear;
+      setActiveBtn.textContent = isActive ? 'Active Budget' : 'Set Active Budget';
+      setActiveBtn.disabled = isActive;
+
+      if (isActive) {
+        setActiveBtn.setAttribute('title', 'This year is the Active Budget');
+        setActiveBtn.setAttribute(
+          'data-tooltip',
+          'This budget year is currently the Active Budget. Use the gear menu → Deactivate Budget to clear the active selection.'
+        );
+      } else {
+        setActiveBtn.setAttribute('title', 'Set this year as the Active Budget');
+        setActiveBtn.setAttribute(
+          'data-tooltip',
+          'Sets this budget year as the Active Budget. The sidebar Budget link will open this year’s dashboard until you deactivate it.'
+        );
+      }
+
+      // Deactivate link should only be enabled if any active budget is set.
+      setLinkDisabled(deactivateLink, !active);
+    }
+
+    syncActiveBudgetButton();
+
+    // Cross-tab sync: if another tab changes the active year, keep this page accurate.
+    window.addEventListener('storage', (e) => {
+      const key = e && typeof e.key === 'string' ? e.key : '';
+      if (key === ACTIVE_BUDGET_YEAR_KEY || key === BUDGET_YEARS_KEY) {
+        syncActiveBudgetButton();
+        initBudgetYearNav();
+      }
+    });
+
+    if (setActiveBtn) {
+      setActiveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        saveActiveBudgetYear(budgetYear);
+        syncActiveBudgetButton();
+        // Re-render nav so the parent Budget link points at the new active year.
+        initBudgetYearNav();
+      });
+    }
+
+    if (deactivateLink) {
+      deactivateLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (deactivateLink.getAttribute('aria-disabled') === 'true') return;
+        clearActiveBudgetYear();
+        syncActiveBudgetButton();
+        initBudgetYearNav();
+        closeMenu();
+      });
+    }
+
+    if (dashboardLink) {
+      dashboardLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.location.href = `budget_dashboard.html?year=${encodeURIComponent(String(budgetYear))}`;
+      });
+    }
+
+    function parseMoney(text) {
+      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
+      if (!raw || raw === '-' || raw === '—') return 0;
+
+      const isParenNeg = raw.includes('(') && raw.includes(')');
+      const cleaned = raw.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
+      const n = Number(cleaned);
+      if (!Number.isFinite(n)) return 0;
+      return isParenNeg ? -Math.abs(n) : n;
+    }
+
+    function parseMoneyOrNull(text) {
+      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
+      if (!raw || raw === '-' || raw === '—') return null;
+      const isParenNeg = raw.includes('(') && raw.includes(')');
+      const cleaned = raw.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
+      if (!/[0-9]/.test(cleaned)) return null;
+      const n = Number(cleaned);
+      if (!Number.isFinite(n)) return null;
+      return isParenNeg ? -Math.abs(n) : n;
+    }
+
+    function hasUsdValue(text) {
+      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
+      if (!raw) return false;
+      if (raw === '-' || raw === '—') return false;
+      return true;
+    }
+
+    function normalizeUsdCells() {
+      const usdValueCells = tbody.querySelectorAll('td.budgetTable__usd');
+      for (const valueCell of usdValueCells) {
+        const parentRow = valueCell.closest('tr');
+        const isTotalRow = Boolean(parentRow && parentRow.classList.contains('budgetTable__total'));
+        const raw = String(valueCell.textContent ?? '').replace(/\u00A0/g, ' ');
+        const trimmed = raw.trim();
+
+        // Clear the separate sign cell (we render "$ " inside the value cell)
+        const maybeSign = valueCell.previousElementSibling;
+        if (maybeSign && maybeSign.classList.contains('budgetTable__usdSign')) {
+          maybeSign.textContent = '';
+        }
+
+        if (!hasUsdValue(trimmed)) {
+          // Keep USD totals explicit and bold.
+          if (isTotalRow) valueCell.innerHTML = '<strong>$ 0.00</strong>';
+          else valueCell.textContent = '-';
+          continue;
+        }
+
+        const withoutDollar = trimmed.replace(/^\$\s*/u, '');
+        // Exactly one space after $.
+        if (isTotalRow) valueCell.innerHTML = `<strong>$ ${withoutDollar}</strong>`;
+        else valueCell.textContent = `$ ${withoutDollar}`;
+      }
+    }
+
+    function applyNegativeNumberClasses() {
+      const rows = tbody.querySelectorAll('tr');
+      for (const row of rows) {
+        const skipDescriptionCol = isEditableDataRow(row);
+        const cells = row.querySelectorAll('td');
+        for (let i = 0; i < cells.length; i += 1) {
+          const cell = cells[i];
+          // Skip Description column (3rd column)
+          if (skipDescriptionCol && i === 2) {
+            cell.classList.remove('is-negative');
+            continue;
+          }
+
+          const value = parseMoney(cell.textContent);
+          if (value < 0) cell.classList.add('is-negative');
+          else cell.classList.remove('is-negative');
+        }
+      }
+    }
+
+    function formatEuro(amount) {
+      const n = Number(amount);
+      const safe = Number.isFinite(n) ? n : 0;
+      return `${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+    }
+
+    function formatUsd(amount) {
+      const n = Number(amount);
+      const safe = Number.isFinite(n) ? n : 0;
+      return `$ ${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+
+    function normalizeEuroCells() {
+      const rows = tbody.querySelectorAll('tr');
+      for (const row of rows) {
+        if (!isEditableDataRow(row)) continue;
+        const tds = row.querySelectorAll('td');
+
+        // Money columns: 4-7 (0-based 3..6)
+        for (let col = 3; col <= 6; col += 1) {
+          const cell = tds[col];
+          if (!cell) continue;
+          const parsed = parseMoneyOrNull(cell.textContent);
+          if (parsed === null) continue;
+          cell.textContent = formatEuro(parsed);
+        }
+      }
+    }
+
+    function isEditableDataRow(row) {
+      if (!row) return false;
+      if (row.classList.contains('budgetTable__spacer')) return false;
+      if (row.classList.contains('budgetTable__total')) return false;
+      if (row.classList.contains('budgetTable__remaining')) return false;
+      if (row.classList.contains('budgetTable__checksum')) return false;
+      const tds = row.querySelectorAll('td');
+      return tds.length >= 7;
+    }
+
+    function sumSection(rows) {
+      const totals = {
+        approved: 0,
+        receipts: 0,
+        expenditures: 0,
+        balance: 0,
+        receiptsUsd: 0,
+        expendituresUsd: 0,
+      };
+
+      for (const row of rows) {
+        if (!isEditableDataRow(row)) continue;
+        const tds = row.querySelectorAll('td');
+        totals.approved += parseMoney(tds[3]?.textContent);
+        totals.receipts += parseMoney(tds[4]?.textContent);
+        totals.expenditures += parseMoney(tds[5]?.textContent);
+        totals.balance += parseMoney(tds[6]?.textContent);
+
+        // USD value columns (sign columns are present but visually collapsed)
+        totals.receiptsUsd += parseMoney(tds[8]?.textContent);
+        totals.expendituresUsd += parseMoney(tds[10]?.textContent);
+      }
+
+      return totals;
+    }
+
+    function updateTotalRow(totalRow, totals) {
+      if (!totalRow) return;
+      const tds = totalRow.querySelectorAll('td');
+      if (tds.length < 11) return;
+
+      tds[3].innerHTML = `<strong>${formatEuro(totals.approved)}</strong>`;
+      tds[4].innerHTML = `<strong>${formatEuro(totals.receipts)}</strong>`;
+      tds[5].innerHTML = `<strong>${formatEuro(totals.expenditures)}</strong>`;
+      tds[6].innerHTML = `<strong>${formatEuro(totals.balance)}</strong>`;
+
+      // Keep USD sign cells blank; render "$ " inside the value cells.
+      if (tds[7]) tds[7].textContent = '';
+      if (tds[9]) tds[9].textContent = '';
+      if (tds[8]) tds[8].innerHTML = `<strong>${formatUsd(totals.receiptsUsd)}</strong>`;
+      if (tds[10]) tds[10].innerHTML = `<strong>${formatUsd(totals.expendituresUsd)}</strong>`;
+    }
+
+    function updateRemainingRow(remainingRow, section1Totals, section2Totals) {
+      if (!remainingRow) return;
+      const cells = remainingRow.querySelectorAll('td');
+      if (cells.length < 7) return;
+
+      // Remaining funds of balance =
+      // (Total Budget, Receipts, Expenditures -> Receipts Euro)
+      // + (Total Anticipated Values -> Balance Euro)
+      // - (Total Budget, Receipts, Expenditures -> Expenditures Euro)
+      const remaining = section2Totals.receipts + section1Totals.balance - section2Totals.expenditures;
+      // Value should appear under the Balance Euro column.
+      const valueCell = cells[6];
+      valueCell.innerHTML = `<strong>${formatEuro(remaining)}</strong>`;
+
+      if (remaining < 0) valueCell.classList.add('is-negative');
+      else valueCell.classList.remove('is-negative');
+    }
+
+    function ensureRemainingRowLayout() {
+      const remainingRow = tbody.querySelector('tr.budgetTable__remaining');
+      if (!remainingRow) return;
+
+      const cells = Array.from(remainingRow.querySelectorAll('td'));
+
+      // New layout is 11 plain <td> cells (no colspans) to match the 11 visible columns.
+      const hasAnyColspan = cells.some((c) => c.hasAttribute('colspan'));
+      if (!hasAnyColspan && cells.length === 11) return;
+
+      // Preserve the label text if we can find it.
+      const labelText = remainingRow.textContent?.includes('Remaining') ? 'Remaining funds of balance' : 'Remaining funds of balance';
+
+      // Build 11 cells: label in Description (3), value in Balance Euro (7).
+      remainingRow.innerHTML = `
+        <td></td>
+        <td></td>
+        <td><strong>${labelText}</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td class="num"><strong>-</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      `.trim();
+    }
+
+    function ensureTotalRowsLayout() {
+      const totalRows = tbody.querySelectorAll('tr.budgetTable__total');
+      for (const row of totalRows) {
+        const cells = Array.from(row.querySelectorAll('td'));
+        const hasAnyColspan = cells.some((c) => c.hasAttribute('colspan'));
+        if (!hasAnyColspan && cells.length === 11) continue;
+
+        const rowText = row.textContent ?? '';
+        const labelText = rowText.includes('Total Budget')
+          ? 'Total Budget, Receipts, Expenditures'
+          : 'Total Anticipated Values';
+
+        row.innerHTML = `
+          <td></td>
+          <td></td>
+          <td><strong>${labelText}</strong></td>
+          <td class="num"><strong>-</strong></td>
+          <td class="num"><strong>-</strong></td>
+          <td class="num"><strong>-</strong></td>
+          <td class="num"><strong>-</strong></td>
+          <td class="budgetTable__usdSign"></td>
+          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+          <td class="budgetTable__usdSign"></td>
+          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+        `.trim();
+      }
+    }
+
+    function buildChecksumSpacerRow() {
+      const tr = document.createElement('tr');
+      tr.className = 'budgetTable__spacer budgetTable__checksumSpacer';
+      tr.innerHTML = '<td colspan="11"></td>';
+      return tr;
+    }
+
+    function buildChecksumRow(kind) {
+      const tr = document.createElement('tr');
+      tr.className = 'budgetTable__checksum';
+      tr.setAttribute('data-checksum-kind', kind);
+
+      const label = kind === 'receipts' ? 'Receipts Checksum' : 'Expenditure Checksum';
+      // Value lives under the related column:
+      // receipts checksum -> Receipts Euro (col 5 / index 4)
+      // expenditure checksum -> Expenditures Euro (col 6 / index 5)
+      tr.innerHTML = `
+        <td></td>
+        <td></td>
+        <td><strong>${label}</strong></td>
+        <td></td>
+        <td class="num">${kind === 'receipts' ? '<strong>-</strong>' : ''}</td>
+        <td class="num">${kind === 'expenditures' ? '<strong>-</strong>' : ''}</td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      `.trim();
+      return tr;
+    }
+
+    function ensureChecksumRowsLayout() {
+      const existing = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
+      const hasReceipts = existing.some((r) => r.getAttribute('data-checksum-kind') === 'receipts');
+      const hasExpenditures = existing.some((r) => r.getAttribute('data-checksum-kind') === 'expenditures');
+
+      const remainingRow = tbody.querySelector('tr.budgetTable__remaining');
+      const insertAfter = remainingRow && remainingRow.isConnected ? remainingRow : null;
+
+      // Ensure we have a spacer before the checksum rows.
+      let spacer = tbody.querySelector('tr.budgetTable__checksumSpacer');
+      if (!spacer) {
+        spacer = buildChecksumSpacerRow();
+        if (insertAfter) insertAfter.insertAdjacentElement('afterend', spacer);
+        else tbody.appendChild(spacer);
+      }
+
+      // Add missing checksum rows (keep existing user-saved ones intact).
+      if (!hasReceipts) spacer.insertAdjacentElement('afterend', buildChecksumRow('receipts'));
+
+      // Re-find spacer sibling insertion point for expenditures so ordering is stable.
+      const rowsAfterSpacer = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
+      const receiptsRow = rowsAfterSpacer.find((r) => r.getAttribute('data-checksum-kind') === 'receipts');
+      const insertionPoint = receiptsRow && receiptsRow.isConnected ? receiptsRow : spacer;
+
+      if (!hasExpenditures) insertionPoint.insertAdjacentElement('afterend', buildChecksumRow('expenditures'));
+
+      // Normalize layout to 11 cells (no colspans)
+      const all = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
+      for (const row of all) {
+        const tds = row.querySelectorAll('td');
+        if (tds.length === 11) continue;
+        const kind = row.getAttribute('data-checksum-kind') || 'receipts';
+        row.replaceWith(buildChecksumRow(kind));
+      }
+    }
+
+    function updateChecksumRows(section1Totals, section2Totals) {
+      const receiptsChecksum = section1Totals.receipts - section2Totals.receipts;
+      const expendituresChecksum = section1Totals.expenditures - section2Totals.expenditures;
+
+      const rows = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
+      for (const row of rows) {
+        const kind = row.getAttribute('data-checksum-kind');
+        const tds = row.querySelectorAll('td');
+        if (tds.length < 11) continue;
+
+        if (kind === 'receipts') {
+          tds[4].innerHTML = `<strong>${formatEuro(receiptsChecksum)}</strong>`;
+          if (receiptsChecksum < 0) tds[4].classList.add('is-negative');
+          else tds[4].classList.remove('is-negative');
+        }
+
+        if (kind === 'expenditures') {
+          tds[5].innerHTML = `<strong>${formatEuro(expendituresChecksum)}</strong>`;
+          if (expendituresChecksum < 0) tds[5].classList.add('is-negative');
+          else tds[5].classList.remove('is-negative');
+        }
+      }
+    }
+
+    function recalculateBudgetTotals() {
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
+      if (totalRows.length < 2) return;
+
+      const firstTotalIndex = rows.indexOf(totalRows[0]);
+      const secondTotalIndex = rows.indexOf(totalRows[1]);
+      if (firstTotalIndex < 0 || secondTotalIndex < 0 || secondTotalIndex <= firstTotalIndex) return;
+
+      const section1Rows = rows.slice(0, firstTotalIndex);
+      const section2Rows = rows.slice(firstTotalIndex + 1, secondTotalIndex);
+
+      const s1 = sumSection(section1Rows);
+      const s2 = sumSection(section2Rows);
+
+      updateTotalRow(totalRows[0], s1);
+      updateTotalRow(totalRows[1], s2);
+
+      const remainingRow = rows.find((r) => r.classList.contains('budgetTable__remaining'));
+      if (remainingRow) updateRemainingRow(remainingRow, s1, s2);
+
+      // Checksum section lives at the bottom and compares totals between sections.
+      updateChecksumRows(s1, s2);
+
+      normalizeEuroCells();
+      normalizeUsdCells();
+      applyNegativeNumberClasses();
+    }
+
+    const savedHtml = budgetKey ? localStorage.getItem(budgetKey) : null;
+    if (savedHtml) tbody.innerHTML = savedHtml;
+
+    // If older saved HTML is present, migrate row layout to current schema.
+    ensureRemainingRowLayout();
+    ensureTotalRowsLayout();
+    ensureChecksumRowsLayout();
+
+    // Ensure money formats look consistent on load.
+    normalizeEuroCells();
+    normalizeUsdCells();
+
+    // Ensure totals are correct on load (including restored saved state)
+    recalculateBudgetTotals();
+    applyNegativeNumberClasses();
+
+    let isEditing = false;
+    let selectedRow = null;
+    let lastClickedSection = 1; // 1 = anticipated (top), 2 = budget (bottom)
+    let editStartHtml = null;
+
+    function isMenuOpen() {
+      return Boolean(menuPanel && !menuPanel.hasAttribute('hidden'));
+    }
+
+    function closeMenu() {
+      if (!menuPanel || !menuBtn) return;
+      menuPanel.setAttribute('hidden', '');
+      menuBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    function openMenu() {
+      if (!menuPanel || !menuBtn) return;
+      menuPanel.removeAttribute('hidden');
+      menuBtn.setAttribute('aria-expanded', 'true');
+    }
+
+    function toggleMenu() {
+      if (!menuPanel || !menuBtn) return;
+      if (isMenuOpen()) closeMenu();
+      else openMenu();
+    }
+
+    function setLinkDisabled(linkEl, disabled) {
+      if (!linkEl) return;
+      linkEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      if (disabled) linkEl.setAttribute('tabindex', '-1');
+      else linkEl.removeAttribute('tabindex');
+    }
+
+    function setMenuItemVisible(el, visible) {
+      if (!el) return;
+      el.hidden = !visible;
+      el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+      if (!visible) el.setAttribute('tabindex', '-1');
+    }
+
+    function setSelectedRow(nextRow) {
+      if (selectedRow && selectedRow.isConnected) {
+        selectedRow.classList.remove('budgetRow--selected');
+      }
+
+      selectedRow = nextRow && isEditableDataRow(nextRow) ? nextRow : null;
+      if (selectedRow) selectedRow.classList.add('budgetRow--selected');
+
+      setLinkDisabled(removeLineLink, !isEditing || !selectedRow);
+    }
+
+    function updateLineButtons() {
+      // Only show Add/Remove while editing.
+      setMenuItemVisible(addLineLink, isEditing);
+      setMenuItemVisible(removeLineLink, isEditing);
+
+      setLinkDisabled(addLineLink, !isEditing);
+      setLinkDisabled(removeLineLink, !isEditing || !selectedRow);
+
+      // In the dropdown, Edit should be available only when not editing.
+      setLinkDisabled(editLink, isEditing);
+
+      // Import replaces the table, so prevent it during editing.
+      setLinkDisabled(importCsvLink, isEditing);
+
+      // Creating a new year budget should be done outside edit mode.
+      setLinkDisabled(newYearLink, isEditing);
+
+      // Ensure these remain enabled.
+      setLinkDisabled(exportCsvLink, false);
+      setLinkDisabled(downloadTemplateLink, false);
+    }
+
+    function applyEditingAttributesToRow(row) {
+      if (!row || !isEditableDataRow(row)) return;
+      const cells = row.querySelectorAll('td');
+      for (const cell of cells) {
+        if (cell.classList.contains('budgetTable__usdSign')) {
+          cell.removeAttribute('contenteditable');
+          cell.removeAttribute('spellcheck');
+          continue;
+        }
+
+        if (isEditing) {
+          cell.setAttribute('contenteditable', 'true');
+          cell.setAttribute('spellcheck', 'false');
+        } else {
+          cell.removeAttribute('contenteditable');
+          cell.removeAttribute('spellcheck');
+        }
+      }
+    }
+
+    function createEmptyBudgetRow() {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="num"></td>
+        <td class="num"></td>
+        <td></td>
+        <td class="num budgetTable__euro">0.00 €</td>
+        <td class="num budgetTable__euro">0.00 €</td>
+        <td class="num budgetTable__euro">0.00 €</td>
+        <td class="num budgetTable__bal">0.00 €</td>
+        <td class="budgetTable__usdSign">$</td>
+        <td class="num budgetTable__usd">-</td>
+        <td class="budgetTable__usdSign">$</td>
+        <td class="num budgetTable__usd">-</td>
+      `.trim();
+      return tr;
+    }
+
+    function addLine() {
+      if (!isEditing) return;
+      const newRow = createEmptyBudgetRow();
+
+      const firstTotal = tbody.querySelector('tr.budgetTable__total');
+      const totalRows = tbody.querySelectorAll('tr.budgetTable__total');
+      const secondTotal = totalRows.length >= 2 ? totalRows[1] : null;
+      if (selectedRow && selectedRow.isConnected) {
+        selectedRow.insertAdjacentElement('afterend', newRow);
+      } else if (lastClickedSection === 2 && secondTotal) {
+        // Insert into the Budget section by default if the user last clicked there.
+        secondTotal.insertAdjacentElement('beforebegin', newRow);
+      } else if (firstTotal) {
+        // Default to Anticipated section.
+        firstTotal.insertAdjacentElement('beforebegin', newRow);
+      } else {
+        tbody.appendChild(newRow);
+      }
+
+      applyEditingAttributesToRow(newRow);
+      setSelectedRow(newRow);
+      recalculateBudgetTotals();
+    }
+
+    function removeLine() {
+      if (!isEditing) return;
+      if (!selectedRow || !selectedRow.isConnected) return;
+      if (!isEditableDataRow(selectedRow)) return;
+
+      const rowToRemove = selectedRow;
+      setSelectedRow(null);
+      rowToRemove.remove();
+      recalculateBudgetTotals();
+    }
+
+    function setEditing(next) {
+      isEditing = Boolean(next);
+      table.classList.toggle('budgetTable--editing', isEditing);
+
+      // Only Save remains a button; Edit is a link.
+      saveBtn.hidden = !isEditing;
+      if (cancelBtn) cancelBtn.hidden = !isEditing;
+
+      if (!isEditing) setSelectedRow(null);
+
+      const rows = tbody.querySelectorAll('tr');
+      for (const row of rows) {
+        if (!isEditableDataRow(row)) continue;
+        const cells = row.querySelectorAll('td');
+        for (const cell of cells) {
+          if (cell.classList.contains('budgetTable__usdSign')) {
+            cell.removeAttribute('contenteditable');
+            cell.removeAttribute('spellcheck');
+            continue;
+          }
+          if (isEditing) {
+            cell.setAttribute('contenteditable', 'true');
+            cell.setAttribute('spellcheck', 'false');
+          } else {
+            cell.removeAttribute('contenteditable');
+            cell.removeAttribute('spellcheck');
+          }
+        }
+      }
+
+      updateLineButtons();
+    }
+
+    function saveEdits() {
+      // Update computed totals before persisting
+      recalculateBudgetTotals();
+      applyNegativeNumberClasses();
+      normalizeEuroCells();
+      normalizeUsdCells();
+      const clone = tbody.cloneNode(true);
+      clone.querySelectorAll('.budgetRow--selected').forEach((el) => el.classList.remove('budgetRow--selected'));
+      clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
+      clone.querySelectorAll('[spellcheck]').forEach((el) => el.removeAttribute('spellcheck'));
+      if (budgetKey) localStorage.setItem(budgetKey, clone.innerHTML);
+    }
+
+    function promptForBudgetYear(defaultYear) {
+      const suggested = Number.isInteger(defaultYear) ? defaultYear : new Date().getFullYear();
+      const raw = window.prompt('Enter budget year (4 digits)', String(suggested));
+      if (raw === null) return null;
+      const y = Number(String(raw).trim());
+      if (!Number.isInteger(y) || y < 1900 || y > 3000) {
+        window.alert('Please enter a valid 4-digit year (e.g., 2026).');
+        return null;
+      }
+      return y;
+    }
+
+    function openBudgetYear(year) {
+      window.location.href = `budget.html?year=${encodeURIComponent(String(year))}`;
+    }
+
+    function createOrOpenBudgetYear(year) {
+      const y = Number(year);
+      if (!Number.isInteger(y)) return;
+      const key = getBudgetTableKeyForYear(y);
+      if (!key) return;
+
+      const years = loadBudgetYears();
+      const exists = years.includes(y) || Boolean(localStorage.getItem(key));
+      if (exists) {
+        openBudgetYear(y);
+        return;
+      }
+
+      // Seed new year from the currently saved table for this page's year.
+      const seedHtml = budgetKey ? localStorage.getItem(budgetKey) : null;
+      const initial = seedHtml || templateHtml;
+      localStorage.setItem(key, initial);
+      saveBudgetYears([y, ...years]);
+      openBudgetYear(y);
+    }
+
+    function escapeCsvValue(value) {
+      const s = String(value ?? '');
+      // Normalize whitespace/newlines for CSV
+      const normalized = s.replace(/\u00A0/g, ' ').replace(/\r\n|\r|\n/g, ' ').trim();
+      const mustQuote = /[",\n\r]/.test(normalized);
+      const escaped = normalized.replace(/"/g, '""');
+      return mustQuote ? `"${escaped}"` : escaped;
+    }
+
+    function getDownloadFileName() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `budget_${yyyy}-${mm}-${dd}.csv`;
+    }
+
+    function downloadCsvFile(csvText, fileName) {
+      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportBudgetToCsv() {
+      // Ensure export is consistent with what the UI shows.
+      recalculateBudgetTotals();
+      normalizeEuroCells();
+      normalizeUsdCells();
+      applyNegativeNumberClasses();
+
+      const header = [
+        'IN',
+        'OUT',
+        'Description',
+        'Amount Approved Euro',
+        'Receipts Euro',
+        'Expenditures Euro',
+        'Balance Euro',
+        'Receipts USD',
+        'Expenditures USD',
+      ];
+
+      const lines = [];
+      lines.push(header.map(escapeCsvValue).join(','));
+
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      for (const row of rows) {
+        if (row.classList.contains('budgetTable__spacer')) continue;
+        const tds = Array.from(row.querySelectorAll('td'));
+        if (tds.length < 7) continue;
+
+        // Table is 11 columns; USD columns are split (sign + value). Export the value cells only.
+        const values = [
+          tds[0]?.textContent ?? '',
+          tds[1]?.textContent ?? '',
+          tds[2]?.textContent ?? '',
+          tds[3]?.textContent ?? '',
+          tds[4]?.textContent ?? '',
+          tds[5]?.textContent ?? '',
+          tds[6]?.textContent ?? '',
+          tds[8]?.textContent ?? '',
+          tds[10]?.textContent ?? '',
+        ];
+
+        lines.push(values.map(escapeCsvValue).join(','));
+      }
+
+      // UTF-8 BOM helps Excel parse UTF-8 + € correctly.
+      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
+      downloadCsvFile(csv, getDownloadFileName());
+    }
+
+    function getTemplateFileName() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `budget_template_${yyyy}-${mm}-${dd}.csv`;
+    }
+
+    function downloadBudgetCsvTemplate() {
+      const header = [
+        'Section',
+        'IN',
+        'OUT',
+        'Description',
+        'Amount Approved Euro',
+        'Receipts Euro',
+        'Expenditures Euro',
+        'Balance Euro',
+        'Receipts USD',
+        'Expenditures USD',
+      ];
+
+      const exampleRows = [
+        ['Anticipated', '', '', '', '', '', '', '', '', ''],
+        ['Budget', '', '', '', '', '', '', '', '', ''],
+      ];
+
+      const lines = [];
+      lines.push(header.map(escapeCsvValue).join(','));
+      for (const r of exampleRows) lines.push(r.map(escapeCsvValue).join(','));
+
+      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
+      downloadCsvFile(csv, getTemplateFileName());
+    }
+
+    function parseCsvText(text) {
+      const rows = [];
+      const s = String(text ?? '');
+      let row = [];
+      let field = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < s.length; i += 1) {
+        const ch = s[i];
+
+        if (inQuotes) {
+          if (ch === '"') {
+            const next = s[i + 1];
+            if (next === '"') {
+              field += '"';
+              i += 1;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            field += ch;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          inQuotes = true;
+          continue;
+        }
+
+        if (ch === ',') {
+          row.push(field);
+          field = '';
+          continue;
+        }
+
+        if (ch === '\n') {
+          row.push(field);
+          field = '';
+          rows.push(row);
+          row = [];
+          continue;
+        }
+
+        if (ch === '\r') {
+          // Ignore CR; LF handles end-of-line.
+          continue;
+        }
+
+        field += ch;
+      }
+
+      // Flush
+      row.push(field);
+      rows.push(row);
+
+      // Drop completely empty trailing row
+      while (rows.length > 0) {
+        const last = rows[rows.length - 1];
+        const isEmpty = last.every((c) => String(c ?? '').trim() === '');
+        if (!isEmpty) break;
+        rows.pop();
+      }
+
+      return rows;
+    }
+
+    function normalizeHeaderName(name) {
+      return String(name ?? '')
+        .replace(/\uFEFF/g, '')
+        .replace(/\u00A0/g, ' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    function buildDataRowFromRecord(rec) {
+      const inVal = String(rec.in ?? '').trim();
+      const outVal = String(rec.out ?? '').trim();
+      const desc = String(rec.description ?? '').trim();
+
+      const approvedEuro = String(rec.approvedEuro ?? '').trim() || '0.00 €';
+      const receiptsEuro = String(rec.receiptsEuro ?? '').trim() || '0.00 €';
+      const expendituresEuro = String(rec.expendituresEuro ?? '').trim() || '0.00 €';
+      const balanceEuro = String(rec.balanceEuro ?? '').trim() || '0.00 €';
+
+      const receiptsUsd = String(rec.receiptsUsd ?? '').replace(/\u00A0/g, ' ').trim();
+      const expendituresUsd = String(rec.expendituresUsd ?? '').replace(/\u00A0/g, ' ').trim();
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="num">${escapeHtml(inVal)}</td>
+        <td class="num">${escapeHtml(outVal)}</td>
+        <td>${escapeHtml(desc)}</td>
+        <td class="num budgetTable__euro">${escapeHtml(approvedEuro)}</td>
+        <td class="num budgetTable__euro">${escapeHtml(receiptsEuro)}</td>
+        <td class="num budgetTable__euro">${escapeHtml(expendituresEuro)}</td>
+        <td class="num budgetTable__bal">${escapeHtml(balanceEuro)}</td>
+        <td class="budgetTable__usdSign">$</td>
+        <td class="num budgetTable__usd">${escapeHtml(receiptsUsd || '-')}</td>
+        <td class="budgetTable__usdSign">$</td>
+        <td class="num budgetTable__usd">${escapeHtml(expendituresUsd || '-')}</td>
+      `.trim();
+      return tr;
+    }
+
+    function buildSpacerRow() {
+      const tr = document.createElement('tr');
+      tr.className = 'budgetTable__spacer';
+      tr.innerHTML = '<td colspan="11"></td>';
+      return tr;
+    }
+
+    function buildTotalRow(label) {
+      const tr = document.createElement('tr');
+      tr.className = 'budgetTable__total';
+      tr.innerHTML = `
+        <td></td>
+        <td></td>
+        <td><strong>${escapeHtml(label)}</strong></td>
+        <td class="num"><strong>-</strong></td>
+        <td class="num"><strong>-</strong></td>
+        <td class="num"><strong>-</strong></td>
+        <td class="num"><strong>-</strong></td>
+        <td class="budgetTable__usdSign"></td>
+        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+        <td class="budgetTable__usdSign"></td>
+        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+      `.trim();
+      return tr;
+    }
+
+    function buildRemainingRow() {
+      const tr = document.createElement('tr');
+      tr.className = 'budgetTable__remaining';
+      tr.innerHTML = `
+        <td></td>
+        <td></td>
+        <td><strong>Remaining funds of balance</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td class="num"><strong>-</strong></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+      `.trim();
+      return tr;
+    }
+
+    function buildChecksumSection() {
+      return [
+        buildChecksumSpacerRow(),
+        buildChecksumRow('receipts'),
+        buildChecksumRow('expenditures'),
+      ];
+    }
+
+    // Small local helper for safe HTML insertion
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function importBudgetFromCsvText(csvText, fileName) {
+      if (isEditing) {
+        window.alert('Please click Save (exit Edit mode) before importing a CSV.');
+        return;
+      }
+
+      const ok = window.confirm(`Importing a CSV will replace the current budget table. Continue?\n\nFile: ${fileName || 'CSV'}`);
+      if (!ok) return;
+
+      const rows = parseCsvText(csvText);
+      if (rows.length === 0) {
+        window.alert('CSV is empty.');
+        return;
+      }
+
+      const header = rows[0].map(normalizeHeaderName);
+      const dataRows = rows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
+
+      const idx = {
+        section: header.indexOf('section'),
+        in: header.indexOf('in'),
+        out: header.indexOf('out'),
+        description: header.indexOf('description'),
+        approvedEuro: header.indexOf('amount approved euro'),
+        receiptsEuro: header.indexOf('receipts euro'),
+        expendituresEuro: header.indexOf('expenditures euro'),
+        balanceEuro: header.indexOf('balance euro'),
+        receiptsUsd: header.indexOf('receipts usd'),
+        expendituresUsd: header.indexOf('expenditures usd'),
+      };
+
+      const hasSectionColumn = idx.section !== -1;
+      const hasTemplateHeaders = idx.in !== -1 && idx.out !== -1 && idx.description !== -1;
+
+      if (!hasTemplateHeaders && header.length >= 3) {
+        // Allow importing a file that has no headers by treating the first row as data.
+        dataRows.unshift(rows[0]);
+      }
+
+      const section1 = [];
+      const section2 = [];
+      let inferredSection = 1; // 1 = anticipated, 2 = budget
+
+      function isTotalsOrRemaining(descText) {
+        const d = String(descText ?? '').toLowerCase();
+        if (!d) return false;
+        return d.includes('total anticipated values')
+          || d.includes('total budget')
+          || d.includes('remaining funds of balance')
+          || d.includes('receipts checksum')
+          || d.includes('expenditure checksum');
+      }
+
+      for (const r of dataRows) {
+        const get = (i) => (i >= 0 ? (r[i] ?? '') : '');
+
+        // Template-aware record reading
+        const rawSection = hasSectionColumn ? get(idx.section) : '';
+        const inVal = idx.in !== -1 ? get(idx.in) : r[0] ?? '';
+        const outVal = idx.out !== -1 ? get(idx.out) : r[1] ?? '';
+        const desc = idx.description !== -1 ? get(idx.description) : r[2] ?? '';
+
+        // Support round-tripping from exported CSV (it includes the total/remaining rows)
+        if (String(desc ?? '').trim().toLowerCase().includes('total anticipated values')) {
+          inferredSection = 2;
+          continue;
+        }
+        if (isTotalsOrRemaining(desc)) continue;
+
+        const record = {
+          in: inVal,
+          out: outVal,
+          description: desc,
+          approvedEuro: idx.approvedEuro !== -1 ? get(idx.approvedEuro) : (r[3] ?? ''),
+          receiptsEuro: idx.receiptsEuro !== -1 ? get(idx.receiptsEuro) : (r[4] ?? ''),
+          expendituresEuro: idx.expendituresEuro !== -1 ? get(idx.expendituresEuro) : (r[5] ?? ''),
+          balanceEuro: idx.balanceEuro !== -1 ? get(idx.balanceEuro) : (r[6] ?? ''),
+          receiptsUsd: idx.receiptsUsd !== -1 ? get(idx.receiptsUsd) : (r[7] ?? ''),
+          expendituresUsd: idx.expendituresUsd !== -1 ? get(idx.expendituresUsd) : (r[8] ?? ''),
+        };
+
+        const sectionName = String(rawSection ?? '').trim().toLowerCase();
+        const targetSection = sectionName.startsWith('a') ? 1 : sectionName.startsWith('b') ? 2 : inferredSection;
+
+        if (targetSection === 1) section1.push(record);
+        else section2.push(record);
+      }
+
+      // Rebuild tbody from imported data
+      tbody.innerHTML = '';
+      for (const rec of section1) tbody.appendChild(buildDataRowFromRecord(rec));
+      tbody.appendChild(buildSpacerRow());
+      tbody.appendChild(buildTotalRow('Total Anticipated Values'));
+      tbody.appendChild(buildSpacerRow());
+      for (const rec of section2) tbody.appendChild(buildDataRowFromRecord(rec));
+      tbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
+      tbody.appendChild(buildRemainingRow());
+      for (const el of buildChecksumSection()) tbody.appendChild(el);
+
+      // Migrate and recalc using the same pipeline as saved HTML.
+      ensureRemainingRowLayout();
+      ensureTotalRowsLayout();
+      ensureChecksumRowsLayout();
+      recalculateBudgetTotals();
+      normalizeEuroCells();
+      normalizeUsdCells();
+      applyNegativeNumberClasses();
+      saveEdits();
+    }
+
+    editLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (isEditing) return;
+      editStartHtml = tbody.innerHTML;
+      setEditing(true);
+    });
+
+    saveBtn.addEventListener('click', () => {
+      if (!isEditing) return;
+      saveEdits();
+      setEditing(false);
+      editStartHtml = null;
+    });
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        if (!isEditing) return;
+        // Restore the table to the state it was in when Edit was clicked.
+        setSelectedRow(null);
+        setEditing(false);
+        if (typeof editStartHtml === 'string') {
+          tbody.innerHTML = editStartHtml;
+          ensureRemainingRowLayout();
+          ensureTotalRowsLayout();
+          ensureChecksumRowsLayout();
+          normalizeEuroCells();
+          normalizeUsdCells();
+          recalculateBudgetTotals();
+          applyNegativeNumberClasses();
+        }
+        editStartHtml = null;
+      });
+    }
+
+    if (addLineLink) {
+      addLineLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (addLineLink.getAttribute('aria-disabled') === 'true') return;
+        if (!isEditing) return;
+        addLine();
+      });
+    }
+    if (removeLineLink) {
+      removeLineLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (removeLineLink.getAttribute('aria-disabled') === 'true') return;
+        if (!isEditing) return;
+        removeLine();
+      });
+    }
+
+    if (exportCsvLink) {
+      exportCsvLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        exportBudgetToCsv();
+      });
+    }
+    if (downloadTemplateLink) {
+      downloadTemplateLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        downloadBudgetCsvTemplate();
+      });
+    }
+
+    if (importCsvLink) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.csv,text/csv';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+
+      importCsvLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (isEditing) return;
+        input.value = '';
+        input.click();
+      });
+
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          importBudgetFromCsvText(reader.result, file.name);
+        };
+        reader.onerror = () => {
+          window.alert('Could not read CSV file.');
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    if (newYearLink) {
+      newYearLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (newYearLink.getAttribute('aria-disabled') === 'true') return;
+        if (isEditing) return;
+        const y = promptForBudgetYear(budgetYear + 1);
+        if (!y) return;
+        createOrOpenBudgetYear(y);
+      });
+    }
+
+    if (menuBtn) {
+      const MENU_CLOSE_DELAY_MS = 250;
+      let menuCloseTimer = 0;
+
+      function cancelScheduledClose() {
+        if (!menuCloseTimer) return;
+        clearTimeout(menuCloseTimer);
+        menuCloseTimer = 0;
+      }
+
+      function scheduleClose() {
+        cancelScheduledClose();
+        if (!isMenuOpen()) return;
+        menuCloseTimer = window.setTimeout(() => {
+          closeMenu();
+          menuCloseTimer = 0;
+        }, MENU_CLOSE_DELAY_MS);
+      }
+
+      menuBtn.addEventListener('click', () => {
+        toggleMenu();
+      });
+
+      // Allow time to move from the gear icon to the menu panel.
+      menuBtn.addEventListener('mouseenter', cancelScheduledClose);
+      menuBtn.addEventListener('mouseleave', scheduleClose);
+
+      if (menuPanel) {
+        menuPanel.addEventListener('mouseenter', cancelScheduledClose);
+        menuPanel.addEventListener('mouseleave', scheduleClose);
+      }
+
+      document.addEventListener('click', (e) => {
+        if (!isMenuOpen()) return;
+        const menuRoot = e.target?.closest ? e.target.closest('[data-budget-menu]') : null;
+        if (menuRoot) return;
+        cancelScheduledClose();
+        closeMenu();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (!isMenuOpen()) return;
+        if (e.key === 'Escape') {
+          cancelScheduledClose();
+          closeMenu();
+        }
+      });
+    }
+
+    // Select a row for removal while editing.
+    tbody.addEventListener('click', (e) => {
+      if (!isEditing) return;
+      const row = e.target?.closest ? e.target.closest('tr') : null;
+      if (!row || row.classList.contains('budgetTable__total') || row.classList.contains('budgetTable__remaining')) {
+        setSelectedRow(null);
+        return;
+      }
+      if (!isEditableDataRow(row)) {
+        setSelectedRow(null);
+        return;
+      }
+
+       // Track which section the user is interacting with so Add line
+       // defaults into the correct section even when nothing is selected.
+      const allRows = Array.from(tbody.querySelectorAll('tr'));
+      const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
+      if (totals.length >= 2) {
+        const firstTotalIndex = allRows.indexOf(totals[0]);
+        const secondTotalIndex = allRows.indexOf(totals[1]);
+        const rowIndex = allRows.indexOf(row);
+        if (rowIndex > firstTotalIndex && rowIndex < secondTotalIndex) lastClickedSection = 2;
+        else if (rowIndex >= 0 && rowIndex < firstTotalIndex) lastClickedSection = 1;
+      }
+
+      setSelectedRow(row);
+    });
+
+    // While editing, update negative formatting live.
+    let rafId = 0;
+    tbody.addEventListener('input', () => {
+      if (!isEditing) return;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        applyNegativeNumberClasses();
+        rafId = 0;
+      });
+    });
+
+    // On leaving a USD value cell, normalize to "$ " + value.
+    tbody.addEventListener('focusout', (e) => {
+      if (!isEditing) return;
+      const td = e.target?.closest ? e.target.closest('td') : null;
+      if (!td) return;
+      const isUsd = td.classList.contains('budgetTable__usd');
+      const isEuro = td.classList.contains('budgetTable__euro') || td.classList.contains('budgetTable__bal');
+      if (!isUsd && !isEuro) return;
+      normalizeEuroCells();
+      normalizeUsdCells();
+      applyNegativeNumberClasses();
+    });
+
+    setEditing(false);
+  }
+
+  function initBudgetDashboard() {
+    const root = document.querySelector('[data-budget-dashboard]');
+    if (!root) return;
+
+    const gridAnt = root.querySelector('[data-budget-dashboard-grid-anticipated]') || root.querySelector('[data-budget-dashboard-grid]');
+    const gridBud = root.querySelector('[data-budget-dashboard-grid-budget]');
+    const emptyAnt = root.querySelector('[data-budget-dashboard-empty-anticipated]') || root.querySelector('[data-budget-dashboard-empty]');
+    const emptyBud = root.querySelector('[data-budget-dashboard-empty-budget]');
+    if (!gridAnt) return;
+
+    const year = getActiveBudgetYear();
+    const titleEl = document.querySelector('[data-budget-dashboard-title]');
+    if (titleEl) titleEl.textContent = `${year} Budget Dashboard`;
+    const subheadEl = document.querySelector('[data-budget-dashboard-subhead]');
+    if (subheadEl) subheadEl.textContent = `Charts for ${year}: Expenditures vs Balance (Euro).`;
+    document.title = `${year} Budget Dashboard`;
+
+    const backLink = document.getElementById('budgetDashboardBackLink');
+    if (backLink) {
+      backLink.href = `budget.html?year=${encodeURIComponent(String(year))}`;
+      backLink.textContent = `${year} Budget`;
+      backLink.setAttribute('aria-label', `Back to ${year} Budget`);
+      backLink.title = `${year} Budget`;
+    }
+
+    initBudgetYearNav();
+
+    const searchInput = document.getElementById('budgetDashboardSearch');
+
+    const key = getBudgetTableKeyForYear(year);
+    const html = key ? localStorage.getItem(key) : null;
+    const tbody = document.createElement('tbody');
+    tbody.innerHTML = String(html || '');
+
+    function parseMoney(text) {
+      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
+      if (!raw || raw === '-' || raw === '—') return 0;
+      const isParenNeg = raw.includes('(') && raw.includes(')');
+      const cleaned = raw.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
+      const n = Number(cleaned);
+      if (!Number.isFinite(n)) return 0;
+      return isParenNeg ? -Math.abs(n) : n;
+    }
+
+    function formatEuro(n) {
+      const num = Number(n);
+      const isNeg = num < 0;
+      const abs = Math.abs(num);
+      const fmt = new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(abs);
+      return `${isNeg ? '-' : ''}${fmt} €`;
+    }
+
+    function pct(value, total) {
+      if (!total || total <= 0) return 0;
+      return Math.round((value / total) * 100);
+    }
+
+    const leaderUpdaters = [];
+    let leaderRaf = 0;
+
+    function scheduleLeaderUpdate() {
+      if (leaderRaf) cancelAnimationFrame(leaderRaf);
+      leaderRaf = requestAnimationFrame(() => {
+        for (const fn of leaderUpdaters) fn();
+        leaderRaf = 0;
+      });
+    }
+
+    function createDonutSvg(valueA, valueB) {
+      const total = valueA + valueB;
+      const radius = 48;
+      const stroke = 20;
+      const cx = 60;
+      const cy = 60;
+      const c = 2 * Math.PI * radius;
+      const aLen = total > 0 ? (valueA / total) * c : 0;
+      const bLen = total > 0 ? (valueB / total) * c : 0;
+
+      const startAngle = -Math.PI / 2;
+      const aFrac = total > 0 ? valueA / total : 0;
+      const bFrac = total > 0 ? valueB / total : 0;
+      const midAngleA = startAngle + (aFrac * 2 * Math.PI) / 2;
+      const midAngleB = startAngle + aFrac * 2 * Math.PI + (bFrac * 2 * Math.PI) / 2;
+
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 120 120');
+      svg.classList.add('budgetDash__donut');
+
+      const track = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      track.setAttribute('cx', String(cx));
+      track.setAttribute('cy', String(cy));
+      track.setAttribute('r', String(radius));
+      track.setAttribute('fill', 'none');
+      track.setAttribute('stroke-width', String(stroke));
+      track.classList.add('budgetDash__donutTrack');
+      svg.appendChild(track);
+
+      const segA = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      segA.setAttribute('cx', String(cx));
+      segA.setAttribute('cy', String(cy));
+      segA.setAttribute('r', String(radius));
+      segA.setAttribute('fill', 'none');
+      segA.setAttribute('stroke-width', String(stroke));
+      segA.setAttribute('stroke-linecap', 'butt');
+      segA.setAttribute('stroke-dasharray', `${aLen} ${Math.max(0, c - aLen)}`);
+      segA.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
+      segA.classList.add('budgetDash__donutSegA');
+      svg.appendChild(segA);
+
+      const segB = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      segB.setAttribute('cx', String(cx));
+      segB.setAttribute('cy', String(cy));
+      segB.setAttribute('r', String(radius));
+      segB.setAttribute('fill', 'none');
+      segB.setAttribute('stroke-width', String(stroke));
+      segB.setAttribute('stroke-linecap', 'butt');
+      segB.setAttribute('stroke-dasharray', `${bLen} ${Math.max(0, c - bLen)}`);
+      segB.setAttribute('stroke-dashoffset', String(-aLen));
+      segB.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
+      segB.classList.add('budgetDash__donutSegB');
+      svg.appendChild(segB);
+
+      return {
+        svg,
+        total,
+        meta: {
+          cx,
+          cy,
+          radius,
+          stroke,
+          midAngleA,
+          midAngleB,
+        },
+      };
+    }
+
+    function attachLeaderLines(chartRowEl, donutSvgEl, balanceValueEl, expValueEl, meta, showBalanceLine, showExpLine) {
+      if (!chartRowEl || !donutSvgEl || !meta) return;
+      if (!balanceValueEl || !expValueEl) return;
+
+      const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      overlay.classList.add('budgetDash__leaders');
+      overlay.setAttribute('aria-hidden', 'true');
+
+      const lineLeft = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      lineLeft.classList.add('budgetDash__leaderLine');
+      const lineRight = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      lineRight.classList.add('budgetDash__leaderLine');
+
+      overlay.appendChild(lineLeft);
+      overlay.appendChild(lineRight);
+      chartRowEl.appendChild(overlay);
+
+      function pointOnArcToClient(angleRad) {
+        const r = meta.radius + meta.stroke / 2;
+        const x = meta.cx + r * Math.cos(angleRad);
+        const y = meta.cy + r * Math.sin(angleRad);
+        const rect = donutSvgEl.getBoundingClientRect();
+        return {
+          x: rect.left + (x / 120) * rect.width,
+          y: rect.top + (y / 120) * rect.height,
+        };
+      }
+
+      function centerOf(el) {
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+
+      function donutCenterClient() {
+        const rect = donutSvgEl.getBoundingClientRect();
+        return {
+          x: rect.left + (meta.cx / 120) * rect.width,
+          y: rect.top + (meta.cy / 120) * rect.height,
+        };
+      }
+
+      function endPointNearText(valueEl, donutCenter) {
+        const r = valueEl.getBoundingClientRect();
+        const gap = 6;
+        const y = r.top + r.height / 2;
+
+        // If the value is left of the donut, approach from the right side
+        // and stop just AFTER the text. If it's right of the donut, stop
+        // just BEFORE the text.
+        const isLeftOfDonut = (r.left + r.width / 2) < donutCenter.x;
+        const x = isLeftOfDonut ? (r.right + gap) : (r.left - gap);
+        return { x, y };
+      }
+
+      function update() {
+        const rowRect = chartRowEl.getBoundingClientRect();
+        const w = Math.max(1, rowRect.width);
+        const h = Math.max(1, rowRect.height);
+        overlay.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        overlay.setAttribute('width', String(w));
+        overlay.setAttribute('height', String(h));
+
+        const dCenter = donutCenterClient();
+
+        // Balance metric -> segment A (only when value > 0)
+        const arcA = pointOnArcToClient(meta.midAngleA);
+        const balTarget = endPointNearText(balanceValueEl, dCenter);
+
+        // Expenditures metric -> segment B (only when value > 0)
+        const arcB = pointOnArcToClient(meta.midAngleB);
+        const expTarget = endPointNearText(expValueEl, dCenter);
+
+        const a0x = arcA.x - rowRect.left;
+        const a0y = arcA.y - rowRect.top;
+        const a1x = balTarget.x - rowRect.left;
+        const a1y = balTarget.y - rowRect.top;
+
+        const b0x = arcB.x - rowRect.left;
+        const b0y = arcB.y - rowRect.top;
+        const b1x = expTarget.x - rowRect.left;
+        const b1y = expTarget.y - rowRect.top;
+
+        // Two-segment leader: angled then horizontal.
+        const midAx = a0x + (a1x - a0x) * 0.6;
+        const midBx = b0x + (b1x - b0x) * 0.6;
+
+        if (showBalanceLine) {
+          lineLeft.style.display = '';
+          lineLeft.setAttribute('d', `M ${a0x} ${a0y} L ${midAx} ${a1y} L ${a1x} ${a1y}`);
+        } else {
+          lineLeft.style.display = 'none';
+          lineLeft.setAttribute('d', '');
+        }
+
+        if (showExpLine) {
+          lineRight.style.display = '';
+          lineRight.setAttribute('d', `M ${b0x} ${b0y} L ${midBx} ${b1y} L ${b1x} ${b1y}`);
+        } else {
+          lineRight.style.display = 'none';
+          lineRight.setAttribute('d', '');
+        }
+      }
+
+      leaderUpdaters.push(update);
+      update();
+    }
+
+    gridAnt.innerHTML = '';
+    if (gridBud) gridBud.innerHTML = '';
+
+    const allRows = Array.from(tbody.querySelectorAll('tr'));
+    const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
+    const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
+    const secondTotalIndex = totals.length >= 2 ? allRows.indexOf(totals[1]) : -1;
+
+    /** @type {Array<{outCode:string, desc:string, exp:number, bal:number, section:'anticipated'|'budget'}>} */
+    const items = [];
+    for (const tr of allRows) {
+      if (tr.classList.contains('budgetTable__spacer')) continue;
+      if (tr.classList.contains('budgetTable__total')) continue;
+      if (tr.classList.contains('budgetTable__remaining')) continue;
+      if (tr.classList.contains('budgetTable__checksum')) continue;
+
+      const tds = tr.querySelectorAll('td');
+      if (tds.length < 7) continue;
+
+      const outCode = String(tds[1].textContent || '').trim();
+      if (!/^\d{4}$/.test(outCode)) continue;
+
+      const desc = String(tds[2].textContent || '').trim();
+      const exp = parseMoney(tds[5].textContent);
+      const bal = parseMoney(tds[6].textContent);
+
+      const approved = parseMoney(tds[3].textContent);
+      const receipts = parseMoney(tds[4].textContent);
+      const total = Math.abs(approved) + Math.abs(receipts);
+      const hasAny = total !== 0 || exp !== 0 || bal !== 0;
+      if (!hasAny) continue;
+
+      const rowIndex = allRows.indexOf(tr);
+      /** @type {'anticipated'|'budget'} */
+      let section = 'budget';
+      if (firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex) {
+        section = 'anticipated';
+      } else if (firstTotalIndex >= 0 && secondTotalIndex >= 0 && rowIndex > firstTotalIndex && rowIndex < secondTotalIndex) {
+        section = 'budget';
+      } else if (firstTotalIndex >= 0 && secondTotalIndex < 0 && rowIndex > firstTotalIndex) {
+        section = 'budget';
+      }
+
+      items.push({ outCode, desc, exp, bal, section });
+    }
+
+    const anticipatedItems = items.filter((i) => i.section === 'anticipated');
+    const budgetItems = items.filter((i) => i.section === 'budget');
+
+    const anticipatedCount = anticipatedItems.length;
+    const budgetCount = budgetItems.length;
+
+    if (emptyAnt) emptyAnt.hidden = anticipatedItems.length > 0;
+    if (emptyBud) emptyBud.hidden = budgetItems.length > 0;
+
+    function renderItem(item, targetGrid) {
+      const card = document.createElement('article');
+      card.className = 'budgetDash__card';
+      card.dataset.search = `${item.outCode} ${item.desc || ''}`.trim();
+
+      const h = document.createElement('h3');
+      h.className = 'budgetDash__title';
+      h.textContent = `${item.outCode} — ${item.desc || ''}`.trim();
+      card.appendChild(h);
+
+      const chartRow = document.createElement('div');
+      chartRow.className = 'budgetDash__chartRow';
+
+      const expVal = Math.max(0, Number(item.exp) || 0);
+      const rawBal = Number(item.bal) || 0;
+      const isOverspent = rawBal < 0;
+      const balVal = isOverspent ? Math.abs(rawBal) : Math.max(0, rawBal);
+      const labelA = isOverspent ? 'Overspent' : 'Balance';
+      const labelB = 'Expenditures';
+
+      const { svg, total, meta } = createDonutSvg(balVal, expVal);
+
+      function createMetricBlock(side, valueText, percentText) {
+        const el = document.createElement('div');
+        el.className = `budgetDash__metric budgetDash__metric--${side}`;
+        const valEl = document.createElement('div');
+        valEl.className = 'budgetDash__metricVal';
+        valEl.textContent = valueText;
+        const pctEl = document.createElement('div');
+        pctEl.className = 'budgetDash__metricPct';
+        pctEl.textContent = percentText;
+        el.appendChild(valEl);
+        el.appendChild(pctEl);
+        return { el, valEl };
+      }
+
+      const balanceSide = Math.cos(meta.midAngleA) >= 0 ? 'right' : 'left';
+      const expSide = Math.cos(meta.midAngleB) >= 0 ? 'right' : 'left';
+
+      const leftCol = document.createElement('div');
+      leftCol.className = 'budgetDash__metricCol';
+      const rightCol = document.createElement('div');
+      rightCol.className = 'budgetDash__metricCol';
+
+      const balBlock = createMetricBlock(balanceSide === 'left' ? 'left' : 'right', formatEuro(isOverspent ? -balVal : balVal), `${pct(balVal, total)}%`);
+      const expBlock = createMetricBlock(expSide === 'left' ? 'left' : 'right', formatEuro(expVal), `${pct(expVal, total)}%`);
+
+      function sortKeyForAngle(angleRad) {
+        // Smaller y first (top). In screen coords, y = sin(angle).
+        return Math.sin(angleRad);
+      }
+
+      // Place each block on the same side as its segment.
+      if (balanceSide === 'left') leftCol.appendChild(balBlock.el);
+      else rightCol.appendChild(balBlock.el);
+
+      if (expSide === 'left') leftCol.appendChild(expBlock.el);
+      else rightCol.appendChild(expBlock.el);
+
+      // If both land on the same side, order them top-to-bottom
+      // to reduce leader-line crossings.
+      if (balanceSide === expSide) {
+        const col = balanceSide === 'left' ? leftCol : rightCol;
+        const children = Array.from(col.children);
+        const desired = [
+          { el: balBlock.el, key: sortKeyForAngle(meta.midAngleA) },
+          { el: expBlock.el, key: sortKeyForAngle(meta.midAngleB) },
+        ].sort((a, b) => a.key - b.key);
+        for (const child of children) col.removeChild(child);
+        for (const item2 of desired) col.appendChild(item2.el);
+      }
+
+      chartRow.appendChild(leftCol);
+      chartRow.appendChild(svg);
+      chartRow.appendChild(rightCol);
+      card.appendChild(chartRow);
+
+      // Leader lines connect each value to its donut segment.
+      if (total > 0) {
+        // End lines near the value text without overlapping it.
+        const showBal = balVal > 0;
+        const showExp = expVal > 0;
+        attachLeaderLines(chartRow, svg, balBlock.valEl, expBlock.valEl, meta, showBal, showExp);
+      }
+
+      const legend = document.createElement('div');
+      legend.className = 'budgetDash__legend';
+      legend.innerHTML = `
+        <span class="budgetDash__swatch budgetDash__swatch--a" aria-hidden="true"></span>
+        <span>${labelA}</span>
+        <span class="budgetDash__swatch budgetDash__swatch--b" aria-hidden="true"></span>
+        <span>${labelB}</span>
+      `.trim();
+      card.appendChild(legend);
+
+      if (targetGrid) targetGrid.appendChild(card);
+    }
+
+    for (const item of anticipatedItems) {
+      renderItem(item, gridAnt);
+    }
+
+    // If the split markup is missing, render everything into the single grid.
+    const budgetTarget = gridBud || gridAnt;
+    for (const item of budgetItems) {
+      renderItem(item, budgetTarget);
+    }
+
+    window.addEventListener('resize', scheduleLeaderUpdate);
+    scheduleLeaderUpdate();
+
+    function getVisibleCardCount(gridEl) {
+      if (!gridEl) return 0;
+      const cards = gridEl.querySelectorAll('.budgetDash__card');
+      let n = 0;
+      for (const c of cards) {
+        if (!c.hasAttribute('hidden')) n += 1;
+      }
+      return n;
+    }
+
+    function applyDashboardFilter() {
+      if (!searchInput) return;
+      const q = String(searchInput.value || '').trim().toLowerCase();
+
+      const cards = root.querySelectorAll('.budgetDash__card');
+      for (const card of cards) {
+        const hay = String(card.dataset.search || card.textContent || '').toLowerCase();
+        const match = !q || hay.includes(q);
+        card.hidden = !match;
+      }
+
+      // Empty-state behavior:
+      // - No search: show empty only when the section has no items.
+      // - With search: show empty when no visible items remain.
+      if (!q) {
+        if (emptyAnt) emptyAnt.hidden = anticipatedCount > 0;
+        if (emptyBud) emptyBud.hidden = budgetCount > 0;
+      } else {
+        if (emptyAnt) emptyAnt.hidden = getVisibleCardCount(gridAnt) > 0;
+        if (emptyBud && gridBud) emptyBud.hidden = getVisibleCardCount(gridBud) > 0;
+        if (emptyBud && !gridBud && emptyAnt) {
+          // Fallback single-grid markup.
+          emptyAnt.hidden = getVisibleCardCount(gridAnt) > 0;
+        }
+      }
+
+      scheduleLeaderUpdate();
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener('input', applyDashboardFilter);
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          searchInput.value = '';
+          applyDashboardFilter();
+        }
+      });
+    }
+  }
+
   // ---- Event wiring (only when the elements exist on the page) ----
+
+  installNavAutoSync();
 
   // Theme toggle works on both pages
   applyTheme(getPreferredTheme());
@@ -1234,8 +3620,37 @@
     });
   }
 
+  // Left navigation open/close (only on pages that include it)
+  updateNavToggleUi();
+  if (appShell && navToggleBtn) {
+    navToggleBtn.addEventListener('click', () => {
+      appShell.classList.toggle('appShell--navClosed');
+      updateNavToggleUi();
+
+      if (submitToken && !submitToken.hidden) positionToast(submitToken);
+      if (flashToken && !flashToken.hidden) positionToast(flashToken);
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    if (submitToken && !submitToken.hidden) positionToast(submitToken);
+    if (flashToken && !flashToken.hidden) positionToast(flashToken);
+  });
+
+  // Show one-time flash token on the Payment Orders page (if present)
+  if (flashToken) {
+    showFlashToken(consumeFlashToken());
+  }
+
+  // Budget page editor (only runs when the table + button exist)
+  initBudgetYearNav();
+  initBudgetEditor();
+  initBudgetDashboard();
+  initBudgetNumberSelect();
+
   if (numberingForm) {
     const settings = loadNumberingSettings();
+    initMasonicYearSelectFromBudgets(settings.year2);
     if (masonicYearInput) masonicYearInput.value = String(Number(settings.year2));
     if (firstNumberInput) firstNumberInput.value = String(settings.nextSeq);
 
@@ -1269,6 +3684,9 @@
       // Normalize field display after saving
       if (masonicYearInput) masonicYearInput.value = String(Number(year2));
       if (firstNumberInput) firstNumberInput.value = String(nextSeq);
+
+      // Close settings after save
+      window.location.href = 'menu.html';
     });
   }
 
@@ -1304,7 +3722,21 @@
     // If we are editing, tweak submit button label
     const submitBtn = form.querySelector('button[type="submit"]');
     if (submitBtn) {
-      submitBtn.textContent = getEditOrderId() ? 'Save Changes' : 'Add to List';
+      submitBtn.textContent = getEditOrderId() ? 'Save Changes' : 'Submit';
+    }
+
+    // Cancel edit button only appears in edit mode
+    if (cancelEditBtn) {
+      cancelEditBtn.hidden = !getEditOrderId();
+      cancelEditBtn.addEventListener('click', () => {
+        clearFieldErrors();
+        clearItemsError();
+        showSubmitToken('');
+        clearDraft();
+        void clearDraftAttachments();
+        setEditOrderId(null);
+        window.location.href = 'menu.html';
+      });
     }
 
     // Open itemize page when clicking Euro or USD fields
@@ -1332,6 +3764,7 @@
 
       clearFieldErrors();
       clearItemsError();
+      showSubmitToken('');
 
       const result = validateForm();
       if (!result.ok) {
@@ -1380,6 +3813,9 @@
           updatedAt: new Date().toISOString(),
         };
         upsertOrder(updated);
+
+        // Show the same token after Save Changes (displayed on Payment Orders page)
+        setFlashToken('Thank you, your update has been saved.');
       } else {
         // Enforce next Payment Order No. from settings
         const generatedPo = getNextPaymentOrderNo();
@@ -1415,6 +3851,10 @@
       // Prepare the next Payment Order No. after submitting a new request
       maybeAutofillPaymentOrderNo();
 
+      if (!editId) {
+        showSubmitToken('Thank you, your request has been submitted.');
+      }
+
       // Return to list after editing
       if (getEditOrderId() === null) {
         // no-op
@@ -1430,6 +3870,7 @@
       resetBtn.addEventListener('click', () => {
         clearFieldErrors();
         clearItemsError();
+        showSubmitToken('');
         form.reset();
         clearDraft();
         void clearDraftAttachments();
@@ -1437,7 +3878,7 @@
         updateItemsStatus();
         syncCurrencyFieldsFromItems();
         const submitBtn = form.querySelector('button[type="submit"]');
-        if (submitBtn) submitBtn.textContent = 'Add to List';
+        if (submitBtn) submitBtn.textContent = 'Submit';
 
         maybeAutofillPaymentOrderNo();
       });

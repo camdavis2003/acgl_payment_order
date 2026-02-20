@@ -3,92 +3,116 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Submitted Requests</title>
+    <title>Payment Orders</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="site-header">
-      <div class="container container--wide">
-        <div class="header-top">
-          <h1>Submitted Requests</h1>
-          <label class="switch" for="themeToggle">
-            <input
-              type="checkbox"
-              id="themeToggle"
-              class="switch__input"
-              role="switch"
-              aria-label="Dark mode"
-            />
-            <span class="switch__track" aria-hidden="true"></span>
-            <span class="switch__text">Dark mode</span>
-          </label>
-        </div>
-        <p class="subhead">
-          This page lists completed Payment Order requests saved in your browser
-          (localStorage).
-        </p>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
 
-        <nav class="menu" aria-label="Pages">
-          <a class="menu__link" href="index.html">New Request Form</a>
-          <a class="menu__link" href="settings.html">Settings</a>
-        </nav>
-      </div>
-    </header>
-
-    <main class="container container--wide">
-      <section
-        id="submitted-requests"
-        class="card"
-        aria-labelledby="list-title"
-      >
-        <div class="list-header">
-          <h2 id="list-title">Submitted Requests</h2>
-          <div class="list-actions">
-            <button type="button" id="clearAllBtn" class="btn btn--danger">
-              Clear All
-            </button>
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <h1>Payment Orders</h1>
+              </div>
+              <label class="switch" for="themeToggle">
+                <input
+                  type="checkbox"
+                  id="themeToggle"
+                  class="switch__input"
+                  role="switch"
+                  aria-label="Dark mode"
+                />
+                <span class="switch__track" aria-hidden="true"></span>
+                <span class="switch__text">Dark mode</span>
+              </label>
+            </div>
+            <p class="subhead">
+              This page lists completed Payment Order requests saved in your
+              browser (localStorage).
+            </p>
           </div>
-        </div>
+        </header>
 
-        <div
-          class="table-wrap"
-          role="region"
-          aria-label="Submitted requests table"
-          tabindex="0"
-        >
-          <table class="table" aria-describedby="list-help">
-            <caption id="list-help" class="sr-only">
-              Newest requests appear first. Use the leftmost column to delete an
-              entry, and use the Actions column to view details or open items.
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col" class="col-delete">
-                  <span class="sr-only">Delete</span>
-                </th>
-                <th scope="col">Payment Order No.</th>
-                <th scope="col">Date</th>
-                <th scope="col">Name</th>
-                <th scope="col" class="num">Euro (€)</th>
-                <th scope="col" class="num">USD ($)</th>
-                <th scope="col">Budget Number</th>
-                <th scope="col">Purpose</th>
-                <th scope="col">With</th>
-                <th scope="col">Status</th>
-                <th scope="col" class="col-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="ordersTbody">
-              <!-- rows inserted by app.js -->
-            </tbody>
-          </table>
-        </div>
+        <main class="container container--wide">
+          <section
+            id="submitted-requests"
+            class="card"
+            aria-labelledby="list-title"
+          >
+            <div
+              id="flashToken"
+              class="token"
+              role="status"
+              aria-live="polite"
+              hidden
+            ></div>
 
-        <div id="emptyState" class="empty" hidden>
-          No requests submitted yet.
-        </div>
-      </section>
-    </main>
+            <div class="list-header">
+              <h2 id="list-title">Payment Orders</h2>
+              <div class="list-actions">
+                <button type="button" id="clearAllBtn" class="btn btn--danger">
+                  Clear All
+                </button>
+              </div>
+            </div>
+
+            <div
+              class="table-wrap"
+              role="region"
+              aria-label="Payment orders table"
+              tabindex="0"
+            >
+              <table class="table" aria-describedby="list-help">
+                <caption id="list-help" class="sr-only">
+                  Newest requests appear first. Use the leftmost column to
+                  delete an entry, and use the Actions column to view details or
+                  open items.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" class="col-delete">
+                      <span class="sr-only">Delete</span>
+                    </th>
+                    <th scope="col">Payment Order No.</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Name</th>
+                    <th scope="col" class="num">Euro (€)</th>
+                    <th scope="col" class="num">USD ($)</th>
+                    <th scope="col">Budget Number</th>
+                    <th scope="col">Purpose</th>
+                    <th scope="col">With</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="ordersTbody">
+                  <!-- rows inserted by app.js -->
+                </tbody>
+              </table>
+            </div>
+
+            <div id="emptyState" class="empty" hidden>
+              No requests submitted yet.
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
 
     <!-- Simple modal for “View” -->
     <div class="modal" id="detailsModal" aria-hidden="true">
@@ -103,6 +127,7 @@
           <div class="modal__headerText">
             <h3 id="modalTitle" class="sr-only">Request Details</h3>
             <h2 id="modalHeaderPo" class="modal__poHeader"></h2>
+            <p id="modalHeaderBudget" class="modal__poDate"></p>
             <p id="modalHeaderDate" class="modal__poDate"></p>
           </div>
         </div>

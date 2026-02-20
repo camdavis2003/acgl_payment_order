@@ -7,91 +7,99 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="site-header">
-      <div class="container">
-        <div class="header-top">
-          <h1>Payment Order Settings</h1>
-          <label class="switch" for="themeToggle">
-            <input
-              type="checkbox"
-              id="themeToggle"
-              class="switch__input"
-              role="switch"
-              aria-label="Dark mode"
-            />
-            <span class="switch__track" aria-hidden="true"></span>
-            <span class="switch__text">Dark mode</span>
-          </label>
-        </div>
-        <p class="subhead">
-          Set the masonic year and the first Payment Order number for the year.
-        </p>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
 
-        <nav class="menu" aria-label="Pages">
-          <a class="menu__link" href="index.html">New Request Form</a>
-          <a class="menu__link" href="menu.html">View Submitted Requests</a>
-        </nav>
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <h1>Payment Order Settings</h1>
+              </div>
+              <label class="switch" for="themeToggle">
+                <input
+                  type="checkbox"
+                  id="themeToggle"
+                  class="switch__input"
+                  role="switch"
+                  aria-label="Dark mode"
+                />
+                <span class="switch__track" aria-hidden="true"></span>
+                <span class="switch__text">Dark mode</span>
+              </label>
+            </div>
+            <p class="subhead">
+              Set the masonic year and the first Payment Order number for the
+              year.
+            </p>
+          </div>
+        </header>
+
+        <main class="container">
+          <section class="card" aria-labelledby="settings-title">
+            <h2 id="settings-title">Numbering</h2>
+
+            <form id="numberingForm" novalidate>
+              <div class="grid">
+                <div class="field">
+                  <label for="masonicYear">Masonic Year (2 digits)</label>
+                  <select id="masonicYear" name="masonicYear" required>
+                    <option value="" selected disabled>Select a budget…</option>
+                  </select>
+                  <div
+                    class="error"
+                    id="error-masonicYear"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+
+                <div class="field">
+                  <label for="firstNumber"
+                    >First Payment Order No. of the Year</label
+                  >
+                  <input
+                    id="firstNumber"
+                    name="firstNumber"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    required
+                  />
+                  <div
+                    class="error"
+                    id="error-firstNumber"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button type="submit" class="btn btn--primary">
+                  Save Settings
+                </button>
+              </div>
+            </form>
+          </section>
+        </main>
       </div>
-    </header>
-
-    <main class="container">
-      <section class="card" aria-labelledby="settings-title">
-        <h2 id="settings-title">Numbering</h2>
-
-        <form id="numberingForm" novalidate>
-          <div class="grid">
-            <div class="field">
-              <label for="masonicYear">Masonic Year (2 digits)</label>
-              <input
-                id="masonicYear"
-                name="masonicYear"
-                type="number"
-                min="0"
-                max="99"
-                step="1"
-                inputmode="numeric"
-                autocomplete="off"
-                required
-              />
-              <div
-                class="error"
-                id="error-masonicYear"
-                role="alert"
-                aria-live="polite"
-              ></div>
-            </div>
-
-            <div class="field">
-              <label for="firstNumber"
-                >First Payment Order No. of the Year</label
-              >
-              <input
-                id="firstNumber"
-                name="firstNumber"
-                type="number"
-                min="1"
-                step="1"
-                inputmode="numeric"
-                autocomplete="off"
-                required
-              />
-              <div
-                class="error"
-                id="error-firstNumber"
-                role="alert"
-                aria-live="polite"
-              ></div>
-            </div>
-          </div>
-
-          <div class="actions">
-            <button type="submit" class="btn btn--primary">
-              Save Settings
-            </button>
-          </div>
-        </form>
-      </section>
-    </main>
+    </div>
 
     <script src="app.js" defer></script>
   </body>

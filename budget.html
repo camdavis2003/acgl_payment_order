@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Budget</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <h1 data-budget-title>Budget</h1>
+              </div>
+              <label class="switch" for="themeToggle">
+                <input
+                  type="checkbox"
+                  id="themeToggle"
+                  class="switch__input"
+                  role="switch"
+                  aria-label="Dark mode"
+                />
+                <span class="switch__track" aria-hidden="true"></span>
+                <span class="switch__text">Dark mode</span>
+              </label>
+            </div>
+            <p class="subhead" data-budget-subhead>Budget overview table.</p>
+          </div>
+        </header>
+
+        <main class="container container--wide">
+          <section class="card" aria-label="Budget table">
+            <div class="actions budgetActions">
+              <button
+                type="button"
+                id="budgetSetActiveBtn"
+                class="btn btn--ghost"
+                title="Set this year as the Active Budget"
+                data-tooltip="Sets this budget year as the Active Budget. The sidebar Budget link will open this year’s dashboard until you deactivate it."
+              >
+                Set Active Budget
+              </button>
+
+              <button
+                type="button"
+                id="budgetSaveBtn"
+                class="btn btn--primary"
+                hidden
+              >
+                Save
+              </button>
+
+              <button
+                type="button"
+                id="budgetCancelBtn"
+                class="btn btn--ghost"
+                hidden
+              >
+                Cancel
+              </button>
+
+              <div class="budgetMenu" data-budget-menu>
+                <button
+                  type="button"
+                  id="budgetActionsMenuBtn"
+                  class="actionLink actionLink--icon"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-controls="budgetActionsMenu"
+                  title="Menu"
+                  aria-label="Menu"
+                >
+                  ⚙
+                </button>
+
+                <div
+                  id="budgetActionsMenu"
+                  class="budgetMenu__panel"
+                  role="menu"
+                  aria-label="Budget menu"
+                  hidden
+                >
+                  <a
+                    href="#"
+                    id="budgetEditLink"
+                    class="actionLink"
+                    role="menuitem"
+                    title="Edit the budget table"
+                    data-tooltip="Enter Edit mode so you can change any budget row values. Use Save to keep changes, or Cancel to discard changes."
+                    >Edit</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetDashboardLink"
+                    class="actionLink"
+                    role="menuitem"
+                    title="Open the budget dashboard"
+                    data-tooltip="Opens a dashboard with a donut chart for each OUT account showing Expenditures vs Balance for this budget year."
+                    >Dashboard</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetNewYearLink"
+                    class="actionLink"
+                    role="menuitem"
+                    title="Create a new year budget"
+                    data-tooltip="Creates a new budget for a specific year (and keeps prior years). If the year already exists, it opens it."
+                    >New Budget Year</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetDeactivateLink"
+                    class="actionLink actionLink--danger"
+                    role="menuitem"
+                    title="Deactivate the active budget"
+                    data-tooltip="Clears the Active Budget setting. After deactivating, the Budget link will fall back to the newest/current budget year."
+                    >Deactivate Budget</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetAddLineLink"
+                    class="actionLink"
+                    role="menuitem"
+                    aria-disabled="true"
+                    title="Add a new budget line"
+                    data-tooltip="While in Edit mode: click a budget row first (to pick where it goes), then click Add line. The new blank line will be inserted directly below the selected row. If no row is selected, it adds to the section you last clicked (Anticipated or Budget)."
+                    >Add line</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetRemoveLineLink"
+                    class="actionLink actionLink--danger"
+                    role="menuitem"
+                    aria-disabled="true"
+                    title="Remove the selected budget line"
+                    data-tooltip="While in Edit mode: click a budget row to select it, then click Remove line. It deletes the selected row only (totals/remaining rows can’t be removed)."
+                    >Remove line</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetExportCsvLink"
+                    class="actionLink"
+                    role="menuitem"
+                    title="Download the current budget as CSV"
+                    data-tooltip="Downloads a CSV file of the current budget table (including totals/remaining) so you can save it or open it in Excel."
+                    >Export CSV</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetDownloadTemplateLink"
+                    class="actionLink"
+                    role="menuitem"
+                    title="Download a blank CSV template"
+                    data-tooltip="Downloads a blank CSV template you can fill in (includes a Section column for Anticipated vs Budget)."
+                    >Download CSV template</a
+                  >
+                  <a
+                    href="#"
+                    id="budgetImportCsvLink"
+                    class="actionLink"
+                    role="menuitem"
+                    title="Import a CSV to rebuild the budget"
+                    data-tooltip="Imports a CSV file and rebuilds the budget table from it (recalculates totals/remaining). Import is disabled while in Edit mode."
+                    >Import CSV</a
+                  >
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="table-wrap budgetTableWrap"
+              role="region"
+              aria-label="Budget table"
+              tabindex="0"
+            >
+              <table class="table budgetTable">
+                <colgroup>
+                  <col class="budgetCol budgetCol--in" />
+                  <col class="budgetCol budgetCol--out" />
+                  <col class="budgetCol budgetCol--desc" />
+                  <col class="budgetCol budgetCol--money" />
+                  <col class="budgetCol budgetCol--money" />
+                  <col class="budgetCol budgetCol--money" />
+                  <col class="budgetCol budgetCol--money" />
+                  <col class="budgetCol budgetCol--usdSign" />
+                  <col class="budgetCol budgetCol--money" />
+                  <col class="budgetCol budgetCol--usdSign" />
+                  <col class="budgetCol budgetCol--money" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col" class="budgetTable__head">IN</th>
+                    <th scope="col" class="budgetTable__head">OUT</th>
+                    <th scope="col" class="budgetTable__head">Description</th>
+                    <th scope="col" class="budgetTable__head">
+                      Amount Approved Euro
+                    </th>
+                    <th scope="col" class="budgetTable__head">Receipts Euro</th>
+                    <th scope="col" class="budgetTable__head">
+                      Expenditures Euro
+                    </th>
+                    <th scope="col" class="budgetTable__head">Balance Euro</th>
+                    <th scope="col" class="budgetTable__head" colspan="2">
+                      Receipts USD
+                    </th>
+                    <th scope="col" class="budgetTable__head" colspan="2">
+                      Expenditures USD
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="num">1020</td>
+                    <td class="num">2020</td>
+                    <td>New Lodge Petitions &amp; Charter fees</td>
+                    <td class="num budgetTable__euro">EUR 0.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">0.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1030</td>
+                    <td class="num">2030</td>
+                    <td>Lodge Per Capita Dues</td>
+                    <td class="num budgetTable__euro">67,000.00 €</td>
+                    <td class="num budgetTable__euro">25,614.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">41,386.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1032</td>
+                    <td class="num">2032</td>
+                    <td>Lodge Dues Receipts</td>
+                    <td class="num budgetTable__euro">EUR 0.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">0.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1060</td>
+                    <td class="num">2060</td>
+                    <td>Grand Lodge - Charity - Specified</td>
+                    <td class="num budgetTable__euro">EUR 0.00</td>
+                    <td class="num budgetTable__euro">500.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">500.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1065</td>
+                    <td class="num">2065</td>
+                    <td>Grand Master's Charity</td>
+                    <td class="num budgetTable__euro">EUR 0.00</td>
+                    <td class="num budgetTable__euro">9,791.23 €</td>
+                    <td class="num budgetTable__euro">5,000.00 €</td>
+                    <td class="num budgetTable__bal">4,791.23 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1061</td>
+                    <td class="num">2061</td>
+                    <td>Grand Lodge - Benevolent - Specified</td>
+                    <td class="num budgetTable__euro">EUR 0.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">0.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1070</td>
+                    <td class="num">2070</td>
+                    <td>Interest Income</td>
+                    <td class="num budgetTable__euro">EUR 0.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">0.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1071</td>
+                    <td class="num">2071</td>
+                    <td>Annual Registration Receipts</td>
+                    <td class="num budgetTable__euro">EUR 25,000.00</td>
+                    <td class="num budgetTable__euro">5,250.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">19,750.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+
+                  <tr class="budgetTable__spacer">
+                    <td colspan="11"></td>
+                  </tr>
+
+                  <tr class="budgetTable__total">
+                    <td></td>
+                    <td></td>
+                    <td><strong>Total Anticipated Values</strong></td>
+                    <td class="num"><strong>92,000.00 €</strong></td>
+                    <td class="num"><strong>41,155.23 €</strong></td>
+                    <td class="num"><strong>5,000.00 €</strong></td>
+                    <td class="num"><strong>66,427.23 €</strong></td>
+                    <td class="budgetTable__usdSign"></td>
+                    <td class="num budgetTable__usd">
+                      <strong>$ 0.00</strong>
+                    </td>
+                    <td class="budgetTable__usdSign"></td>
+                    <td class="num budgetTable__usd">
+                      <strong>$ 0.00</strong>
+                    </td>
+                  </tr>
+
+                  <tr class="budgetTable__spacer">
+                    <td colspan="11"></td>
+                  </tr>
+
+                  <tr>
+                    <td class="num">1100</td>
+                    <td class="num">2100</td>
+                    <td>Expendable Supplies</td>
+                    <td class="num budgetTable__euro">EUR 1,500.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">218.00 €</td>
+                    <td class="num budgetTable__bal">1,282.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1110</td>
+                    <td class="num">2110</td>
+                    <td>Postage Account</td>
+                    <td class="num budgetTable__euro">EUR 500.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">500.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1120</td>
+                    <td class="num">2120</td>
+                    <td>IT &amp; Digitization</td>
+                    <td class="num budgetTable__euro">EUR 3,500.00</td>
+                    <td class="num budgetTable__euro">140.00 €</td>
+                    <td class="num budgetTable__euro">635.08 €</td>
+                    <td class="num budgetTable__bal">3,004.92 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1140</td>
+                    <td class="num">2140</td>
+                    <td>Publications &amp; Printing Account (certificates)</td>
+                    <td class="num budgetTable__euro">EUR 150.00</td>
+                    <td class="num budgetTable__euro">971.85 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">1,121.85 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1145</td>
+                    <td class="num">2145</td>
+                    <td>Publications &amp; Printing of Rituals/Codes</td>
+                    <td class="num budgetTable__euro">EUR 1,000.00</td>
+                    <td class="num budgetTable__euro">910.00 €</td>
+                    <td class="num budgetTable__euro">765.73 €</td>
+                    <td class="num budgetTable__bal">1,144.27 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1150</td>
+                    <td class="num">2150</td>
+                    <td>Equipment Purchases - Repair &amp; Maintenance</td>
+                    <td class="num budgetTable__euro">EUR 2,500.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">563.90 €</td>
+                    <td class="num budgetTable__bal">1,936.10 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1170</td>
+                    <td class="num">2170</td>
+                    <td>Audit and Legal Fees</td>
+                    <td class="num budgetTable__euro">EUR 2,700.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">3,553.34 €</td>
+                    <td class="num budgetTable__bal">-853.34 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1180</td>
+                    <td class="num">2180</td>
+                    <td>Taxes/Insurances/Bonding Fees, etc.:</td>
+                    <td class="num budgetTable__euro">EUR 200.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">437.06 €</td>
+                    <td class="num budgetTable__bal">-237.06 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1190</td>
+                    <td class="num">2190</td>
+                    <td>Annual &amp; Semi Annual Expenses</td>
+                    <td class="num budgetTable__euro">EUR 30,000.00</td>
+                    <td class="num budgetTable__euro">50.00 €</td>
+                    <td class="num budgetTable__euro">44,728.26 €</td>
+                    <td class="num budgetTable__bal">-14,678.26 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1200</td>
+                    <td class="num">2200</td>
+                    <td>Per Diem and Travel Expenses</td>
+                    <td class="num budgetTable__euro">EUR 7,000.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">6,637.86 €</td>
+                    <td class="num budgetTable__bal">362.14 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1201</td>
+                    <td class="num">2201</td>
+                    <td>Travel Expenses to VGLvD Senate Meetings</td>
+                    <td class="num budgetTable__euro">EUR 2,000.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">1,048.02 €</td>
+                    <td class="num budgetTable__bal">951.98 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1204</td>
+                    <td class="num">2204</td>
+                    <td>Grand Master's Conference</td>
+                    <td class="num budgetTable__euro">EUR 12,000.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">3,936.56 €</td>
+                    <td class="num budgetTable__bal">8,063.44 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1211</td>
+                    <td class="num">2211</td>
+                    <td>Grand Secretaries salaries/liabilities</td>
+                    <td class="num budgetTable__euro">EUR 3,000.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">1,500.00 €</td>
+                    <td class="num budgetTable__bal">1,500.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1230</td>
+                    <td class="num">2230</td>
+                    <td>VGLvD Per Capita Dues</td>
+                    <td class="num budgetTable__euro">EUR 15,000.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">15,000.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1242</td>
+                    <td class="num">2242</td>
+                    <td>Flowers, Wreaths, Memorials:</td>
+                    <td class="num budgetTable__euro">EUR 1,000.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">327.00 €</td>
+                    <td class="num budgetTable__bal">673.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1243</td>
+                    <td class="num">2243</td>
+                    <td>Bank Charges &amp; Fees</td>
+                    <td class="num budgetTable__euro">EUR 500.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">344.54 €</td>
+                    <td class="num budgetTable__bal">155.46 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">1,011.34</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1246</td>
+                    <td class="num">2246</td>
+                    <td>Bank Transfers - $ or EURO</td>
+                    <td class="num budgetTable__euro">EUR 0.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">4,000.00 €</td>
+                    <td class="num budgetTable__bal">-4,000.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">2249</td>
+                    <td class="num">2249</td>
+                    <td>Dues and Fees Other Than VGLvD</td>
+                    <td class="num budgetTable__euro">EUR 1,500.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__bal">1,500.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1250</td>
+                    <td class="num">2250</td>
+                    <td>Grand Master Expense Account</td>
+                    <td class="num budgetTable__euro">EUR 2,500.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">452.00 €</td>
+                    <td class="num budgetTable__bal">2,048.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1280</td>
+                    <td class="num">2280</td>
+                    <td>Miscellaneous Reimbursable Items</td>
+                    <td class="num budgetTable__euro">EUR 500.00</td>
+                    <td class="num budgetTable__euro">280.00 €</td>
+                    <td class="num budgetTable__euro">569.68 €</td>
+                    <td class="num budgetTable__bal">210.32 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+                  <tr>
+                    <td class="num">1998</td>
+                    <td class="num">2998</td>
+                    <td>Charity</td>
+                    <td class="num budgetTable__euro">EUR 4,950.00</td>
+                    <td class="num budgetTable__euro">0.00 €</td>
+                    <td class="num budgetTable__euro">1,000.00 €</td>
+                    <td class="num budgetTable__bal">3,950.00 €</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                    <td class="budgetTable__usdSign">$</td>
+                    <td class="num budgetTable__usd">-</td>
+                  </tr>
+
+                  <tr class="budgetTable__total">
+                    <td></td>
+                    <td></td>
+                    <td>
+                      <strong>Total Budget, Receipts, Expenditures</strong>
+                    </td>
+                    <td class="num"><strong>92,000.00 €</strong></td>
+                    <td class="num"><strong>2,351.85 €</strong></td>
+                    <td class="num"><strong>70,717.03 €</strong></td>
+                    <td class="num"><strong>19,474.50 €</strong></td>
+                    <td class="budgetTable__usdSign"></td>
+                    <td class="num budgetTable__usd">
+                      <strong>$ 0.00</strong>
+                    </td>
+                    <td class="budgetTable__usdSign"></td>
+                    <td class="num budgetTable__usd">
+                      <strong>$ 0.00</strong>
+                    </td>
+                  </tr>
+                  <tr class="budgetTable__remaining">
+                    <td></td>
+                    <td></td>
+                    <td><strong>Remaining funds of balance</strong></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td class="num"><strong>-1,937.95 €</strong></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+
+                  <tr class="budgetTable__spacer budgetTable__checksumSpacer">
+                    <td colspan="11"></td>
+                  </tr>
+                  <tr
+                    class="budgetTable__checksum"
+                    data-checksum-kind="receipts"
+                  >
+                    <td></td>
+                    <td></td>
+                    <td><strong>Receipts Checksum</strong></td>
+                    <td></td>
+                    <td class="num"><strong>-</strong></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+                  <tr
+                    class="budgetTable__checksum"
+                    data-checksum-kind="expenditures"
+                  >
+                    <td></td>
+                    <td></td>
+                    <td><strong>Expenditure Checksum</strong></td>
+                    <td></td>
+                    <td></td>
+                    <td class="num"><strong>-</strong></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

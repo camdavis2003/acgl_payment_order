@@ -13,6 +13,8 @@
   --menu-hover: #f9fafb;
   --danger-border: #ef4444;
   --danger-text: #991b1b;
+  --chart-balance: #60a5fa;
+  --chart-expenditures: #fdba74;
 }
 
 html[data-theme="dark"] {
@@ -30,6 +32,8 @@ html[data-theme="dark"] {
   --menu-hover: #0b1324;
   --danger-border: #f87171;
   --danger-text: #fecaca;
+  --chart-balance: #60a5fa;
+  --chart-expenditures: #fdba74;
 }
 
 * { box-sizing: border-box; }
@@ -46,13 +50,457 @@ body {
   line-height: 1.4;
 }
 
+/* App shell layout (left navigation + page content) */
+.appShell {
+  min-height: 100vh;
+  display: flex;
+}
+
+.appNav {
+  width: 240px;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  padding: 12px;
+
+/* Tree-style sidebar navigation */
+.appNavTree {
+  display: block;
+}
+
+.appNavTree__list,
+.appNavTree__children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.appNavTree__item {
+  margin: 0;
+}
+
+.appNavTree__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appNavTree__row > .appNav__link {
+  flex: 1;
+}
+
+.appNavTree__toggle {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  user-select: none;
+  transition: transform 120ms ease, color 120ms ease;
+}
+
+.appNavTree__toggle:hover {
+  background: var(--menu-hover);
+  color: var(--text);
+}
+
+.appNavTree__toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.appNavTree__item.is-open > .appNavTree__row .appNavTree__toggle {
+  transform: rotate(90deg);
+  color: var(--text);
+}
+
+.appNavTree__children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  margin-left: 12px;
+}
+
+/* Author styles override the browser's default [hidden] rule; force collapse. */
+.appNavTree__children[hidden] {
+  display: none;
+}
+
+.appNavTree__childItem {
+  margin: 0;
+}
+
+.appNavTree__badge {
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
+}
+
+.appShell.appShell--navClosed .appNav {
+  display: none;
+}
+
+.appMain {
+  flex: 1;
+  min-width: 0;
+}
+
+
+.header-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Hamburger toggle button */
+.navIconBtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.navIconBtn:hover {
+  background: var(--menu-hover);
+}
+
+.navIconBtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.navIconBtn__lines {
+  width: 18px;
+  height: 2px;
+  background: var(--text);
+  box-shadow: 0 -6px 0 var(--text), 0 6px 0 var(--text);
+  border-radius: 999px;
+}
+
+.appNav__link {
+  display: block;
+  padding: 10px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appNav__link:hover {
+  background: var(--menu-hover);
+}
+
+.appNav__link.is-active {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.appNav__group {
+  margin-top: 4px;
+}
+
+.appNav__groupRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appNav__groupRow .appNav__link {
+  flex: 1;
+}
+
+.appNav__toggle {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  user-select: none;
+  transition: transform 120ms ease;
+}
+
+.appNav__toggle:hover {
+  background: var(--menu-hover);
+  color: var(--text);
+}
+
+.appNav__toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.appNav__group.is-open .appNav__toggle {
+  transform: rotate(90deg);
+  color: var(--text);
+}
+
+.appNav__sub {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  margin-left: 12px;
+}
+
+.appNav__sublink {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appNav__sublink:hover {
+  background: var(--menu-hover);
+  color: var(--text);
+}
+
+.appNav__sublink.is-active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Budget dashboard */
+.budgetDash__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.budgetDash__section {
+  margin: 0;
+}
+
+.budgetDash__section + .budgetDash__section {
+  margin-top: 18px;
+}
+
+.budgetDash__sectionTitle {
+  margin: 0 0 12px;
+  font-size: 2.4rem;
+  font-weight: 900;
+}
+
+.budgetDash__topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.budgetDash__search {
+  flex: 1;
+  max-width: 460px;
+}
+
+@media (max-width: 560px) {
+  .budgetDash__topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .budgetDash__search {
+    max-width: none;
+  }
+  #budgetDashboardBackLink {
+    align-self: flex-end;
+  }
+}
+
+@media (max-width: 1320px) {
+  .budgetDash__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .budgetDash__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .budgetDash__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.budgetDash__card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.budgetDash__title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  line-height: 1.2;
+  font-weight: 800;
+  text-align: center;
+}
+
+.budgetDash__chartRow {
+  display: grid;
+  grid-template-columns: 1fr 170px 1fr;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.budgetDash__metricCol {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.budgetDash__leaders {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.budgetDash__leaderLine {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  fill: none;
+  opacity: 0.9;
+}
+
+.budgetDash__metric {
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.budgetDash__metric--left {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.budgetDash__metric--right {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.budgetDash__metricVal {
+  font-variant-numeric: tabular-nums;
+}
+
+.budgetDash__metricPct {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.budgetDash__donut {
+  width: 170px;
+  height: 170px;
+  display: block;
+  margin: 0 auto;
+}
+
+.budgetDash__donutTrack {
+  stroke: var(--border);
+}
+
+.budgetDash__donutSegA {
+  stroke: var(--chart-balance);
+}
+
+.budgetDash__donutSegB {
+  stroke: var(--chart-expenditures);
+}
+
+.budgetDash__legend {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.budgetDash__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+  border: 1px solid var(--border);
+}
+
+.budgetDash__swatch--a {
+  background: var(--chart-balance);
+}
+
+.budgetDash__swatch--b {
+  background: var(--chart-expenditures);
+}
+
+.budgetDash__empty {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .appNav {
+    width: 200px;
+  }
+}
+
 .container {
   max-width: 1000px;
   margin: 0 auto;
   padding: 16px;
 }
 
-/* Wider/fluid layout (used on Submitted Requests list page) */
+/* Wider/fluid layout (used on Payment Orders list page) */
 .container--wide {
   max-width: 100%;
 }
@@ -264,6 +712,332 @@ input:focus, textarea:focus, select:focus, button:focus {
   color: var(--danger);
 }
 
+.token {
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: 16px;
+  bottom: 16px;
+  max-width: 520px;
+  z-index: 2000;
+  border: 2px solid var(--text);
+  background: var(--border);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  box-shadow: 0 14px 28px rgba(0,0,0,0.18);
+
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.token[hidden] {
+  display: none !important;
+}
+
+.token__msg {
+  min-width: 0;
+  flex: 1;
+}
+
+.token__close {
+  flex: 0 0 auto;
+  border: 1px solid var(--text);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.token__close:hover {
+  background: var(--menu-hover);
+}
+
+/* Budget page */
+.budgetTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* Budget table: stable scrolling with sticky header.
+   The wrapper scrolls vertically, while the <th> cells stay pinned. */
+.budgetTableWrap {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.budgetTable th,
+.budgetTable td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  vertical-align: top;
+}
+
+.budgetTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+.budgetTable__head {
+  font-weight: 700;
+  text-align: center;
+  white-space: normal;
+}
+
+.budgetTable td.num,
+.budgetTable th.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Center all cells except Description (column 3) */
+.budgetTable th,
+.budgetTable td {
+  text-align: center;
+}
+
+.budgetTable th:nth-child(3),
+.budgetTable td:nth-child(3) {
+  text-align: left;
+}
+
+/* This table also uses the shared `.table` class; override its alignment rules */
+.table.budgetTable thead th {
+  text-align: center;
+}
+
+.table.budgetTable thead th:nth-child(3) {
+  text-align: left;
+}
+
+.table.budgetTable td.num,
+.table.budgetTable th.num {
+  text-align: center;
+}
+
+.budgetTable--editing td[contenteditable="true"] {
+  cursor: text;
+}
+
+.budgetTable--editing td[contenteditable="true"]:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.budgetTable--editing tr.budgetTable__total td,
+.budgetTable--editing tr.budgetTable__remaining td {
+  cursor: not-allowed;
+}
+
+.budgetTable td.is-negative,
+.budgetTable td.is-negative strong {
+  color: var(--danger-text);
+  font-weight: 800;
+}
+
+.budgetActions {
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.budgetActions .btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.budgetActions__links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actionLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 600;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+/* Force hidden links to stay hidden even with author display rules */
+.actionLink[hidden] {
+  display: none;
+}
+
+.actionLink:hover {
+  background: var(--menu-hover);
+}
+
+.actionLink[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Budget dropdown: keep items visually disabled, but allow hover so tooltips can show. */
+.budgetMenu__panel .actionLink[aria-disabled="true"] {
+  pointer-events: auto;
+  /* Avoid opacity here; opacity would also fade the tooltip popup background. */
+  opacity: 1;
+  color: var(--muted);
+}
+
+.budgetMenu__panel .actionLink.actionLink--danger[aria-disabled="true"] {
+  color: var(--danger-text);
+}
+
+.actionLink--danger {
+  color: var(--danger-text);
+}
+
+.actionLink--icon {
+  padding: 8px 10px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.budgetMenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.budgetMenu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 220px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Author styles can override the browser's default [hidden] rule;
+   force the dropdown closed unless JS opens it. */
+.budgetMenu__panel[hidden] {
+  display: none;
+}
+
+.budgetMenu__panel .actionLink {
+  width: 100%;
+  justify-content: flex-start;
+  position: relative;
+}
+
+/* Tooltip popup for menu items (e.g., Add line) */
+.budgetMenu__panel .actionLink[data-tooltip]:hover::after,
+.budgetMenu__panel .actionLink[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: 340px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  white-space: normal;
+  z-index: 20;
+}
+
+.budgetMenu__panel .actionLink[data-tooltip]:hover::before,
+.budgetMenu__panel .actionLink[data-tooltip]:focus-visible::before {
+  content: '';
+  position: absolute;
+  right: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 7px solid var(--border);
+  z-index: 21;
+}
+
+.budgetTable tr.budgetRow--selected td {
+  background: var(--menu-hover);
+}
+
+/* Budget table column sizing (colgroup) */
+.budgetCol--in,
+.budgetCol--out {
+  width: 76px;
+}
+
+.budgetCol--desc {
+  width: 420px;
+}
+
+/* These are the 6 columns that must be equal width:
+   Amount Approved Euro, Receipts Euro, Expenditures Euro, Balance Euro,
+   Receipts USD (value), Expenditures USD (value)
+*/
+.budgetCol--money {
+  width: 160px;
+}
+
+.budgetCol--usdSign {
+  width: 1px;
+}
+
+.budgetTable__usdSign {
+  width: 1px;
+  padding: 0;
+  border-left: none;
+  border-right: none;
+  color: transparent;
+}
+
+.budgetTable__usd {
+  white-space: nowrap;
+}
+
+.budgetTable__usdSign + .budgetTable__usd {
+  border-left: none;
+}
+
+.budgetTable__spacer td {
+  padding: 12px 0;
+  border-color: transparent;
+}
+
+.budgetTable__total td,
+.budgetTable__remaining td {
+  background: var(--table-head);
+}
+
+.budgetTable__checksum td {
+  background: var(--table-head);
+}
+
+.budgetTable__remaining td {
+  background: var(--border);
+}
+
 .input-error {
   border-color: var(--danger);
 }
@@ -335,13 +1109,52 @@ input:focus, textarea:focus, select:focus, button:focus {
   font-weight: 600;
 }
 
+/* Tooltip popup for buttons (e.g., Set Active Budget) */
+.btn[data-tooltip] {
+  position: relative;
+}
+
+.btn[data-tooltip]:hover::after,
+.btn[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  transform: none;
+  width: max-content;
+  max-width: 360px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  white-space: normal;
+  z-index: 30;
+}
+
+.btn[data-tooltip]:hover::before,
+.btn[data-tooltip]:focus-visible::before {
+  content: '';
+  position: absolute;
+  right: 18px;
+  bottom: calc(100% + 4px);
+  transform: none;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--border);
+  z-index: 31;
+}
+
 .btn--primary {
   background: var(--primary-bg);
   color: var(--primary-text);
   border-color: var(--primary-bg);
 }
 
-/* Blue filled Edit button (Submitted Requests list) */
+/* Blue filled Edit button (Payment Orders list) */
 .btn--editBlue {
   background: var(--focus);
   border-color: var(--focus);
@@ -366,7 +1179,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   background: var(--menu-hover);
 }
 
-/* Grey filled View button (Submitted Requests list) */
+/* Grey filled View button (Payment Orders list) */
 .btn--viewGrey {
   background: var(--border);
   border-color: var(--border);
@@ -729,6 +1542,9 @@ input:focus, textarea:focus, select:focus, button:focus {
   margin-top: 10px;
   border-top: 1px solid var(--border);
   padding-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .timelinegraph__event {

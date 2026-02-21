@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Income</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <h1 data-income-title>Income</h1>
+              </div>
+              <label class="switch" for="themeToggle">
+                <input
+                  type="checkbox"
+                  id="themeToggle"
+                  class="switch__input"
+                  role="switch"
+                  aria-label="Dark mode"
+                />
+                <span class="switch__track" aria-hidden="true"></span>
+                <span class="switch__text">Dark mode</span>
+              </label>
+            </div>
+            <p class="subhead">
+              This page lists income transactions saved in your browser
+              (localStorage).
+            </p>
+          </div>
+        </header>
+
+        <main class="container container--wide">
+          <section class="card" aria-labelledby="income-list-title">
+            <div class="list-header">
+              <h2 id="income-list-title" data-income-list-title>Income</h2>
+              <div class="list-actions">
+                <div class="list-search">
+                  <label class="sr-only" for="incomeGlobalSearch"
+                    >Search all columns</label
+                  >
+                  <input
+                    id="incomeGlobalSearch"
+                    type="text"
+                    inputmode="search"
+                    placeholder="Search all columns…"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    id="incomeClearSearchBtn"
+                    class="searchClearBtn"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    hidden
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div class="budgetMenu" data-income-menu>
+                  <button
+                    type="button"
+                    id="incomeActionsMenuBtn"
+                    class="actionLink actionLink--icon"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="incomeActionsMenu"
+                    title="Menu"
+                    aria-label="Menu"
+                  >
+                    ⚙
+                  </button>
+
+                  <div
+                    id="incomeActionsMenu"
+                    class="budgetMenu__panel"
+                    role="menu"
+                    aria-label="Income menu"
+                    hidden
+                  >
+                    <a
+                      href="#"
+                      id="incomeNewLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Create a new income entry"
+                      data-tooltip="Opens the New Income form."
+                      >New Income</a
+                    >
+                    <a
+                      href="#"
+                      id="incomeExportCsvLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Download the current income list as CSV"
+                      data-tooltip="Downloads a CSV file of the current income entries so you can save it or open it in Excel."
+                      >Export CSV</a
+                    >
+                    <a
+                      href="#"
+                      id="incomeDownloadTemplateLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Download a blank CSV template"
+                      data-tooltip="Downloads a blank CSV template you can fill in and import. Budget Number is optional."
+                      >Download CSV template</a
+                    >
+                    <a
+                      href="#"
+                      id="incomeImportCsvLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Import a CSV to rebuild the income list"
+                      data-tooltip="Imports a CSV file and replaces the current income list for this year."
+                      >Import CSV</a
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="table-wrap incomeTableWrap"
+              role="region"
+              aria-label="Income table"
+              tabindex="0"
+            >
+              <table
+                id="incomeTable"
+                class="table"
+                aria-describedby="income-help"
+              >
+                <caption id="income-help" class="sr-only">
+                  Newest entries appear first. Use the leftmost column to delete
+                  an entry, and use the Actions column to view or edit details.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" class="col-delete">
+                      <span class="sr-only">Delete</span>
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="date"
+                    >
+                      Transaction Date
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="remitter"
+                    >
+                      Remitter
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="budgetNumber"
+                    >
+                      Budget Number
+                    </th>
+                    <th
+                      scope="col"
+                      class="num is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="euro"
+                    >
+                      Euro (€)
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="description"
+                    >
+                      Description
+                    </th>
+                    <th scope="col" class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="incomeTbody">
+                  <!-- rows inserted by app.js -->
+                </tbody>
+              </table>
+            </div>
+
+            <div id="incomeEmptyState" class="empty" hidden>
+              No income entries yet.
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="modal" id="incomeModal" aria-hidden="true">
+      <div class="modal__backdrop" data-income-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="incomeModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <h2 id="incomeModalTitle" class="modal__poHeader">Income</h2>
+            <p id="incomeModalSubhead" class="modal__poDate"></p>
+          </div>
+        </div>
+        <div class="modal__body" id="incomeModalBody"></div>
+        <div class="modal__footer">
+          <button type="button" id="incomeSaveBtn" class="btn btn--primary">
+            Save
+          </button>
+          <button type="button" class="btn btn--ghost" data-income-modal-close>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

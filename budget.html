@@ -47,139 +47,142 @@
 
         <main class="container container--wide">
           <section class="card" aria-label="Budget table">
-            <div class="actions budgetActions">
-              <button
-                type="button"
-                id="budgetSetActiveBtn"
-                class="btn btn--ghost"
-                title="Set this year as the Active Budget"
-                data-tooltip="Sets this budget year as the Active Budget. The sidebar Budget link will open this year’s dashboard until you deactivate it."
-              >
-                Set Active Budget
-              </button>
-
-              <button
-                type="button"
-                id="budgetSaveBtn"
-                class="btn btn--primary"
-                hidden
-              >
-                Save
-              </button>
-
-              <button
-                type="button"
-                id="budgetCancelBtn"
-                class="btn btn--ghost"
-                hidden
-              >
-                Cancel
-              </button>
-
-              <div class="budgetMenu" data-budget-menu>
+            <div class="list-header">
+              <h2 id="budget-list-title" data-budget-list-title>Budget</h2>
+              <div class="list-actions">
                 <button
                   type="button"
-                  id="budgetActionsMenuBtn"
-                  class="actionLink actionLink--icon"
-                  aria-haspopup="menu"
-                  aria-expanded="false"
-                  aria-controls="budgetActionsMenu"
-                  title="Menu"
-                  aria-label="Menu"
+                  id="budgetSetActiveBtn"
+                  class="btn btn--ghost"
+                  title="Set this year as the Active Budget"
+                  data-tooltip="Sets this budget year as the Active Budget. The sidebar Budget link will open this year’s dashboard until you deactivate it."
                 >
-                  ⚙
+                  Set Active Budget
                 </button>
 
-                <div
-                  id="budgetActionsMenu"
-                  class="budgetMenu__panel"
-                  role="menu"
-                  aria-label="Budget menu"
+                <button
+                  type="button"
+                  id="budgetSaveBtn"
+                  class="btn btn--primary"
                   hidden
                 >
-                  <a
-                    href="#"
-                    id="budgetEditLink"
-                    class="actionLink"
-                    role="menuitem"
-                    title="Edit the budget table"
-                    data-tooltip="Enter Edit mode so you can change any budget row values. Use Save to keep changes, or Cancel to discard changes."
-                    >Edit</a
+                  Save
+                </button>
+
+                <button
+                  type="button"
+                  id="budgetCancelBtn"
+                  class="btn btn--ghost"
+                  hidden
+                >
+                  Cancel
+                </button>
+
+                <div class="budgetMenu" data-budget-menu>
+                  <button
+                    type="button"
+                    id="budgetActionsMenuBtn"
+                    class="actionLink actionLink--icon"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                    aria-controls="budgetActionsMenu"
+                    title="Menu"
+                    aria-label="Menu"
                   >
-                  <a
-                    href="#"
-                    id="budgetDashboardLink"
-                    class="actionLink"
-                    role="menuitem"
-                    title="Open the budget dashboard"
-                    data-tooltip="Opens a dashboard with a donut chart for each OUT account showing Expenditures vs Balance for this budget year."
-                    >Dashboard</a
+                    ⚙
+                  </button>
+
+                  <div
+                    id="budgetActionsMenu"
+                    class="budgetMenu__panel"
+                    role="menu"
+                    aria-label="Budget menu"
+                    hidden
                   >
-                  <a
-                    href="#"
-                    id="budgetNewYearLink"
-                    class="actionLink"
-                    role="menuitem"
-                    title="Create a new year budget"
-                    data-tooltip="Creates a new budget for a specific year (and keeps prior years). If the year already exists, it opens it."
-                    >New Budget Year</a
-                  >
-                  <a
-                    href="#"
-                    id="budgetDeactivateLink"
-                    class="actionLink actionLink--danger"
-                    role="menuitem"
-                    title="Deactivate the active budget"
-                    data-tooltip="Clears the Active Budget setting. After deactivating, the Budget link will fall back to the newest/current budget year."
-                    >Deactivate Budget</a
-                  >
-                  <a
-                    href="#"
-                    id="budgetAddLineLink"
-                    class="actionLink"
-                    role="menuitem"
-                    aria-disabled="true"
-                    title="Add a new budget line"
-                    data-tooltip="While in Edit mode: click a budget row first (to pick where it goes), then click Add line. The new blank line will be inserted directly below the selected row. If no row is selected, it adds to the section you last clicked (Anticipated or Budget)."
-                    >Add line</a
-                  >
-                  <a
-                    href="#"
-                    id="budgetRemoveLineLink"
-                    class="actionLink actionLink--danger"
-                    role="menuitem"
-                    aria-disabled="true"
-                    title="Remove the selected budget line"
-                    data-tooltip="While in Edit mode: click a budget row to select it, then click Remove line. It deletes the selected row only (totals/remaining rows can’t be removed)."
-                    >Remove line</a
-                  >
-                  <a
-                    href="#"
-                    id="budgetExportCsvLink"
-                    class="actionLink"
-                    role="menuitem"
-                    title="Download the current budget as CSV"
-                    data-tooltip="Downloads a CSV file of the current budget table (including totals/remaining) so you can save it or open it in Excel."
-                    >Export CSV</a
-                  >
-                  <a
-                    href="#"
-                    id="budgetDownloadTemplateLink"
-                    class="actionLink"
-                    role="menuitem"
-                    title="Download a blank CSV template"
-                    data-tooltip="Downloads a blank CSV template you can fill in (includes a Section column for Anticipated vs Budget)."
-                    >Download CSV template</a
-                  >
-                  <a
-                    href="#"
-                    id="budgetImportCsvLink"
-                    class="actionLink"
-                    role="menuitem"
-                    title="Import a CSV to rebuild the budget"
-                    data-tooltip="Imports a CSV file and rebuilds the budget table from it (recalculates totals/remaining). Import is disabled while in Edit mode."
-                    >Import CSV</a
-                  >
+                    <a
+                      href="#"
+                      id="budgetEditLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Edit the budget table"
+                      data-tooltip="Enter Edit mode so you can change any budget row values. Use Save to keep changes, or Cancel to discard changes."
+                      >Edit</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetDashboardLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Open the budget dashboard"
+                      data-tooltip="Opens a dashboard with a donut chart for each OUT account showing Expenditures vs Balance for this budget year."
+                      >Dashboard</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetNewYearLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Create a new year budget"
+                      data-tooltip="Creates a new budget for a specific year (and keeps prior years). If the year already exists, it opens it."
+                      >New Budget Year</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetDeactivateLink"
+                      class="actionLink actionLink--danger"
+                      role="menuitem"
+                      title="Deactivate the active budget"
+                      data-tooltip="Clears the Active Budget setting. After deactivating, the Budget link will fall back to the newest/current budget year."
+                      >Deactivate Budget</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetAddLineLink"
+                      class="actionLink"
+                      role="menuitem"
+                      aria-disabled="true"
+                      title="Add a new budget line"
+                      data-tooltip="While in Edit mode: click a budget row first (to pick where it goes), then click Add line. The new blank line will be inserted directly below the selected row. If no row is selected, it adds to the section you last clicked (Anticipated or Budget)."
+                      >Add line</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetRemoveLineLink"
+                      class="actionLink actionLink--danger"
+                      role="menuitem"
+                      aria-disabled="true"
+                      title="Remove the selected budget line"
+                      data-tooltip="While in Edit mode: click a budget row to select it, then click Remove line. It deletes the selected row only (totals/remaining rows can’t be removed)."
+                      >Remove line</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetExportCsvLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Download the current budget as CSV"
+                      data-tooltip="Downloads a CSV file of the current budget table (including totals/remaining) so you can save it or open it in Excel."
+                      >Export CSV</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetDownloadTemplateLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Download a blank CSV template"
+                      data-tooltip="Downloads a blank CSV template you can fill in (includes a Section column for Anticipated vs Budget)."
+                      >Download CSV template</a
+                    >
+                    <a
+                      href="#"
+                      id="budgetImportCsvLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Import a CSV to rebuild the budget"
+                      data-tooltip="Imports a CSV file and adds rows to the current budget table (recalculates totals/remaining). Import is disabled while in Edit mode."
+                      >Import CSV</a
+                    >
+                  </div>
                 </div>
               </div>
             </div>

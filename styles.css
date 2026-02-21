@@ -394,12 +394,15 @@ body {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  position: relative;
+  z-index: 3;
 }
 
 .budgetDash__leaders {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 1;
 }
 
 .budgetDash__leaderLine {
@@ -441,6 +444,8 @@ body {
   height: 170px;
   display: block;
   margin: 0 auto;
+  position: relative;
+  z-index: 2;
 }
 
 .budgetDash__donutTrack {
@@ -677,6 +682,11 @@ input, textarea, select {
   color: var(--text);
 }
 
+/* JS-toggled input state (e.g., global search active) */
+.input-active {
+  border-color: var(--focus);
+}
+
 /* Currency fields are auto-filled; make them feel clickable */
 .currency-input[readonly] {
   cursor: pointer;
@@ -768,6 +778,18 @@ input:focus, textarea:focus, select:focus, button:focus {
 /* Budget table: stable scrolling with sticky header.
    The wrapper scrolls vertically, while the <th> cells stay pinned. */
 .budgetTableWrap {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+/* Payment Orders: stable scrolling with sticky header (match Budget list style) */
+.ordersTableWrap {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+/* Income: stable scrolling with sticky header (match Budget/Payment Orders style) */
+.incomeTableWrap {
   max-height: 60vh;
   overflow: auto;
 }
@@ -1205,6 +1227,55 @@ input:focus, textarea:focus, select:focus, button:focus {
   margin-bottom: 8px;
 }
 
+.list-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.list-search {
+  flex: 1;
+  min-width: 220px;
+  max-width: 360px;
+  position: relative;
+}
+
+.list-search input {
+  width: 100%;
+  padding-right: 34px;
+}
+
+.searchClearBtn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.searchClearBtn:hover {
+  background: var(--menu-hover);
+  color: var(--text);
+}
+
+.searchClearBtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--border);
@@ -1235,9 +1306,162 @@ input:focus, textarea:focus, select:focus, button:focus {
   font-size: 0.95rem;
 }
 
+/* Payment Orders header background like Budget table */
+#ordersTable thead th {
+  background: var(--surface);
+}
+
+/* Income header background like Budget table */
+#incomeTable thead th {
+  background: var(--surface);
+}
+
+#incomeTable td.num,
+#incomeTable th.num {
+  text-align: center;
+}
+
+/* Payment Orders: simple click-to-sort headers */
+.table thead th.is-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.table thead th.is-sortable::after {
+  content: " \21C5";
+  opacity: 0.45;
+}
+
+.table thead th.is-sortable[aria-sort="ascending"]::after {
+  content: " \2191";
+  opacity: 1;
+}
+
+.table thead th.is-sortable[aria-sort="descending"]::after {
+  content: " \2193";
+  opacity: 1;
+}
+
+.table tfoot td {
+  background: var(--table-head);
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+}
+
+.ordersTotalsRow__label {
+  text-align: left;
+}
+
+/* Payment Orders column header dropdown filters */
+.thMenu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 26px;
+}
+
+.thMenu__label {
+  min-width: 0;
+}
+
+.thMenuBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.thMenuBtn__chevrons {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.thMenuBtn__chevrons polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.thMenuBtn:hover {
+  background: var(--menu-hover);
+}
+
+.thMenuBtn.is-active {
+  border-color: var(--focus);
+}
+
+.thMenu__panel {
+  min-width: 240px;
+}
+
+.thMenu__filterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thMenu__rangeRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.thMenu__checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.thMenu__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+}
+
+input[type='checkbox'].cb {
+  width: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.thMenu__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
 .table td.num, .table th.num {
   text-align: right;
   white-space: nowrap;
+}
+
+/* Payment Orders: center Euro / USD columns (including totals) */
+#ordersTable td.num,
+#ordersTable th.num {
+  text-align: center;
 }
 
 .table td.actions {
@@ -1581,6 +1805,32 @@ input:focus, textarea:focus, select:focus, button:focus {
   grid-template-columns: 160px 1fr;
   row-gap: 0px;
   column-gap: 12px;
+
+.modalAttList {
+  display: grid;
+  gap: 10px;
+}
+
+.modalAttRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modalAttName {
+  min-width: 0;
+}
+
+.modalAttName > div:first-child {
+  word-break: break-word;
+}
+
+.modalAttActions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
 }
 
 @media (max-width: 520px) {

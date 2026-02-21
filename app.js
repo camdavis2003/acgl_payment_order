@@ -218,6 +218,15 @@
         })),
       },
       {
+        key: 'income',
+        label: 'Income',
+        href: `income.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: years.map((year) => ({
+          label: String(year),
+          href: `income.html?year=${encodeURIComponent(String(year))}`,
+        })),
+      },
+      {
         key: 'orders',
         label: 'Payment Orders',
         href: `menu.html?year=${encodeURIComponent(String(resolvedYear))}`,
@@ -471,6 +480,50 @@
     return outAccounts;
   }
 
+  function readInAccountsFromBudgetYear(year) {
+    const key = getBudgetTableKeyForYear(year);
+    const html = key ? localStorage.getItem(key) : null;
+    if (!html) return [];
+
+    const tbody = document.createElement('tbody');
+    tbody.innerHTML = String(html || '');
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const seen = new Set();
+    const inAccounts = [];
+
+    for (const tr of rows) {
+      if (tr.classList.contains('budgetTable__spacer')) continue;
+      if (tr.classList.contains('budgetTable__total')) continue;
+      if (tr.classList.contains('budgetTable__remaining')) continue;
+      if (tr.classList.contains('budgetTable__checksum')) continue;
+
+      const tds = tr.querySelectorAll('td');
+      if (tds.length < 3) continue;
+
+      const inCode = String(tds[0].textContent || '').trim();
+      if (!/^\d{4}$/.test(inCode)) continue;
+
+      if (seen.has(inCode)) continue;
+      seen.add(inCode);
+
+      const desc = String(tds[2].textContent || '').trim();
+      inAccounts.push({ inCode, desc });
+    }
+
+    return inAccounts;
+  }
+
+  function formatInBudgetNumberForDisplay(value, year) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const items = readInAccountsFromBudgetYear(y);
+    const match = items.find((x) => x && x.inCode === raw);
+    if (match && match.desc) return `${raw} - ${match.desc}`;
+    return raw;
+  }
+
   function initBudgetNumberSelect() {
     const select = document.getElementById('budgetNumber');
     if (!select) return;
@@ -521,6 +574,369 @@
         }
       });
     }
+  }
+
+  // ---- Budget impact from Approved payment orders ----
+
+  function parseBudgetMoney(text) {
+    const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
+    if (!raw || raw === '-' || raw === '—') return 0;
+    const isParenNeg = raw.includes('(') && raw.includes(')');
+    const cleaned = raw.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
+    const n = Number(cleaned);
+    if (!Number.isFinite(n)) return 0;
+    return isParenNeg ? -Math.abs(n) : n;
+  }
+
+  function formatBudgetEuro(amount) {
+    const n = Number(amount);
+    const safe = Number.isFinite(n) ? n : 0;
+    return `${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  }
+
+  function formatBudgetUsd(amount) {
+    const n = Number(amount);
+    const safe = Number.isFinite(n) ? n : 0;
+    return `$ ${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function isBudgetEditableDataRow(row) {
+    if (!row) return false;
+    if (row.classList.contains('budgetTable__spacer')) return false;
+    if (row.classList.contains('budgetTable__total')) return false;
+    if (row.classList.contains('budgetTable__remaining')) return false;
+    if (row.classList.contains('budgetTable__checksum')) return false;
+    const tds = row.querySelectorAll('td');
+    return tds.length >= 7;
+  }
+
+  function findBudgetRowForOutCode(rows, outCode, preferBudgetSection) {
+    const code = String(outCode ?? '').trim();
+    if (!/^\d{4}$/.test(code)) return null;
+
+    const editableRows = rows.filter((r) => isBudgetEditableDataRow(r));
+    if (editableRows.length === 0) return null;
+
+    const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
+    if (preferBudgetSection && totalRows.length >= 2) {
+      const firstTotalIndex = rows.indexOf(totalRows[0]);
+      const secondTotalIndex = rows.indexOf(totalRows[1]);
+      if (firstTotalIndex >= 0 && secondTotalIndex > firstTotalIndex) {
+        const section2 = rows.slice(firstTotalIndex + 1, secondTotalIndex).filter((r) => isBudgetEditableDataRow(r));
+        const match = section2.find((r) => String(r.querySelectorAll('td')[1]?.textContent || '').trim() === code);
+        if (match) return match;
+      }
+    }
+
+    return editableRows.find((r) => String(r.querySelectorAll('td')[1]?.textContent || '').trim() === code) || null;
+  }
+
+  function findBudgetRowForInCode(rows, inCode, preferBudgetSection) {
+    const code = String(inCode ?? '').trim();
+    if (!/^[0-9]{4}$/.test(code)) return null;
+
+    const editableRows = rows.filter((r) => isBudgetEditableDataRow(r));
+    if (editableRows.length === 0) return null;
+
+    const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
+    if (preferBudgetSection && totalRows.length >= 2) {
+      const firstTotalIndex = rows.indexOf(totalRows[0]);
+      const secondTotalIndex = rows.indexOf(totalRows[1]);
+      if (firstTotalIndex >= 0 && secondTotalIndex > firstTotalIndex) {
+        const section2 = rows.slice(firstTotalIndex + 1, secondTotalIndex).filter((r) => isBudgetEditableDataRow(r));
+        const match = section2.find((r) => String(r.querySelectorAll('td')[0]?.textContent || '').trim() === code);
+        if (match) return match;
+      }
+    }
+
+    return editableRows.find((r) => String(r.querySelectorAll('td')[0]?.textContent || '').trim() === code) || null;
+  }
+
+  /**
+   * Apply one or more deltas to Budget "Receipts Euro" cells based on IN code.
+   * This is used by Income entries to roll receipts into the matching budget year.
+   */
+  function applyIncomeBudgetReceiptsDeltas(year, deltas) {
+    const y = Number(year);
+    const key = getBudgetTableKeyForYear(y);
+    if (!key) return { ok: false, reason: 'noBudgetKey' };
+
+    const html = localStorage.getItem(key);
+    if (!html) return { ok: false, reason: 'noBudgetHtml' };
+
+    const list = Array.isArray(deltas) ? deltas : [];
+    const normalized = list
+      .map((d) => ({
+        inCode: String(d && d.inCode ? d.inCode : '').trim(),
+        deltaEuro: Number(d && d.deltaEuro),
+      }))
+      .filter((d) => /^[0-9]{4}$/.test(d.inCode) && Number.isFinite(d.deltaEuro) && d.deltaEuro !== 0);
+
+    if (normalized.length === 0) return { ok: true, changed: false };
+
+    const tbody = document.createElement('tbody');
+    tbody.innerHTML = String(html || '');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+    // Validate all targets exist first (avoid partial updates).
+    for (const d of normalized) {
+      const target = findBudgetRowForInCode(rows, d.inCode, true);
+      if (!target) return { ok: false, reason: 'rowNotFound', inCode: d.inCode };
+    }
+
+    // Apply deltas to Receipts Euro (td index 4) then recalc totals/balances.
+    for (const d of normalized) {
+      const targetRow = findBudgetRowForInCode(rows, d.inCode, true);
+      if (!targetRow) return { ok: false, reason: 'rowNotFound', inCode: d.inCode };
+
+      const tds = targetRow.querySelectorAll('td');
+      if (tds.length < 7) return { ok: false, reason: 'invalidRow', inCode: d.inCode };
+
+      const prev = parseBudgetMoney(tds[4]?.textContent);
+      const next = prev + d.deltaEuro;
+      if (tds[4]) tds[4].textContent = formatBudgetEuro(next);
+    }
+
+    recalculateBudgetTotalsInTbody(tbody);
+    localStorage.setItem(key, tbody.innerHTML);
+    return { ok: true, changed: true };
+  }
+
+  function extractInCodeFromBudgetNumberText(text) {
+    const raw = String(text ?? '').trim();
+    if (!raw) return '';
+    const m = raw.match(/\b(\d{4})\b/);
+    return m ? String(m[1]) : '';
+  }
+
+  // One-time/idempotent: for Income entries created before Budget linkage existed
+  // (or imported), apply missing receipts impacts and mark them to prevent re-apply.
+  function backfillIncomeBudgetReceiptImpactsIfNeeded(year) {
+    const y = Number(year);
+    const entries = loadIncome(y);
+    if (!Array.isArray(entries) || entries.length === 0) return;
+
+    const allowed = new Set(readInAccountsFromBudgetYear(y).map((x) => (x && x.inCode ? String(x.inCode).trim() : '')).filter(Boolean));
+    if (allowed.size === 0) return;
+
+    const toApply = [];
+    for (const e of entries) {
+      if (!e) continue;
+      if (e.budgetReceiptImpact && typeof e.budgetReceiptImpact === 'object') continue;
+      const code = extractInCodeFromBudgetNumberText(e.budgetNumber);
+      const euro = Number(e.euro);
+      if (!/^[0-9]{4}$/.test(code)) continue;
+      if (!allowed.has(code)) continue;
+      if (!Number.isFinite(euro) || euro <= 0) continue;
+      toApply.push({ id: e.id, inCode: code, euro });
+    }
+
+    if (toApply.length === 0) return;
+
+    const sums = new Map();
+    for (const x of toApply) {
+      sums.set(x.inCode, (sums.get(x.inCode) || 0) + x.euro);
+    }
+    const deltas = Array.from(sums.entries()).map(([inCode, sumEuro]) => ({ inCode, deltaEuro: sumEuro }));
+    const budgetRes = applyIncomeBudgetReceiptsDeltas(y, deltas);
+    if (!budgetRes || !budgetRes.ok) return;
+
+    const nowIso = new Date().toISOString();
+    const toApplyMap = new Map(toApply.map((x) => [x.id, x]));
+    const next = entries.map((e) => {
+      const x = e && e.id ? toApplyMap.get(e.id) : null;
+      if (!e || !x) return e;
+      return {
+        ...e,
+        budgetReceiptImpact: {
+          at: nowIso,
+          year: y,
+          inCode: x.inCode,
+          euro: x.euro,
+        },
+      };
+    });
+    saveIncome(next, y);
+  }
+
+  function recalculateBudgetTotalsInTbody(tbodyEl) {
+    if (!tbodyEl) return;
+    const rows = Array.from(tbodyEl.querySelectorAll('tr'));
+    const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
+    if (totalRows.length < 2) return;
+
+    const firstTotalIndex = rows.indexOf(totalRows[0]);
+    const secondTotalIndex = rows.indexOf(totalRows[1]);
+    if (firstTotalIndex < 0 || secondTotalIndex < 0 || secondTotalIndex <= firstTotalIndex) return;
+
+    const section1Rows = rows.slice(0, firstTotalIndex);
+    const section2Rows = rows.slice(firstTotalIndex + 1, secondTotalIndex);
+
+    function sumSectionAndUpdateBalances(sectionRows, kind) {
+      const totals = {
+        approved: 0,
+        receipts: 0,
+        expenditures: 0,
+        balance: 0,
+        receiptsUsd: 0,
+        expendituresUsd: 0,
+      };
+
+      for (const row of sectionRows) {
+        if (!isBudgetEditableDataRow(row)) continue;
+        const tds = row.querySelectorAll('td');
+        const approved = parseBudgetMoney(tds[3]?.textContent);
+        const receipts = parseBudgetMoney(tds[4]?.textContent);
+        const expenditures = parseBudgetMoney(tds[5]?.textContent);
+        const balance = kind === 'anticipated'
+          ? (approved - receipts - expenditures)
+          : (approved + receipts - expenditures);
+
+        totals.approved += approved;
+        totals.receipts += receipts;
+        totals.expenditures += expenditures;
+        totals.balance += balance;
+
+        // USD value columns (sign columns may be blank; value cells carry the number)
+        totals.receiptsUsd += parseBudgetMoney(tds[8]?.textContent);
+        totals.expendituresUsd += parseBudgetMoney(tds[10]?.textContent);
+
+        // Keep Balance Euro consistent
+        if (tds[6]) tds[6].textContent = formatBudgetEuro(balance);
+      }
+
+      return totals;
+    }
+
+    const s1 = sumSectionAndUpdateBalances(section1Rows, 'anticipated');
+    const s2 = sumSectionAndUpdateBalances(section2Rows, 'budget');
+
+    function updateTotalRow(totalRow, totals) {
+      const tds = totalRow.querySelectorAll('td');
+      if (tds.length < 11) return;
+      tds[3].innerHTML = `<strong>${formatBudgetEuro(totals.approved)}</strong>`;
+      tds[4].innerHTML = `<strong>${formatBudgetEuro(totals.receipts)}</strong>`;
+      tds[5].innerHTML = `<strong>${formatBudgetEuro(totals.expenditures)}</strong>`;
+      tds[6].innerHTML = `<strong>${formatBudgetEuro(totals.balance)}</strong>`;
+
+      if (tds[7]) tds[7].textContent = '';
+      if (tds[9]) tds[9].textContent = '';
+      if (tds[8]) tds[8].innerHTML = `<strong>${formatBudgetUsd(totals.receiptsUsd)}</strong>`;
+      if (tds[10]) tds[10].innerHTML = `<strong>${formatBudgetUsd(totals.expendituresUsd)}</strong>`;
+    }
+
+    updateTotalRow(totalRows[0], s1);
+    updateTotalRow(totalRows[1], s2);
+
+    const remainingRow = rows.find((r) => r.classList.contains('budgetTable__remaining'));
+    if (remainingRow) {
+      const cells = remainingRow.querySelectorAll('td');
+      if (cells.length >= 7) {
+        const remaining = s2.receipts + s1.balance - s2.expenditures;
+        const valueCell = cells[6];
+        if (valueCell) {
+          valueCell.innerHTML = `<strong>${formatBudgetEuro(remaining)}</strong>`;
+          if (remaining < 0) valueCell.classList.add('is-negative');
+          else valueCell.classList.remove('is-negative');
+        }
+      }
+    }
+
+    // Checksum rows (if present)
+    const receiptsChecksum = s1.receipts - s2.receipts;
+    const expendituresChecksum = s1.expenditures - s2.expenditures;
+    const checksumRows = Array.from(tbodyEl.querySelectorAll('tr.budgetTable__checksum'));
+    for (const row of checksumRows) {
+      const kind = row.getAttribute('data-checksum-kind');
+      const tds = row.querySelectorAll('td');
+      if (tds.length < 11) continue;
+
+      if (kind === 'receipts') {
+        tds[4].innerHTML = `<strong>${formatBudgetEuro(receiptsChecksum)}</strong>`;
+        if (receiptsChecksum < 0) tds[4].classList.add('is-negative');
+        else tds[4].classList.remove('is-negative');
+      }
+
+      if (kind === 'expenditures') {
+        tds[5].innerHTML = `<strong>${formatBudgetEuro(expendituresChecksum)}</strong>`;
+        if (expendituresChecksum < 0) tds[5].classList.add('is-negative');
+        else tds[5].classList.remove('is-negative');
+      }
+    }
+  }
+
+  function applyApprovedOrderBudgetDeduction(order, year, appliedAtIso) {
+    const y = Number(year);
+    const key = getBudgetTableKeyForYear(y);
+    if (!key) return { ok: false, reason: 'noBudgetKey' };
+
+    const html = localStorage.getItem(key);
+    if (!html) return { ok: false, reason: 'noBudgetHtml' };
+
+    const outCode = String(order && order.budgetNumber ? order.budgetNumber : '').trim();
+    if (!/^\d{4}$/.test(outCode)) return { ok: false, reason: 'invalidOutCode' };
+
+    const euro = Number(order && order.euro);
+    const usd = Number(order && order.usd);
+    const euroAmount = Number.isFinite(euro) ? euro : 0;
+    const usdAmount = Number.isFinite(usd) ? usd : 0;
+    if (euroAmount === 0 && usdAmount === 0) return { ok: false, reason: 'zeroAmount' };
+
+    const tbody = document.createElement('tbody');
+    tbody.innerHTML = String(html || '');
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const targetRow = findBudgetRowForOutCode(rows, outCode, true);
+    if (!targetRow) return { ok: false, reason: 'rowNotFound' };
+
+    // Detect which section the row belongs to so Balance Euro uses the right formula.
+    // Anticipated: approved - receipts - expenditures
+    // Budget: approved + receipts - expenditures
+    let sectionKind = 'budget';
+    const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
+    if (totalRows.length >= 2) {
+      const firstTotalIndex = rows.indexOf(totalRows[0]);
+      const secondTotalIndex = rows.indexOf(totalRows[1]);
+      const rowIndex = rows.indexOf(targetRow);
+      if (rowIndex >= 0 && firstTotalIndex >= 0 && secondTotalIndex > firstTotalIndex) {
+        if (rowIndex < firstTotalIndex) sectionKind = 'anticipated';
+        else if (rowIndex > firstTotalIndex && rowIndex < secondTotalIndex) sectionKind = 'budget';
+      }
+    }
+
+    const tds = targetRow.querySelectorAll('td');
+
+    if (euroAmount !== 0) {
+      const prevExp = parseBudgetMoney(tds[5]?.textContent);
+      const nextExp = prevExp + euroAmount;
+      if (tds[5]) tds[5].textContent = formatBudgetEuro(nextExp);
+
+      const approved = parseBudgetMoney(tds[3]?.textContent);
+      const receipts = parseBudgetMoney(tds[4]?.textContent);
+      const balance = sectionKind === 'anticipated'
+        ? (approved - receipts - nextExp)
+        : (approved + receipts - nextExp);
+      if (tds[6]) tds[6].textContent = formatBudgetEuro(balance);
+    }
+
+    if (usdAmount !== 0) {
+      const prevUsdExp = parseBudgetMoney(tds[10]?.textContent);
+      const nextUsdExp = prevUsdExp + usdAmount;
+      if (tds[10]) tds[10].textContent = formatBudgetUsd(nextUsdExp);
+    }
+
+    // Recalculate totals/remaining/checksums so dashboard stays consistent.
+    recalculateBudgetTotalsInTbody(tbody);
+
+    localStorage.setItem(key, tbody.innerHTML);
+
+    return {
+      ok: true,
+      outCode,
+      euroApplied: euroAmount,
+      usdApplied: usdAmount,
+      at: String(appliedAtIso || new Date().toISOString()),
+    };
   }
 
   function initMasonicYearSelectFromBudgets(preferredYear2) {
@@ -589,11 +1005,21 @@
   const tbody = document.getElementById('ordersTbody');
   const emptyState = document.getElementById('emptyState');
   const clearAllBtn = document.getElementById('clearAllBtn');
+  const ordersClearSearchBtn = document.getElementById('ordersClearSearchBtn');
 
   const modal = document.getElementById('detailsModal');
   const modalBody = document.getElementById('modalBody');
   const editOrderBtn = document.getElementById('editOrderBtn');
   const saveOrderBtn = document.getElementById('saveOrderBtn');
+
+  // Income list page
+  const incomeTbody = document.getElementById('incomeTbody');
+  const incomeEmptyState = document.getElementById('incomeEmptyState');
+  const incomeClearAllBtn = document.getElementById('incomeClearAllBtn');
+  const incomeClearSearchBtn = document.getElementById('incomeClearSearchBtn');
+  const incomeModal = document.getElementById('incomeModal');
+  const incomeModalBody = document.getElementById('incomeModalBody');
+  const incomeSaveBtn = document.getElementById('incomeSaveBtn');
 
   const themeToggle = document.getElementById('themeToggle');
 
@@ -788,6 +1214,22 @@
   function showFlashToken(message) {
     if (!flashToken) return;
     showToast(flashToken, message, 'flash');
+  }
+
+  function ensurePaymentOrdersListExistsForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return { ok: false, created: false };
+    const storageKey = getPaymentOrdersKeyForYear(y);
+    if (!storageKey) return { ok: false, created: false };
+
+    try {
+      const existing = localStorage.getItem(storageKey);
+      if (existing !== null) return { ok: true, created: false };
+      localStorage.setItem(storageKey, JSON.stringify([]));
+      return { ok: true, created: true };
+    } catch {
+      return { ok: false, created: false };
+    }
   }
 
   /** @returns {Array<Object>} */
@@ -1032,6 +1474,45 @@
     const n = normalizeSequence(seq);
     const seqText = n < 100 ? String(n).padStart(2, '0') : String(n);
     return `PO ${y}-${seqText}`;
+  }
+
+  function getYear2ForBudgetYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    const yy = ((y % 100) + 100) % 100;
+    return String(yy).padStart(2, '0');
+  }
+
+  function inferNextSequenceFromOrdersForYear2(orders, year2) {
+    const y2 = normalizeMasonicYear2(year2);
+    let maxSeq = 0;
+    for (const o of orders || []) {
+      const canon = canonicalizePaymentOrderNo(o && o.paymentOrderNo);
+      const m = canon.match(/^PO(\d{2})-(\d+)$/i);
+      if (!m) continue;
+      if (m[1] !== y2) continue;
+      const n = Number(m[2]);
+      if (!Number.isFinite(n)) continue;
+      const seq = Math.trunc(n);
+      if (seq > maxSeq) maxSeq = seq;
+    }
+    return Math.max(1, maxSeq + 1);
+  }
+
+  function syncNumberingSettingsToBudgetYear(year) {
+    const year2 = getYear2ForBudgetYear(year);
+    if (!year2) return false;
+
+    const orders = loadOrders(year);
+    const nextFromOrders = inferNextSequenceFromOrdersForYear2(orders, year2);
+
+    const current = loadNumberingSettings();
+    const isSameYear2 = normalizeMasonicYear2(current.year2) === year2;
+    const nextSeq = isSameYear2 ? Math.max(normalizeSequence(current.nextSeq), nextFromOrders) : nextFromOrders;
+
+    if (isSameYear2 && normalizeSequence(current.nextSeq) === nextSeq) return false;
+    saveNumberingSettings({ year2, nextSeq });
+    return true;
   }
 
   function getNextPaymentOrderNo() {
@@ -1297,6 +1778,44 @@
     return null;
   }
 
+  async function getAttachmentById(id) {
+    if (!id) return null;
+    const db = await openAttachmentsDb();
+    const tx = db.transaction(ATTACHMENTS_STORE, 'readonly');
+    const store = tx.objectStore(ATTACHMENTS_STORE);
+    const record = await idbRequestToPromise(store.get(id));
+    return record || null;
+  }
+
+  function openBlobInNewTab(blob) {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+
+    // Use a synthetic anchor so we can enforce noopener/noreferrer.
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    // Keep the object URL alive briefly so the new tab can load it.
+    setTimeout(() => URL.revokeObjectURL(url), 2 * 60 * 1000);
+  }
+
+  function downloadBlob(blob, fileName) {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName || 'attachment';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function renderAttachmentsTable(attachments) {
     if (!attachmentsTbody || !attachmentsEmptyState) return;
     attachmentsTbody.innerHTML = '';
@@ -1317,10 +1836,37 @@
             <td>${safeName}</td>
             <td class="num">${escapeHtml(formatBytes(a.size))}</td>
             <td class="actions">
+              <button type="button" class="btn btn--ghost" data-attachment-action="view">View</button>
               <button type="button" class="btn btn--ghost" data-attachment-action="download">Download</button>
               <button type="button" class="btn btn--danger" data-attachment-action="delete">Remove</button>
             </td>
           </tr>
+        `.trim();
+      })
+      .join('');
+  }
+
+  function renderModalAttachments(attachments) {
+    if (!attachments || attachments.length === 0) {
+      return '<div class="muted">No attachments.</div>';
+    }
+
+    return attachments
+      .map((a) => {
+        const safeId = escapeHtml(a.id);
+        const safeName = escapeHtml(a.name || 'attachment');
+        const safeSize = escapeHtml(formatBytes(a.size));
+        return `
+          <div class="modalAttRow" data-attachment-id="${safeId}">
+            <div class="modalAttName">
+              <div>${safeName}</div>
+              <div class="muted">${safeSize}</div>
+            </div>
+            <div class="modalAttActions">
+              <button type="button" class="btn btn--ghost" data-modal-attachment-action="view">View</button>
+              <button type="button" class="btn btn--ghost" data-modal-attachment-action="download">Download</button>
+            </div>
+          </div>
         `.trim();
       })
       .join('');
@@ -1968,8 +2514,134 @@
         if (seq > 99) break;
       }
 
-      if (existing.length >= 10) return;
-      localStorage.setItem(ordersKey, JSON.stringify(next));
+      if (existing.length < 10) {
+        localStorage.setItem(ordersKey, JSON.stringify(next));
+      }
+    }
+
+    // Seed 2025 Income (year-scoped) if missing / too few.
+    const incomeKey = getIncomeKeyForYear(targetYear);
+    if (incomeKey) {
+      const INCOME_MOCK_VERSION_KEY = 'payment_orders_income_mock_version';
+      const INCOME_MOCK_VERSION = '1';
+
+      let existingIncome = [];
+      try {
+        const raw = localStorage.getItem(incomeKey);
+        const parsed = raw ? JSON.parse(raw) : null;
+        existingIncome = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        existingIncome = [];
+      }
+
+      const storedIncomeMockVersion = localStorage.getItem(INCOME_MOCK_VERSION_KEY);
+
+      const existingIds = new Set(existingIncome.map((e) => String(e && e.id ? e.id : '')));
+      const baseMs = Date.UTC(targetYear, 7, 15, 12, 0, 0); // Aug 15, YYYY
+
+      const incomeTemplates = [
+        { date: `${targetYear}-01-03`, remitter: 'Harmony Lodge No. 12', budgetNumber: '1030', euro: 25614.0, description: 'Per capita dues received (batch 1).' },
+        { date: `${targetYear}-01-15`, remitter: 'Grand Lodge Registration Office', budgetNumber: '1071', euro: 5250.0, description: 'Annual registration receipts (batch 1).' },
+        { date: `${targetYear}-02-01`, remitter: 'Office of the Grand Master', budgetNumber: '1065', euro: 9791.23, description: 'Charity receipts received (benefit event).' },
+        { date: `${targetYear}-02-12`, remitter: 'Grand Lodge Charity Committee', budgetNumber: '1060', euro: 500.0, description: 'Specified charity donation received.' },
+        { date: `${targetYear}-03-05`, remitter: 'New Horizons Lodge UD', budgetNumber: '1020', euro: 1200.0, description: 'Petition and charter fees received.' },
+        { date: `${targetYear}-03-28`, remitter: 'Jordan Example', budgetNumber: '1200', euro: 180.0, description: 'Travel advance returned (unused portion).' },
+        { date: `${targetYear}-04-10`, remitter: 'ACGL IT Services', budgetNumber: '1120', euro: 140.0, description: 'Digitization cost share reimbursement received.' },
+        { date: `${targetYear}-05-20`, remitter: 'Example Office Supplies Ltd.', budgetNumber: '1100', euro: 250.0, description: 'Supplier rebate/credit received.' },
+        { date: `${targetYear}-06-07`, remitter: 'Taylor Example', budgetNumber: '2280', euro: 75.5, description: 'Returned reimbursable items (credit).' },
+        { date: `${targetYear}-07-18`, remitter: 'Charity Trust of Example City', budgetNumber: '1998', euro: 1000.0, description: 'Charity contribution received.' },
+      ];
+
+      // Upgrade existing seeded mock income entries when the template changes.
+      if (storedIncomeMockVersion !== INCOME_MOCK_VERSION) {
+        const nowIso = new Date().toISOString();
+        const templateById = new Map(
+          incomeTemplates.map((t, idx) => {
+            const id = `mock_income_${targetYear}_${String(idx + 1).padStart(2, '0')}`;
+            return [id, t];
+          })
+        );
+
+        const hasAnyIncomeMock = existingIncome.some((e) => e && typeof e.id === 'string' && e.id.startsWith(`mock_income_${targetYear}_`));
+        if (hasAnyIncomeMock) {
+          const upgraded = existingIncome.map((e) => {
+            if (!e || typeof e !== 'object') return e;
+            const id = String(e.id || '');
+            const tpl = templateById.get(id);
+            if (!tpl) return e;
+            return {
+              ...e,
+              date: tpl.date,
+              remitter: tpl.remitter,
+              budgetNumber: String(tpl.budgetNumber || '').trim(),
+              euro: Number(tpl.euro),
+              description: tpl.description,
+              updatedAt: nowIso,
+            };
+          });
+          localStorage.setItem(incomeKey, JSON.stringify(upgraded));
+          existingIncome = upgraded;
+        }
+
+        localStorage.setItem(INCOME_MOCK_VERSION_KEY, INCOME_MOCK_VERSION);
+      }
+
+      const needed = Math.max(0, 10 - existingIncome.length);
+      if (needed > 0) {
+        const additions = [];
+
+        for (let idx = 0; idx < incomeTemplates.length && additions.length < needed; idx += 1) {
+          const t = incomeTemplates[idx];
+          const createdAt = new Date(baseMs - idx * 1000 * 60 * 60 * 24 * 9).toISOString();
+          const id = `mock_income_${targetYear}_${String(idx + 1).padStart(2, '0')}`;
+          if (existingIds.has(id)) continue;
+          existingIds.add(id);
+          additions.push({
+            id,
+            createdAt,
+            updatedAt: createdAt,
+            date: t.date,
+            remitter: t.remitter,
+            budgetNumber: String(t.budgetNumber || '').trim(),
+            euro: Number(t.euro),
+            description: t.description,
+          });
+        }
+
+        // Top up with generic entries if templates were not enough.
+        const fallbackCodes = readInAccountsFromBudgetYear(targetYear).map((x) => x && x.inCode).filter(Boolean);
+        const fallbackRemitters = [
+          'Alex Example',
+          'Pat Example',
+          'Riverside Lodge No. 8',
+          'Grand Lodge Secretariat',
+          'Example Bank Plc',
+        ];
+        let seq = incomeTemplates.length + 1;
+        while (existingIncome.length + additions.length < 10) {
+          const id = `mock_income_${targetYear}_topup_${String(seq).padStart(2, '0')}`;
+          if (!existingIds.has(id)) {
+            const createdAt = new Date(baseMs - (existingIncome.length + additions.length) * 1000 * 60 * 60 * 24 * 7).toISOString();
+            const budgetNumber = fallbackCodes.length > 0 ? String(fallbackCodes[(seq - 1) % fallbackCodes.length]) : '1030';
+            additions.push({
+              id,
+              createdAt,
+              updatedAt: createdAt,
+              date: `${targetYear}-08-01`,
+              remitter: String(fallbackRemitters[(seq - 1) % fallbackRemitters.length]),
+              budgetNumber,
+              euro: 25.0,
+              description: 'Top-up mock income entry.',
+            });
+            existingIds.add(id);
+          }
+          seq += 1;
+          if (seq > 99) break;
+        }
+
+        const nextIncome = [...existingIncome, ...additions];
+        localStorage.setItem(incomeKey, JSON.stringify(nextIncome));
+      }
     }
   }
 
@@ -2211,10 +2883,7 @@
 
     emptyState.hidden = true;
 
-    // Newest first (createdAt desc)
-    const sorted = [...orders].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-
-    const rowsHtml = sorted
+    const rowsHtml = orders
       .map((o) => {
         return `
           <tr data-id="${escapeHtml(o.id)}">
@@ -2249,6 +2918,598 @@
       .join('');
 
     tbody.innerHTML = rowsHtml;
+  }
+
+  const PAYMENT_ORDERS_COL_TYPES = {
+    paymentOrderNo: 'text',
+    date: 'date',
+    name: 'text',
+    euro: 'number',
+    usd: 'number',
+    budgetNumber: 'text',
+    purpose: 'text',
+    with: 'text',
+    status: 'text',
+  };
+
+  const paymentOrdersViewState = {
+    globalFilter: '',
+    filters: {
+      paymentOrderNo: '',
+      date: { kind: 'dateRange', from: '', to: '' },
+      name: '',
+      euro: '',
+      usd: '',
+      budgetNumber: '',
+      purpose: '',
+      with: { kind: 'multiselect', mode: 'include', values: [] },
+      status: { kind: 'multiselect', mode: 'include', values: [] },
+    },
+    sortKey: null,
+    sortDir: 'asc',
+    defaultEmptyText: null,
+  };
+
+  function ensurePaymentOrdersDefaultEmptyText() {
+    if (!emptyState) return;
+    if (paymentOrdersViewState.defaultEmptyText !== null) return;
+    paymentOrdersViewState.defaultEmptyText = emptyState.textContent || 'No requests submitted yet.';
+  }
+
+  function normalizeTextForSearch(value) {
+    return String(value ?? '')
+      // Normalize common formatting characters so search is forgiving.
+      .replace(/\u00A0/g, ' ') // NBSP
+      .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-') // hyphen/dash/minus variants
+      .toLowerCase()
+      // Treat spacing around dashes as equivalent (e.g. "26 - 02" == "26-02").
+      .replace(/\s*-\s*/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function getOrderDisplayValueForColumn(order, colKey) {
+    if (!order) return '';
+    switch (colKey) {
+      case 'paymentOrderNo':
+        return formatPaymentOrderNoForDisplay(order.paymentOrderNo);
+      case 'date':
+        return formatDate(order.date);
+      case 'name':
+        return order.name || '';
+      case 'euro':
+        return formatCurrency(order.euro, 'EUR');
+      case 'usd':
+        return formatCurrency(order.usd, 'USD');
+      case 'budgetNumber':
+        return formatBudgetNumberForDisplay(order.budgetNumber);
+      case 'purpose':
+        return order.purpose || '';
+      case 'with':
+        return getOrderWithLabel(order);
+      case 'status':
+        return getOrderStatusLabel(order);
+      default:
+        return '';
+    }
+  }
+
+  function getOrderSortValueForColumn(order, colKey, colType) {
+    if (!order) return null;
+    if (colType === 'number') {
+      const raw = colKey === 'euro' ? order.euro : colKey === 'usd' ? order.usd : null;
+      const num = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+      return Number.isFinite(num) ? num : null;
+    }
+    if (colType === 'date') {
+      // Stored dates are ISO yyyy-mm-dd; lexical sort matches chronological.
+      const d = order.date || '';
+      return String(d);
+    }
+    return normalizeTextForSearch(getOrderDisplayValueForColumn(order, colKey));
+  }
+
+  function sortOrdersForView(orders, sortKey, sortDir) {
+    const dir = sortDir === 'desc' ? -1 : 1;
+
+    // Default sort: newest first (createdAt desc)
+    if (!sortKey) {
+      return [...orders].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    }
+
+    const colType = PAYMENT_ORDERS_COL_TYPES[sortKey] || 'text';
+
+    const withIndex = orders.map((order, index) => ({ order, index }));
+    withIndex.sort((a, b) => {
+      const av = getOrderSortValueForColumn(a.order, sortKey, colType);
+      const bv = getOrderSortValueForColumn(b.order, sortKey, colType);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'number') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+
+    return withIndex.map((x) => x.order);
+  }
+
+  function hasActiveFilterValue(filterValue) {
+    if (!filterValue) return false;
+    if (typeof filterValue === 'string') return normalizeTextForSearch(filterValue) !== '';
+    if (typeof filterValue !== 'object') return false;
+
+    if (filterValue.kind === 'dateRange') {
+      const from = String(filterValue.from || '').trim();
+      const to = String(filterValue.to || '').trim();
+      return Boolean(from || to);
+    }
+
+    if (filterValue.kind === 'multiselect') {
+      return Array.isArray(filterValue.values) && filterValue.values.length > 0;
+    }
+
+    return false;
+  }
+
+  function filterOrdersForView(orders, filters, globalFilter) {
+    const activeColumnFilters = Object.entries(filters || {}).filter(([, v]) => hasActiveFilterValue(v));
+    const globalNeedle = normalizeTextForSearch(globalFilter);
+    const anyGlobal = globalNeedle !== '';
+    if (activeColumnFilters.length === 0 && !anyGlobal) return orders;
+
+    const allFilterableCols = Object.keys(PAYMENT_ORDERS_COL_TYPES);
+
+    return (orders || []).filter((o) => {
+      if (anyGlobal) {
+        const matchesAny = allFilterableCols.some((colKey) => {
+          const hay = normalizeTextForSearch(getOrderDisplayValueForColumn(o, colKey));
+          return hay.includes(globalNeedle);
+        });
+        if (!matchesAny) return false;
+      }
+
+      return activeColumnFilters.every(([colKey, filterValue]) => {
+        if (typeof filterValue === 'string') {
+          const needle = normalizeTextForSearch(filterValue);
+          const haystack = normalizeTextForSearch(getOrderDisplayValueForColumn(o, colKey));
+          return haystack.includes(needle);
+        }
+
+        if (!filterValue || typeof filterValue !== 'object') return true;
+
+        if (filterValue.kind === 'dateRange') {
+          const from = String(filterValue.from || '').trim();
+          const to = String(filterValue.to || '').trim();
+          const d = String((o && o.date) || '').trim();
+          if (!d) return false;
+          if (from && d < from) return false;
+          if (to && d > to) return false;
+          return true;
+        }
+
+        if (filterValue.kind === 'multiselect') {
+          const values = Array.isArray(filterValue.values) ? filterValue.values : [];
+          if (values.length === 0) return true;
+
+          const mode = filterValue.mode === 'exclude' ? 'exclude' : 'include';
+          const cell = normalizeTextForSearch(getOrderDisplayValueForColumn(o, colKey));
+          const selected = values.map((v) => normalizeTextForSearch(v));
+          const isSelected = selected.includes(cell);
+          return mode === 'exclude' ? !isSelected : isSelected;
+        }
+
+        return true;
+      });
+    });
+  }
+
+  function updatePaymentOrdersSortIndicators() {
+    if (!tbody) return;
+    const table = tbody.closest('table');
+    if (!table) return;
+
+    const sortKey = paymentOrdersViewState.sortKey;
+    const sortDir = paymentOrdersViewState.sortDir === 'desc' ? 'desc' : 'asc';
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) {
+        aria = sortDir === 'desc' ? 'descending' : 'ascending';
+      }
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initPaymentOrdersColumnSorting() {
+    if (!tbody) return;
+    const table = tbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+
+      if (paymentOrdersViewState.sortKey === colKey) {
+        paymentOrdersViewState.sortDir = paymentOrdersViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        paymentOrdersViewState.sortKey = colKey;
+        paymentOrdersViewState.sortDir = 'asc';
+      }
+
+      applyPaymentOrdersView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+
+      th.addEventListener('click', () => {
+        const colKey = th.getAttribute('data-sort-key');
+        applySortForKey(colKey);
+      });
+
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        const colKey = th.getAttribute('data-sort-key');
+        applySortForKey(colKey);
+      });
+    }
+
+    updatePaymentOrdersHeaderIndicators();
+  }
+
+  function updatePaymentOrdersHeaderIndicators() {
+    const menus = Array.from(document.querySelectorAll('[data-th-menu][data-col-key]'));
+    for (const menu of menus) {
+      const colKey = menu.getAttribute('data-col-key');
+      const btn = menu.querySelector('[data-th-menu-btn]');
+      if (!btn) continue;
+
+      const hasFilter = colKey && hasActiveFilterValue(paymentOrdersViewState.filters[colKey]);
+      const isSorted = paymentOrdersViewState.sortKey === colKey;
+      btn.classList.toggle('is-active', hasFilter || isSorted);
+    }
+
+    updatePaymentOrdersSortIndicators();
+
+    const globalInput = document.getElementById('ordersGlobalSearch');
+    if (globalInput) {
+      globalInput.classList.toggle(
+        'input-active',
+        normalizeTextForSearch(paymentOrdersViewState.globalFilter) !== ''
+      );
+    }
+
+    if (ordersClearSearchBtn) {
+      const hasSearch = normalizeTextForSearch(paymentOrdersViewState.globalFilter) !== '';
+      ordersClearSearchBtn.hidden = !hasSearch;
+      ordersClearSearchBtn.disabled = !hasSearch;
+    }
+  }
+
+  function updatePaymentOrdersTotals(orders) {
+    const grandEuroEl = document.getElementById('ordersTotalGrandEuro');
+    const grandUsdEl = document.getElementById('ordersTotalGrandUsd');
+    const approvedEuroEl = document.getElementById('ordersTotalApprovedEuro');
+    const approvedUsdEl = document.getElementById('ordersTotalApprovedUsd');
+    const unapprovedEuroEl = document.getElementById('ordersTotalUnapprovedEuro');
+    const unapprovedUsdEl = document.getElementById('ordersTotalUnapprovedUsd');
+
+    if (
+      !grandEuroEl &&
+      !grandUsdEl &&
+      !approvedEuroEl &&
+      !approvedUsdEl &&
+      !unapprovedEuroEl &&
+      !unapprovedUsdEl
+    ) {
+      return;
+    }
+
+    let grandEuro = 0;
+    let grandUsd = 0;
+    let approvedEuro = 0;
+    let approvedUsd = 0;
+    let unapprovedEuro = 0;
+    let unapprovedUsd = 0;
+
+    for (const o of orders || []) {
+      const e = Number(o && o.euro);
+      const u = Number(o && o.usd);
+      const euro = Number.isFinite(e) ? e : 0;
+      const usd = Number.isFinite(u) ? u : 0;
+
+      grandEuro += euro;
+      grandUsd += usd;
+
+      const status = normalizeOrderStatus(o && o.status);
+      const isApprovedOrPaid = status === 'Approved' || status === 'Paid';
+
+      if (isApprovedOrPaid) {
+        approvedEuro += euro;
+        approvedUsd += usd;
+      } else {
+        unapprovedEuro += euro;
+        unapprovedUsd += usd;
+      }
+    }
+
+    if (grandEuroEl) grandEuroEl.textContent = formatCurrency(grandEuro, 'EUR');
+    if (grandUsdEl) grandUsdEl.textContent = formatCurrency(grandUsd, 'USD');
+    if (approvedEuroEl) approvedEuroEl.textContent = formatCurrency(approvedEuro, 'EUR');
+    if (approvedUsdEl) approvedUsdEl.textContent = formatCurrency(approvedUsd, 'USD');
+    if (unapprovedEuroEl) unapprovedEuroEl.textContent = formatCurrency(unapprovedEuro, 'EUR');
+    if (unapprovedUsdEl) unapprovedUsdEl.textContent = formatCurrency(unapprovedUsd, 'USD');
+  }
+
+  function applyPaymentOrdersView() {
+    if (!tbody || !emptyState) return;
+    ensurePaymentOrdersDefaultEmptyText();
+
+    const year = getActiveBudgetYear();
+    const allOrders = loadOrders(year);
+    const filtered = filterOrdersForView(
+      allOrders,
+      paymentOrdersViewState.filters,
+      paymentOrdersViewState.globalFilter
+    );
+    const sorted = sortOrdersForView(filtered, paymentOrdersViewState.sortKey, paymentOrdersViewState.sortDir);
+
+    const anyFilter =
+      normalizeTextForSearch(paymentOrdersViewState.globalFilter) !== '' ||
+      Object.values(paymentOrdersViewState.filters).some((v) => hasActiveFilterValue(v));
+    if (anyFilter && allOrders.length > 0 && sorted.length === 0) {
+      emptyState.textContent = 'No payment orders match your search.';
+    } else {
+      emptyState.textContent = paymentOrdersViewState.defaultEmptyText;
+    }
+
+    renderOrders(sorted);
+    updatePaymentOrdersTotals(sorted);
+    updatePaymentOrdersHeaderIndicators();
+  }
+
+  function initPaymentOrdersHeaderFilters() {
+    initPaymentOrdersColumnSorting();
+
+    const globalInput = document.getElementById('ordersGlobalSearch');
+    if (globalInput) {
+      globalInput.value = paymentOrdersViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        paymentOrdersViewState.globalFilter = globalInput.value;
+        applyPaymentOrdersView();
+      });
+    }
+
+    if (ordersClearSearchBtn && globalInput && !ordersClearSearchBtn.dataset.bound) {
+      ordersClearSearchBtn.dataset.bound = 'true';
+      ordersClearSearchBtn.addEventListener('click', () => {
+        globalInput.value = '';
+        paymentOrdersViewState.globalFilter = '';
+        applyPaymentOrdersView();
+        if (globalInput.focus) globalInput.focus();
+      });
+    }
+
+    const menus = Array.from(document.querySelectorAll('[data-th-menu][data-col-key]'));
+    if (menus.length === 0) {
+      updatePaymentOrdersHeaderIndicators();
+      return;
+    }
+
+    let openMenu = null;
+
+    function closeMenu(menu) {
+      if (!menu) return;
+      const panel = menu.querySelector('[data-th-menu-panel]');
+      const btn = menu.querySelector('[data-th-menu-btn]');
+      if (panel) panel.setAttribute('hidden', '');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+      if (openMenu === menu) openMenu = null;
+    }
+
+    function openMenuFor(menu) {
+      if (!menu) return;
+      if (openMenu && openMenu !== menu) closeMenu(openMenu);
+      const panel = menu.querySelector('[data-th-menu-panel]');
+      const btn = menu.querySelector('[data-th-menu-btn]');
+      if (panel) panel.removeAttribute('hidden');
+      if (btn) btn.setAttribute('aria-expanded', 'true');
+      openMenu = menu;
+
+      const focusTarget =
+        menu.querySelector('input[data-th-search]') ||
+        menu.querySelector('input[data-th-date-from]') ||
+        menu.querySelector('input[data-th-multi-exclude]') ||
+        menu.querySelector('[data-th-menu-panel] input, [data-th-menu-panel] button');
+      if (focusTarget && focusTarget.focus) focusTarget.focus();
+    }
+
+    function toggleMenuFor(menu) {
+      if (!menu) return;
+      const panel = menu.querySelector('[data-th-menu-panel]');
+      const isOpen = panel && !panel.hasAttribute('hidden');
+      if (isOpen) closeMenu(menu);
+      else openMenuFor(menu);
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!openMenu) return;
+      const clickedInside = e.target && openMenu.contains(e.target);
+      if (!clickedInside) closeMenu(openMenu);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && openMenu) {
+        closeMenu(openMenu);
+      }
+    });
+
+    for (const menu of menus) {
+      const colKey = menu.getAttribute('data-col-key');
+      const btn = menu.querySelector('[data-th-menu-btn]');
+      const panel = menu.querySelector('[data-th-menu-panel]');
+      const input = menu.querySelector('input[data-th-search]');
+
+      const dateFrom = menu.querySelector('input[data-th-date-from]');
+      const dateTo = menu.querySelector('input[data-th-date-to]');
+
+      const multiOptions = menu.querySelector('[data-th-multi-options]');
+      const multiExclude = menu.querySelector('input[data-th-multi-exclude]');
+
+      if (input && colKey && paymentOrdersViewState.filters[colKey] !== undefined) {
+        input.value = typeof paymentOrdersViewState.filters[colKey] === 'string' ? paymentOrdersViewState.filters[colKey] || '' : '';
+        input.addEventListener('input', () => {
+          paymentOrdersViewState.filters[colKey] = input.value;
+          applyPaymentOrdersView();
+        });
+      }
+
+      if (colKey === 'date' && dateFrom && dateTo) {
+        const state = paymentOrdersViewState.filters.date;
+        if (state && typeof state === 'object' && state.kind === 'dateRange') {
+          dateFrom.value = String(state.from || '');
+          dateTo.value = String(state.to || '');
+        }
+
+        const onDateChange = () => {
+          paymentOrdersViewState.filters.date = {
+            kind: 'dateRange',
+            from: String(dateFrom.value || '').trim(),
+            to: String(dateTo.value || '').trim(),
+          };
+          applyPaymentOrdersView();
+        };
+
+        dateFrom.addEventListener('change', onDateChange);
+        dateTo.addEventListener('change', onDateChange);
+        dateFrom.addEventListener('input', onDateChange);
+        dateTo.addEventListener('input', onDateChange);
+      }
+
+      if ((colKey === 'status' || colKey === 'with') && multiOptions) {
+        const optionList = colKey === 'status' ? ORDER_STATUSES : WITH_OPTIONS;
+
+        // Ensure state shape exists
+        const existing = paymentOrdersViewState.filters[colKey];
+        if (!existing || typeof existing !== 'object' || existing.kind !== 'multiselect') {
+          paymentOrdersViewState.filters[colKey] = { kind: 'multiselect', mode: 'include', values: [] };
+        }
+
+        const state = paymentOrdersViewState.filters[colKey];
+        const selectedValues =
+          state && typeof state === 'object' && state.kind === 'multiselect' && Array.isArray(state.values)
+            ? state.values
+            : [];
+
+        multiOptions.innerHTML = optionList
+          .map((opt) => {
+            const isChecked = selectedValues.includes(opt) ? ' checked' : '';
+            const safe = escapeHtml(opt);
+            const id = `thMulti-${colKey}-${normalizeTextForSearch(opt).replace(/[^a-z0-9]+/g, '-')}`;
+            return `
+              <label class="thMenu__check" for="${escapeHtml(id)}">
+                <input id="${escapeHtml(id)}" class="cb" type="checkbox" value="${safe}"${isChecked} />
+                <span>${safe}</span>
+              </label>
+            `.trim();
+          })
+          .join('');
+
+        if (multiExclude) {
+          const currentMode = state && typeof state === 'object' && state.kind === 'multiselect' ? state.mode : 'include';
+          multiExclude.checked = currentMode === 'exclude';
+          multiExclude.addEventListener('change', () => {
+            const next = paymentOrdersViewState.filters[colKey];
+            if (next && typeof next === 'object' && next.kind === 'multiselect') {
+              next.mode = multiExclude.checked ? 'exclude' : 'include';
+            }
+            applyPaymentOrdersView();
+          });
+        }
+
+        multiOptions.addEventListener('change', () => {
+          const checked = Array.from(multiOptions.querySelectorAll('input[type="checkbox"]'))
+            .filter((el) => el && el.checked)
+            .map((el) => el.value);
+
+          const next = paymentOrdersViewState.filters[colKey];
+          if (next && typeof next === 'object' && next.kind === 'multiselect') {
+            next.values = checked;
+          }
+          applyPaymentOrdersView();
+        });
+      }
+
+      if (btn) {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          toggleMenuFor(menu);
+        });
+      }
+
+      if (panel) {
+        panel.addEventListener('click', (e) => {
+          const target = e.target;
+          const sortBtn = target && target.closest && target.closest('button[data-th-sort]');
+          const clearBtn = target && target.closest && target.closest('button[data-th-clear]');
+
+          if (sortBtn && colKey) {
+            const dir = sortBtn.getAttribute('data-th-sort') === 'desc' ? 'desc' : 'asc';
+            paymentOrdersViewState.sortKey = colKey;
+            paymentOrdersViewState.sortDir = dir;
+            applyPaymentOrdersView();
+            closeMenu(menu);
+            return;
+          }
+
+          if (clearBtn && colKey) {
+            if (colKey === 'date') {
+              paymentOrdersViewState.filters.date = { kind: 'dateRange', from: '', to: '' };
+              if (dateFrom) dateFrom.value = '';
+              if (dateTo) dateTo.value = '';
+            } else if (colKey === 'status' || colKey === 'with') {
+              paymentOrdersViewState.filters[colKey] = { kind: 'multiselect', mode: 'include', values: [] };
+              if (multiExclude) multiExclude.checked = false;
+              if (multiOptions) {
+                const boxes = Array.from(multiOptions.querySelectorAll('input[type="checkbox"]'));
+                boxes.forEach((el) => {
+                  el.checked = false;
+                });
+              }
+            } else {
+              paymentOrdersViewState.filters[colKey] = '';
+              if (input) input.value = '';
+            }
+
+            if (paymentOrdersViewState.sortKey === colKey) {
+              paymentOrdersViewState.sortKey = null;
+              paymentOrdersViewState.sortDir = 'asc';
+            }
+            applyPaymentOrdersView();
+            closeMenu(menu);
+          }
+        });
+      }
+    }
+
+    updatePaymentOrdersHeaderIndicators();
   }
 
   function openModalWithOrder(order) {
@@ -2321,10 +3582,49 @@
         <dt>BIC</dt><dd>${escapeHtml(orderForView.bic)}</dd>
         <dt>Special Instructions</dt><dd class="kv__pre">${escapeHtml(orderForView.specialInstructions)}</dd>
         <dt>Purpose</dt><dd class="kv__pre">${escapeHtml(orderForView.purpose)}</dd>
+        <dt>Attachments</dt>
+        <dd>
+          <div id="modalAttachments" class="modalAttList">
+            <div class="muted">Loading…</div>
+          </div>
+        </dd>
         <dt>Created</dt><dd>${escapeHtml(orderForView.createdAt)}</dd>
       </dl>
       ${renderTimelineGraph(orderForView)}
     `.trim();
+
+    // Populate attachments asynchronously.
+    (async () => {
+      const container = modalBody.querySelector('#modalAttachments');
+      if (!container) return;
+      try {
+        const attachments = await listAttachments(`order:${orderForView.id}`);
+        container.innerHTML = renderModalAttachments(attachments);
+      } catch {
+        container.innerHTML = '<div class="muted">Attachments unavailable in this browser.</div>';
+      }
+    })();
+
+    // Attachment actions (view/download) inside modal.
+    const modalAttachments = modalBody.querySelector('#modalAttachments');
+    if (modalAttachments) {
+      modalAttachments.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-modal-attachment-action]');
+        if (!btn) return;
+        const row = btn.closest('[data-attachment-id]');
+        if (!row) return;
+        const id = row.getAttribute('data-attachment-id');
+        const action = btn.getAttribute('data-modal-attachment-action');
+        try {
+          const att = await getAttachmentById(id);
+          if (!att) return;
+          if (action === 'view') openBlobInNewTab(att.blob);
+          if (action === 'download') downloadBlob(att.blob, att.name);
+        } catch {
+          // ignore
+        }
+      });
+    }
 
     // Save state for this modal session (only persisted when clicking Save)
     modal.setAttribute('data-original-with', currentWith);
@@ -2402,7 +3702,7 @@
     const orders = loadOrders(year);
     const next = orders.filter((o) => o.id !== id);
     saveOrders(next, year);
-    renderOrders(next);
+    applyPaymentOrdersView();
   }
 
   function clearAll() {
@@ -2412,7 +3712,7 @@
     const ok = window.confirm('Clear all payment orders? This cannot be undone.');
     if (!ok) return;
     saveOrders([], year);
-    renderOrders([]);
+    applyPaymentOrdersView();
   }
 
   function initPaymentOrdersListPage() {
@@ -2438,6 +3738,1067 @@
     if (listTitleEl) listTitleEl.textContent = `${year} Payment Orders`;
 
     document.title = `${year} Payment Orders`;
+  }
+
+  // ---- Income (year-scoped) ----
+
+  function getIncomeKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_income_${y}_v1`;
+  }
+
+  function ensureIncomeListExistsForYear(year) {
+    const key = getIncomeKeyForYear(year);
+    if (!key) return { ok: false, created: false };
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing !== null) return { ok: true, created: false };
+      localStorage.setItem(key, JSON.stringify([]));
+      return { ok: true, created: true };
+    } catch {
+      return { ok: false, created: false };
+    }
+  }
+
+  /** @returns {Array<Object>} */
+  function loadIncome(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** @param {Array<Object>} entries */
+  function saveIncome(entries, year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(entries || []));
+  }
+
+  function upsertIncomeEntry(entry, year) {
+    if (!entry || !entry.id) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const all = loadIncome(y);
+    const idx = all.findIndex((e) => e && e.id === entry.id);
+    const next = idx >= 0 ? all.map((e) => (e && e.id === entry.id ? entry : e)) : [entry, ...all];
+    saveIncome(next, y);
+  }
+
+  function deleteIncomeEntryById(id, year) {
+    if (!id) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const all = loadIncome(y);
+    const next = all.filter((e) => e && e.id !== id);
+    saveIncome(next, y);
+  }
+
+  const INCOME_COL_TYPES = {
+    date: 'date',
+    remitter: 'text',
+    budgetNumber: 'text',
+    euro: 'number',
+    description: 'text',
+  };
+
+  const incomeViewState = {
+    globalFilter: '',
+    sortKey: 'date',
+    sortDir: 'desc',
+    defaultEmptyText: null,
+  };
+
+  function ensureIncomeDefaultEmptyText() {
+    if (!incomeEmptyState) return;
+    if (incomeViewState.defaultEmptyText !== null) return;
+    incomeViewState.defaultEmptyText = incomeEmptyState.textContent || 'No income entries yet.';
+  }
+
+  function getIncomeDisplayValueForColumn(entry, colKey, year) {
+    if (!entry) return '';
+    switch (colKey) {
+      case 'date':
+        return formatDate(entry.date);
+      case 'remitter':
+        return entry.remitter || '';
+      case 'budgetNumber':
+        return formatInBudgetNumberForDisplay(entry.budgetNumber, year);
+      case 'euro':
+        return formatCurrency(entry.euro, 'EUR');
+      case 'description':
+        return entry.description || '';
+      default:
+        return '';
+    }
+  }
+
+  function getIncomeSortValueForColumn(entry, colKey, colType, year) {
+    if (!entry) return null;
+    if (colType === 'number') {
+      const raw = entry.euro;
+      const num = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+      return Number.isFinite(num) ? num : null;
+    }
+    if (colType === 'date') {
+      const raw = String(entry.date || '').trim();
+      return raw ? raw : null;
+    }
+    return normalizeTextForSearch(getIncomeDisplayValueForColumn(entry, colKey, year));
+  }
+
+  function sortIncomeForView(entries, sortKey, sortDir, year) {
+    const dir = sortDir === 'desc' ? -1 : 1;
+    if (!sortKey) {
+      return [...(entries || [])].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    }
+
+    const colType = INCOME_COL_TYPES[sortKey] || 'text';
+    const withIndex = (entries || []).map((entry, index) => ({ entry, index }));
+    withIndex.sort((a, b) => {
+      const av = getIncomeSortValueForColumn(a.entry, sortKey, colType, year);
+      const bv = getIncomeSortValueForColumn(b.entry, sortKey, colType, year);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'number') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+    return withIndex.map((x) => x.entry);
+  }
+
+  function filterIncomeForView(entries, globalFilter, year) {
+    const needle = normalizeTextForSearch(globalFilter);
+    if (!needle) return entries || [];
+
+    const cols = Object.keys(INCOME_COL_TYPES);
+    return (entries || []).filter((e) => {
+      return cols.some((colKey) => normalizeTextForSearch(getIncomeDisplayValueForColumn(e, colKey, year)).includes(needle));
+    });
+  }
+
+  function renderIncomeRows(entries, year) {
+    if (!incomeTbody) return;
+
+    const rowsHtml = (entries || [])
+      .map((e) => {
+        const id = escapeHtml(e.id);
+        const date = escapeHtml(getIncomeDisplayValueForColumn(e, 'date', year));
+        const remitter = escapeHtml(getIncomeDisplayValueForColumn(e, 'remitter', year));
+        const budget = escapeHtml(getIncomeDisplayValueForColumn(e, 'budgetNumber', year));
+        const euro = escapeHtml(getIncomeDisplayValueForColumn(e, 'euro', year));
+        const desc = escapeHtml(getIncomeDisplayValueForColumn(e, 'description', year));
+
+        return `
+          <tr data-income-id="${id}">
+            <td class="col-delete">
+              <button
+                type="button"
+                class="btn btn--x"
+                data-income-action="delete"
+                aria-label="Delete entry"
+                title="Delete"
+              >
+                X
+              </button>
+            </td>
+            <td>${date}</td>
+            <td>${remitter}</td>
+            <td>${budget}</td>
+            <td class="num">${euro}</td>
+            <td>${desc}</td>
+            <td class="actions">
+              <button type="button" class="btn btn--editBlue" data-income-action="edit">Edit</button>
+            </td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    incomeTbody.innerHTML = rowsHtml;
+  }
+
+  function updateIncomeSortIndicators() {
+    if (!incomeTbody) return;
+    const table = incomeTbody.closest('table');
+    if (!table) return;
+
+    const sortKey = incomeViewState.sortKey;
+    const sortDir = incomeViewState.sortDir === 'desc' ? 'desc' : 'asc';
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) {
+        aria = sortDir === 'desc' ? 'descending' : 'ascending';
+      }
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initIncomeColumnSorting() {
+    if (!incomeTbody) return;
+    const table = incomeTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (incomeViewState.sortKey === colKey) {
+        incomeViewState.sortDir = incomeViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        incomeViewState.sortKey = colKey;
+        incomeViewState.sortDir = 'asc';
+      }
+      applyIncomeView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateIncomeSortIndicators();
+  }
+
+  function populateIncomeBudgetSelect(select, year) {
+    if (!select) return;
+
+    const prev = String(select.value || '').trim();
+    select.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.selected = true;
+    placeholder.textContent = 'Select a budget number (optional)…';
+    select.appendChild(placeholder);
+
+    const inAccounts = readInAccountsFromBudgetYear(year);
+    if (inAccounts.length === 0) {
+      const none = document.createElement('option');
+      none.value = '__none__';
+      none.disabled = true;
+      none.textContent = 'No IN accounts found in the active budget';
+      select.appendChild(none);
+      return;
+    }
+
+    for (const item of inAccounts) {
+      const opt = document.createElement('option');
+      opt.value = item.inCode;
+      opt.textContent = item.desc ? `${item.inCode} - ${item.desc}` : item.inCode;
+      select.appendChild(opt);
+    }
+
+    if (prev && inAccounts.some((x) => x.inCode === prev)) {
+      select.value = prev;
+    }
+  }
+
+  let currentIncomeId = null;
+
+  function openIncomeModal(entry, year) {
+    if (!incomeModal || !incomeModalBody) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    currentIncomeId = entry && entry.id ? entry.id : null;
+
+    const titleEl = incomeModal.querySelector('#incomeModalTitle');
+    const subheadEl = incomeModal.querySelector('#incomeModalSubhead');
+    if (titleEl) titleEl.textContent = currentIncomeId ? 'Income (Edit)' : 'Income (New)';
+    if (subheadEl) subheadEl.textContent = `${y} Income`;
+
+    const safeDate = escapeHtml(entry && entry.date ? entry.date : '');
+    const safeRemitter = escapeHtml(entry && entry.remitter ? entry.remitter : '');
+    const safeEuro =
+      entry && entry.euro !== null && entry.euro !== undefined && entry.euro !== '' ? escapeHtml(String(entry.euro)) : '';
+    const safeDesc = escapeHtml(entry && entry.description ? entry.description : '');
+    const safeBudget = escapeHtml(entry && entry.budgetNumber ? entry.budgetNumber : '');
+
+    incomeModalBody.innerHTML = `
+      <form id="incomeModalForm" novalidate>
+        <div class="grid">
+          <div class="field">
+            <label for="incomeDate">Transaction Date<span class="req" aria-hidden="true">*</span></label>
+            <input id="incomeDate" name="incomeDate" type="date" required value="${safeDate}" />
+            <div class="error" id="error-incomeDate" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="incomeEuro">Euro (€)<span class="req" aria-hidden="true">*</span></label>
+            <input id="incomeEuro" name="incomeEuro" type="number" inputmode="decimal" step="0.01" min="0" required value="${safeEuro}" />
+            <div class="error" id="error-incomeEuro" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="incomeRemitter">Remitter<span class="req" aria-hidden="true">*</span></label>
+            <input id="incomeRemitter" name="incomeRemitter" type="text" autocomplete="off" required value="${safeRemitter}" />
+            <div class="error" id="error-incomeRemitter" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field field--span2">
+            <label for="incomeBudgetNumber">Budget Number</label>
+            <select id="incomeBudgetNumber" name="incomeBudgetNumber">
+              <option value="" selected>Select a budget number (optional)…</option>
+            </select>
+            <div class="error" id="error-incomeBudgetNumber" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field field--span2">
+            <label for="incomeDescription">Description<span class="req" aria-hidden="true">*</span></label>
+            <textarea id="incomeDescription" name="incomeDescription" rows="3" required>${safeDesc}</textarea>
+            <div class="error" id="error-incomeDescription" role="alert" aria-live="polite"></div>
+          </div>
+        </div>
+      </form>
+    `.trim();
+
+    const select = incomeModalBody.querySelector('#incomeBudgetNumber');
+    if (select) {
+      populateIncomeBudgetSelect(select, y);
+      if (safeBudget) select.value = safeBudget;
+    }
+
+    incomeModal.classList.add('is-open');
+    incomeModal.setAttribute('aria-hidden', 'false');
+
+    const focusTarget = incomeModalBody.querySelector('#incomeDate');
+    if (focusTarget && focusTarget.focus) focusTarget.focus();
+  }
+
+  function closeIncomeModal() {
+    if (!incomeModal || !incomeModalBody) return;
+    incomeModal.classList.remove('is-open');
+    incomeModal.setAttribute('aria-hidden', 'true');
+    incomeModalBody.innerHTML = '';
+    currentIncomeId = null;
+  }
+
+  function clearIncomeModalErrors() {
+    if (!incomeModalBody) return;
+    const errors = Array.from(incomeModalBody.querySelectorAll('.error'));
+    for (const el of errors) el.textContent = '';
+  }
+
+  function showIncomeModalErrors(errors) {
+    if (!incomeModalBody || !errors) return;
+    const map = {
+      date: '#error-incomeDate',
+      euro: '#error-incomeEuro',
+      remitter: '#error-incomeRemitter',
+      budgetNumber: '#error-incomeBudgetNumber',
+      description: '#error-incomeDescription',
+    };
+    for (const [k, sel] of Object.entries(map)) {
+      const el = incomeModalBody.querySelector(sel);
+      if (el) el.textContent = errors[k] || '';
+    }
+  }
+
+  function validateIncomeModalValues() {
+    if (!incomeModalBody) return { ok: false };
+    const dateEl = incomeModalBody.querySelector('#incomeDate');
+    const euroEl = incomeModalBody.querySelector('#incomeEuro');
+    const remitterEl = incomeModalBody.querySelector('#incomeRemitter');
+    const budgetEl = incomeModalBody.querySelector('#incomeBudgetNumber');
+    const descEl = incomeModalBody.querySelector('#incomeDescription');
+
+    const values = {
+      date: dateEl ? String(dateEl.value || '').trim() : '',
+      euro: euroEl ? String(euroEl.value || '').trim() : '',
+      remitter: remitterEl ? String(remitterEl.value || '').trim() : '',
+      budgetNumber: budgetEl ? String(budgetEl.value || '').trim() : '',
+      description: descEl ? String(descEl.value || '').trim() : '',
+    };
+
+    const errors = {};
+    if (!values.date) errors.date = 'This field is required.';
+    if (!values.remitter) errors.remitter = 'This field is required.';
+    if (!values.description) errors.description = 'This field is required.';
+
+    const euroNum = Number(values.euro);
+    if (!values.euro) errors.euro = 'This field is required.';
+    else if (!Number.isFinite(euroNum) || euroNum < 0) errors.euro = 'Enter a valid amount.';
+
+    if (Object.keys(errors).length > 0) return { ok: false, errors };
+    return {
+      ok: true,
+      values: {
+        date: values.date,
+        remitter: values.remitter,
+        budgetNumber: values.budgetNumber,
+        euro: euroNum,
+        description: values.description,
+      },
+    };
+  }
+
+  function applyIncomeView() {
+    if (!incomeTbody || !incomeEmptyState) return;
+    ensureIncomeDefaultEmptyText();
+
+    const year = getActiveBudgetYear();
+    const all = loadIncome(year);
+    const filtered = filterIncomeForView(all, incomeViewState.globalFilter, year);
+    const sorted = sortIncomeForView(filtered, incomeViewState.sortKey, incomeViewState.sortDir, year);
+
+    if (normalizeTextForSearch(incomeViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
+      incomeEmptyState.textContent = 'No income entries match your search.';
+    } else {
+      incomeEmptyState.textContent = incomeViewState.defaultEmptyText;
+    }
+
+    incomeEmptyState.hidden = sorted.length > 0;
+    renderIncomeRows(sorted, year);
+    updateIncomeSortIndicators();
+  }
+
+  function initIncomeListPage() {
+    if (!incomeTbody || !incomeEmptyState) return;
+    const year = getActiveBudgetYear();
+
+    const incomeNewLink = document.getElementById('incomeNewLink');
+    const incomeExportCsvLink = document.getElementById('incomeExportCsvLink');
+    const incomeDownloadTemplateLink = document.getElementById('incomeDownloadTemplateLink');
+    const incomeImportCsvLink = document.getElementById('incomeImportCsvLink');
+    const incomeMenuBtn = document.getElementById('incomeActionsMenuBtn');
+    const incomeMenuPanel = document.getElementById('incomeActionsMenu');
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'income.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(year));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    ensureIncomeListExistsForYear(year);
+
+    // Ensure older/mock/imported Income entries are reflected in the Budget receipts.
+    backfillIncomeBudgetReceiptImpactsIfNeeded(year);
+
+    const titleEl = document.querySelector('[data-income-title]');
+    if (titleEl) titleEl.textContent = `${year} Income`;
+    const listTitleEl = document.querySelector('[data-income-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${year} Income`;
+    document.title = `${year} Income`;
+
+    initIncomeColumnSorting();
+
+    const globalInput = document.getElementById('incomeGlobalSearch');
+    if (globalInput) {
+      globalInput.value = incomeViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        incomeViewState.globalFilter = globalInput.value;
+        if (incomeClearSearchBtn) {
+          const hasSearch = normalizeTextForSearch(incomeViewState.globalFilter) !== '';
+          incomeClearSearchBtn.hidden = !hasSearch;
+          incomeClearSearchBtn.disabled = !hasSearch;
+        }
+        applyIncomeView();
+      });
+    }
+
+    if (incomeClearSearchBtn && globalInput) {
+      const hasSearch = normalizeTextForSearch(incomeViewState.globalFilter) !== '';
+      incomeClearSearchBtn.hidden = !hasSearch;
+      incomeClearSearchBtn.disabled = !hasSearch;
+      if (!incomeClearSearchBtn.dataset.bound) {
+        incomeClearSearchBtn.dataset.bound = 'true';
+        incomeClearSearchBtn.addEventListener('click', () => {
+          globalInput.value = '';
+          incomeViewState.globalFilter = '';
+          incomeClearSearchBtn.hidden = true;
+          incomeClearSearchBtn.disabled = true;
+          applyIncomeView();
+          if (globalInput.focus) globalInput.focus();
+        });
+      }
+    }
+
+    if (incomeNewLink) {
+      incomeNewLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        openIncomeModal(null, year);
+        if (incomeMenuPanel && incomeMenuBtn) {
+          incomeMenuPanel.setAttribute('hidden', '');
+          incomeMenuBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    if (incomeClearAllBtn) {
+      incomeClearAllBtn.addEventListener('click', () => {
+        const all = loadIncome(year);
+        if (all.length === 0) return;
+        const ok = window.confirm('Clear all income entries? This cannot be undone.');
+        if (!ok) return;
+
+        // Reverse any previously-applied Budget receipts impacts before clearing.
+        const byCode = new Map();
+        for (const e of all) {
+          const imp = e && e.budgetReceiptImpact && typeof e.budgetReceiptImpact === 'object' ? e.budgetReceiptImpact : null;
+          const code = imp ? String(imp.inCode || '').trim() : '';
+          const euro = imp ? Number(imp.euro) : NaN;
+          if (!/^[0-9]{4}$/.test(code)) continue;
+          if (!Number.isFinite(euro) || euro === 0) continue;
+          byCode.set(code, (byCode.get(code) || 0) + euro);
+        }
+        const deltas = Array.from(byCode.entries()).map(([inCode, sumEuro]) => ({ inCode, deltaEuro: -sumEuro }));
+        if (deltas.length > 0) {
+          const budgetRes = applyIncomeBudgetReceiptsDeltas(year, deltas);
+          if (!budgetRes || !budgetRes.ok) {
+            const code = budgetRes && budgetRes.inCode ? ` (${budgetRes.inCode})` : '';
+            window.alert(`Could not update Budget receipts${code}.\n\nIncome was not cleared. Please verify the ${year} Budget exists and contains the matching IN code.`);
+            return;
+          }
+        }
+
+        saveIncome([], year);
+        applyIncomeView();
+      });
+    }
+
+    function escapeCsvValue(value) {
+      const s = String(value ?? '');
+      const normalized = s.replace(/\u00A0/g, ' ').replace(/\r\n|\r|\n/g, ' ').trim();
+      const mustQuote = /[",\n\r]/.test(normalized);
+      const escaped = normalized.replace(/"/g, '""');
+      return mustQuote ? `"${escaped}"` : escaped;
+    }
+
+    function downloadCsvFile(csvText, fileName) {
+      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function getTodayStamp() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function exportIncomeToCsv() {
+      const header = ['Transaction Date', 'Remitter', 'Budget Number', 'Euro', 'Description'];
+      const entries = loadIncome(year);
+      const lines = [];
+      lines.push(header.map(escapeCsvValue).join(','));
+
+      // Export sorted newest-first by date (stable if any missing date)
+      const sorted = sortIncomeForView(entries, 'date', 'desc', year);
+      for (const e of sorted) {
+        const values = [
+          String(e && e.date ? e.date : ''),
+          String(e && e.remitter ? e.remitter : ''),
+          String(e && e.budgetNumber ? e.budgetNumber : ''),
+          e && e.euro !== null && e.euro !== undefined && e.euro !== '' ? String(e.euro) : '',
+          String(e && e.description ? e.description : ''),
+        ];
+        lines.push(values.map(escapeCsvValue).join(','));
+      }
+
+      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
+      downloadCsvFile(csv, `income_${year}_${getTodayStamp()}.csv`);
+    }
+
+    function downloadIncomeCsvTemplate() {
+      const header = ['Transaction Date', 'Remitter', 'Budget Number', 'Euro', 'Description'];
+      // Include a valid ISO date example so imports succeed without guesswork.
+      const example = [getTodayStamp(), 'Example Remitter', '', '0.00', 'Example description'];
+      const lines = [];
+      lines.push(header.map(escapeCsvValue).join(','));
+      lines.push(example.map(escapeCsvValue).join(','));
+      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
+      downloadCsvFile(csv, `income_template_${year}_${getTodayStamp()}.csv`);
+    }
+
+    function parseCsvText(text) {
+      const rows = [];
+      const s = String(text ?? '');
+      let row = [];
+      let field = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < s.length; i += 1) {
+        const ch = s[i];
+
+        if (inQuotes) {
+          if (ch === '"') {
+            const next = s[i + 1];
+            if (next === '"') {
+              field += '"';
+              i += 1;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            field += ch;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          inQuotes = true;
+          continue;
+        }
+
+        if (ch === ',') {
+          row.push(field);
+          field = '';
+          continue;
+        }
+
+        if (ch === '\n') {
+          row.push(field);
+          field = '';
+          rows.push(row);
+          row = [];
+          continue;
+        }
+
+        if (ch === '\r') {
+          continue;
+        }
+
+        field += ch;
+      }
+
+      row.push(field);
+      rows.push(row);
+
+      while (rows.length > 0) {
+        const last = rows[rows.length - 1];
+        const isEmpty = last.every((c) => String(c ?? '').trim() === '');
+        if (!isEmpty) break;
+        rows.pop();
+      }
+
+      return rows;
+    }
+
+    function normalizeHeaderName(name) {
+      return String(name ?? '')
+        .replace(/\uFEFF/g, '')
+        .replace(/\u00A0/g, ' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    function normalizeCsvDate(raw) {
+      const s = String(raw ?? '').trim();
+      if (!s) return '';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+      // Accept common US-style formats like M/D/YYYY or MM/DD/YYYY (also with '-' separators).
+      const mdy = s.match(/^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$/);
+      if (mdy) {
+        const mm = Number(mdy[1]);
+        const dd = Number(mdy[2]);
+        const yyyy = Number(mdy[3]);
+        if (!Number.isInteger(mm) || !Number.isInteger(dd) || !Number.isInteger(yyyy)) return '';
+        if (yyyy < 1000 || yyyy > 9999) return '';
+        if (mm < 1 || mm > 12) return '';
+        if (dd < 1 || dd > 31) return '';
+
+        // Validate actual calendar date.
+        const d = new Date(yyyy, mm - 1, dd);
+        if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return '';
+
+        const mmText = String(mm).padStart(2, '0');
+        const ddText = String(dd).padStart(2, '0');
+        return `${yyyy}-${mmText}-${ddText}`;
+      }
+
+      const ms = Date.parse(s);
+      if (!Number.isFinite(ms)) return '';
+      const d = new Date(ms);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function parseEuroAmount(raw) {
+      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
+      if (!s) return null;
+      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
+      const n = Number(cleaned);
+      if (!Number.isFinite(n) || n < 0) return null;
+      return n;
+    }
+
+    function importIncomeFromCsvText(csvText, fileName) {
+      const ok = window.confirm(
+        `Importing a CSV will add entries to the current income list for ${year}. Continue?\n\nFile: ${fileName || 'CSV'}`
+      );
+      if (!ok) return;
+
+      const rows = parseCsvText(csvText);
+      if (rows.length === 0) {
+        window.alert('CSV is empty.');
+        return;
+      }
+
+      const header = rows[0].map(normalizeHeaderName);
+      const dataRows = rows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
+
+      const idx = {
+        date: header.indexOf('transaction date') !== -1 ? header.indexOf('transaction date') : header.indexOf('date'),
+        remitter: header.indexOf('remitter'),
+        budgetNumber: header.indexOf('budget number'),
+        euro: header.indexOf('euro'),
+        description: header.indexOf('description'),
+      };
+
+      const hasHeaders = idx.remitter !== -1 && idx.euro !== -1 && idx.description !== -1 && idx.date !== -1;
+      if (!hasHeaders && header.length >= 3) {
+        // Allow headerless CSV by treating first row as data in the expected order.
+        dataRows.unshift(rows[0]);
+        idx.date = 0;
+        idx.remitter = 1;
+        idx.budgetNumber = 2;
+        idx.euro = 3;
+        idx.description = 4;
+      }
+
+      const nowIso = new Date().toISOString();
+      const imported = [];
+      const errors = [];
+
+      for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
+        const r = dataRows[rowIndex];
+        const get = (i) => (i >= 0 ? (r[i] ?? '') : '');
+
+        const date = normalizeCsvDate(get(idx.date));
+        const remitter = String(get(idx.remitter)).trim();
+        const budgetNumber = String(get(idx.budgetNumber)).trim();
+        const euroNum = parseEuroAmount(get(idx.euro));
+        const description = String(get(idx.description)).trim();
+
+        const rowNo = rowIndex + 2; // 1-based + header row
+        if (!date) errors.push(`Row ${rowNo}: invalid Transaction Date.`);
+        if (!remitter) errors.push(`Row ${rowNo}: Remitter is required.`);
+        if (euroNum === null) errors.push(`Row ${rowNo}: Euro is required and must be 0 or greater.`);
+        if (!description) errors.push(`Row ${rowNo}: Description is required.`);
+        if (!date || !remitter || euroNum === null || !description) continue;
+
+        imported.push({
+          id: (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          date,
+          remitter,
+          budgetNumber,
+          euro: euroNum,
+          description,
+        });
+      }
+
+      if (imported.length === 0) {
+        window.alert(errors.length ? `No rows were imported:\n\n${errors.slice(0, 15).join('\n')}` : 'No rows were imported.');
+        return;
+      }
+
+      if (errors.length > 0) {
+        const proceed = window.confirm(
+          `Some rows could not be imported. Import ${imported.length} valid row(s) anyway?\n\n${errors.slice(0, 15).join('\n')}${errors.length > 15 ? '\n…' : ''}`
+        );
+        if (!proceed) return;
+      }
+
+      const existing = loadIncome(year);
+      const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
+      saveIncome(merged, year);
+
+      // Apply Budget receipts impacts for any newly imported rows that have Budget Numbers.
+      backfillIncomeBudgetReceiptImpactsIfNeeded(year);
+      applyIncomeView();
+    }
+
+    if (incomeExportCsvLink) {
+      incomeExportCsvLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        exportIncomeToCsv();
+      });
+    }
+    if (incomeDownloadTemplateLink) {
+      incomeDownloadTemplateLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        downloadIncomeCsvTemplate();
+      });
+    }
+    if (incomeImportCsvLink) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.csv,text/csv';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+
+      incomeImportCsvLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        input.value = '';
+        input.click();
+      });
+
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          importIncomeFromCsvText(reader.result, file.name);
+        };
+        reader.onerror = () => {
+          window.alert('Could not read CSV file.');
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    if (incomeMenuBtn) {
+      const MENU_CLOSE_DELAY_MS = 250;
+      let menuCloseTimer = 0;
+
+      function isMenuOpen() {
+        return Boolean(incomeMenuPanel && !incomeMenuPanel.hasAttribute('hidden'));
+      }
+
+      function closeMenu() {
+        if (!incomeMenuPanel || !incomeMenuBtn) return;
+        incomeMenuPanel.setAttribute('hidden', '');
+        incomeMenuBtn.setAttribute('aria-expanded', 'false');
+      }
+
+      function openMenu() {
+        if (!incomeMenuPanel || !incomeMenuBtn) return;
+        incomeMenuPanel.removeAttribute('hidden');
+        incomeMenuBtn.setAttribute('aria-expanded', 'true');
+      }
+
+      function toggleMenu() {
+        if (isMenuOpen()) closeMenu();
+        else openMenu();
+      }
+
+      function cancelScheduledClose() {
+        if (!menuCloseTimer) return;
+        clearTimeout(menuCloseTimer);
+        menuCloseTimer = 0;
+      }
+
+      function scheduleClose() {
+        cancelScheduledClose();
+        if (!isMenuOpen()) return;
+        menuCloseTimer = window.setTimeout(() => {
+          closeMenu();
+          menuCloseTimer = 0;
+        }, MENU_CLOSE_DELAY_MS);
+      }
+
+      incomeMenuBtn.addEventListener('click', () => {
+        toggleMenu();
+      });
+
+      incomeMenuBtn.addEventListener('mouseenter', cancelScheduledClose);
+      incomeMenuBtn.addEventListener('mouseleave', scheduleClose);
+
+      if (incomeMenuPanel) {
+        incomeMenuPanel.addEventListener('mouseenter', cancelScheduledClose);
+        incomeMenuPanel.addEventListener('mouseleave', scheduleClose);
+      }
+
+      document.addEventListener('click', (e) => {
+        if (!isMenuOpen()) return;
+        const menuRoot = e.target?.closest ? e.target.closest('[data-income-menu]') : null;
+        if (menuRoot) return;
+        cancelScheduledClose();
+        closeMenu();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (!isMenuOpen()) return;
+        if (e.key === 'Escape') {
+          cancelScheduledClose();
+          closeMenu();
+        }
+      });
+    }
+
+    incomeTbody.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-income-action]');
+      if (!btn) return;
+      const row = btn.closest('tr[data-income-id]');
+      if (!row) return;
+      const id = row.getAttribute('data-income-id');
+      const action = btn.getAttribute('data-income-action');
+
+      if (action === 'delete') {
+        const ok = window.confirm('Delete this income entry?');
+        if (!ok) return;
+
+        const all = loadIncome(year);
+        const entry = all.find((x) => x && x.id === id);
+        const imp = entry && entry.budgetReceiptImpact && typeof entry.budgetReceiptImpact === 'object' ? entry.budgetReceiptImpact : null;
+        const code = imp ? String(imp.inCode || '').trim() : '';
+        const euro = imp ? Number(imp.euro) : NaN;
+        if (/^[0-9]{4}$/.test(code) && Number.isFinite(euro) && euro !== 0) {
+          const budgetRes = applyIncomeBudgetReceiptsDeltas(year, [{ inCode: code, deltaEuro: -euro }]);
+          if (!budgetRes || !budgetRes.ok) {
+            window.alert(`Could not update Budget receipts (${code}).\n\nIncome was not deleted. Please verify the ${year} Budget exists and contains the matching IN code.`);
+            return;
+          }
+        }
+
+        deleteIncomeEntryById(id, year);
+        applyIncomeView();
+        return;
+      }
+
+      if (action === 'edit') {
+        const all = loadIncome(year);
+        const entry = all.find((x) => x && x.id === id);
+        if (!entry) return;
+        openIncomeModal(entry, year);
+      }
+    });
+
+    if (incomeModal) {
+      incomeModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-income-modal-close]');
+        if (closeTarget) closeIncomeModal();
+      });
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && incomeModal && incomeModal.classList.contains('is-open')) {
+        closeIncomeModal();
+      }
+    });
+
+    if (incomeSaveBtn) {
+      incomeSaveBtn.addEventListener('click', () => {
+        clearIncomeModalErrors();
+        const res = validateIncomeModalValues();
+        if (!res.ok) {
+          showIncomeModalErrors(res.errors);
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const id =
+          currentIncomeId ||
+          (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+        const existing = currentIncomeId ? loadIncome(year).find((x) => x && x.id === currentIncomeId) : null;
+
+        const entry = {
+          id,
+          createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
+          updatedAt: nowIso,
+          ...res.values,
+        };
+
+        // If this income entry has a Budget Number (IN code), roll its Euro amount into the
+        // matching Budget year's "Receipts Euro" for that IN code.
+        const prevImpact = existing && existing.budgetReceiptImpact && typeof existing.budgetReceiptImpact === 'object'
+          ? {
+            inCode: String(existing.budgetReceiptImpact.inCode || '').trim(),
+            euro: Number(existing.budgetReceiptImpact.euro),
+          }
+          : null;
+
+        const desiredInCode = extractInCodeFromBudgetNumberText(entry.budgetNumber);
+        const desiredEuro = Number(entry.euro);
+        const desiredImpact = (/^[0-9]{4}$/.test(desiredInCode) && Number.isFinite(desiredEuro) && desiredEuro > 0)
+          ? { inCode: desiredInCode, euro: desiredEuro }
+          : null;
+
+        const deltas = [];
+        if (prevImpact && /^[0-9]{4}$/.test(prevImpact.inCode) && Number.isFinite(prevImpact.euro) && prevImpact.euro !== 0) {
+          if (desiredImpact && desiredImpact.inCode === prevImpact.inCode) {
+            const delta = desiredImpact.euro - prevImpact.euro;
+            if (delta !== 0) deltas.push({ inCode: prevImpact.inCode, deltaEuro: delta });
+          } else {
+            deltas.push({ inCode: prevImpact.inCode, deltaEuro: -prevImpact.euro });
+          }
+        }
+        if (desiredImpact) {
+          if (!prevImpact || desiredImpact.inCode !== prevImpact.inCode) {
+            deltas.push({ inCode: desiredImpact.inCode, deltaEuro: desiredImpact.euro });
+          }
+        }
+
+        if (deltas.length > 0) {
+          const budgetRes = applyIncomeBudgetReceiptsDeltas(year, deltas);
+          if (!budgetRes || !budgetRes.ok) {
+            const code = budgetRes && budgetRes.inCode ? ` (${budgetRes.inCode})` : '';
+            window.alert(`Could not update Budget receipts${code}.\n\nIncome was not saved. Please verify the ${year} Budget exists and contains the matching IN code.`);
+            return;
+          }
+        }
+
+        if (desiredImpact) {
+          entry.budgetReceiptImpact = {
+            at: nowIso,
+            year: Number(year),
+            inCode: desiredImpact.inCode,
+            euro: desiredImpact.euro,
+          };
+        } else if (prevImpact) {
+          delete entry.budgetReceiptImpact;
+        }
+
+        upsertIncomeEntry(entry, year);
+        applyIncomeView();
+        closeIncomeModal();
+      });
+    }
+
+    window.addEventListener('storage', (e) => {
+      const key = e && typeof e.key === 'string' ? e.key : '';
+      if (key === ACTIVE_BUDGET_YEAR_KEY || key === BUDGET_YEARS_KEY || key.startsWith('payment_order_budget_table_html_')) {
+        applyIncomeView();
+      }
+    });
+
+    applyIncomeView();
   }
 
   function initBudgetEditor() {
@@ -2466,6 +4827,10 @@
     // Page title ("YYYY Budget")
     const titleEl = document.querySelector('[data-budget-title]');
     if (titleEl) titleEl.textContent = `${budgetYear} Budget`;
+
+    const listTitleEl = document.querySelector('[data-budget-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${budgetYear} Budget`;
+
     const subheadEl = document.querySelector('[data-budget-subhead]');
     if (subheadEl) subheadEl.textContent = `Budget overview table for ${budgetYear}.`;
     document.title = `${budgetYear} Budget`;
@@ -2515,6 +4880,21 @@
       setActiveBtn.addEventListener('click', (e) => {
         e.preventDefault();
         saveActiveBudgetYear(budgetYear);
+
+        // First activation: if no Payment Orders list exists for this year,
+        // create it and reset numbering so the first PO number is always 01.
+        const ensured = ensurePaymentOrdersListExistsForYear(budgetYear);
+        if (ensured && ensured.ok && ensured.created) {
+          const year2 = getYear2ForBudgetYear(budgetYear);
+          if (year2) saveNumberingSettings({ year2, nextSeq: 1 });
+        } else {
+          // Otherwise, keep numbering consistent and never go backwards.
+          syncNumberingSettingsToBudgetYear(budgetYear);
+        }
+
+        // Income: create the year list on first activation (if missing).
+        ensureIncomeListExistsForYear(budgetYear);
+
         syncActiveBudgetButton();
         // Re-render nav so the parent Budget link points at the new active year.
         initBudgetYearNav();
@@ -3241,8 +5621,9 @@
       ];
 
       const exampleRows = [
-        ['Anticipated', '', '', '', '', '', '', '', '', ''],
-        ['Budget', '', '', '', '', '', '', '', '', ''],
+        // Use values that match the importer's expectations and the UI's formatting.
+        ['Anticipated', '1020', '2020', 'Example anticipated line', '0.00 €', '0.00 €', '0.00 €', '0.00 €', '-', '-'],
+        ['Budget', '1998', '2998', 'Example budget line', '0.00 €', '0.00 €', '0.00 €', '0.00 €', '-', '-'],
       ];
 
       const lines = [];
@@ -3427,8 +5808,56 @@
         return;
       }
 
-      const ok = window.confirm(`Importing a CSV will replace the current budget table. Continue?\n\nFile: ${fileName || 'CSV'}`);
+      const ok = window.confirm(
+        `Importing a CSV will add rows to the current budget table. Continue?\n\nFile: ${fileName || 'CSV'}`
+      );
       if (!ok) return;
+
+      function readExistingRecordsBySection() {
+        const allRows = Array.from(tbody.querySelectorAll('tr'));
+        const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
+        const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
+        const secondTotalIndex = totals.length >= 2 ? allRows.indexOf(totals[1]) : -1;
+
+        const section1 = [];
+        const section2 = [];
+
+        for (const tr of allRows) {
+          if (tr.classList.contains('budgetTable__spacer')) continue;
+          if (tr.classList.contains('budgetTable__total')) continue;
+          if (tr.classList.contains('budgetTable__remaining')) continue;
+          if (tr.classList.contains('budgetTable__checksum')) continue;
+
+          const tds = Array.from(tr.querySelectorAll('td'));
+          if (tds.length < 7) continue;
+
+          const rowIndex = allRows.indexOf(tr);
+          const isSection1 = firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex;
+          const isSection2 =
+            firstTotalIndex >= 0 &&
+            rowIndex >= 0 &&
+            rowIndex > firstTotalIndex &&
+            (secondTotalIndex < 0 || rowIndex < secondTotalIndex);
+
+          const rec = {
+            in: tds[0]?.textContent ?? '',
+            out: tds[1]?.textContent ?? '',
+            description: tds[2]?.textContent ?? '',
+            approvedEuro: tds[3]?.textContent ?? '',
+            receiptsEuro: tds[4]?.textContent ?? '',
+            expendituresEuro: tds[5]?.textContent ?? '',
+            balanceEuro: tds[6]?.textContent ?? '',
+            receiptsUsd: tds[8]?.textContent ?? '',
+            expendituresUsd: tds[10]?.textContent ?? '',
+          };
+
+          if (isSection1) section1.push(rec);
+          else if (isSection2) section2.push(rec);
+          else section2.push(rec);
+        }
+
+        return { section1, section2 };
+      }
 
       const rows = parseCsvText(csvText);
       if (rows.length === 0) {
@@ -3441,6 +5870,7 @@
 
       const idx = {
         section: header.indexOf('section'),
+        date: header.indexOf('date') !== -1 ? header.indexOf('date') : header.indexOf('transaction date'),
         in: header.indexOf('in'),
         out: header.indexOf('out'),
         description: header.indexOf('description'),
@@ -3458,6 +5888,41 @@
       if (!hasTemplateHeaders && header.length >= 3) {
         // Allow importing a file that has no headers by treating the first row as data.
         dataRows.unshift(rows[0]);
+      }
+
+      function normalizeCsvDateForImport(raw) {
+        const s = String(raw ?? '').trim();
+        if (!s) return '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const mdy = s.match(/^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$/);
+        if (mdy) {
+          const mm = Number(mdy[1]);
+          const dd = Number(mdy[2]);
+          const yyyy = Number(mdy[3]);
+          if (!Number.isInteger(mm) || !Number.isInteger(dd) || !Number.isInteger(yyyy)) return '';
+          if (yyyy < 1000 || yyyy > 9999) return '';
+          if (mm < 1 || mm > 12) return '';
+          if (dd < 1 || dd > 31) return '';
+          const d = new Date(yyyy, mm - 1, dd);
+          if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return '';
+          return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+        }
+        const ms = Date.parse(s);
+        if (!Number.isFinite(ms)) return '';
+        const d = new Date(ms);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      }
+
+      function inferHeaderlessColumnOffset(row) {
+        // If the first column looks like a date (e.g. M/D/YYYY) and the next columns look
+        // like IN/OUT codes, treat the file as having a leading Date column we can ignore.
+        const r = Array.isArray(row) ? row : [];
+        const firstIsDate = normalizeCsvDateForImport(r[0]) !== '';
+        const nextLooksLikeCodes = /^\d{4}$/.test(String(r[1] ?? '').trim()) && /^\d{4}$/.test(String(r[2] ?? '').trim());
+        return firstIsDate && nextLooksLikeCodes ? 1 : 0;
       }
 
       const section1 = [];
@@ -3479,9 +5944,10 @@
 
         // Template-aware record reading
         const rawSection = hasSectionColumn ? get(idx.section) : '';
-        const inVal = idx.in !== -1 ? get(idx.in) : r[0] ?? '';
-        const outVal = idx.out !== -1 ? get(idx.out) : r[1] ?? '';
-        const desc = idx.description !== -1 ? get(idx.description) : r[2] ?? '';
+        const offset = (idx.in === -1 && idx.out === -1 && idx.description === -1) ? inferHeaderlessColumnOffset(r) : 0;
+        const inVal = idx.in !== -1 ? get(idx.in) : r[0 + offset] ?? '';
+        const outVal = idx.out !== -1 ? get(idx.out) : r[1 + offset] ?? '';
+        const desc = idx.description !== -1 ? get(idx.description) : r[2 + offset] ?? '';
 
         // Support round-tripping from exported CSV (it includes the total/remaining rows)
         if (String(desc ?? '').trim().toLowerCase().includes('total anticipated values')) {
@@ -3494,12 +5960,12 @@
           in: inVal,
           out: outVal,
           description: desc,
-          approvedEuro: idx.approvedEuro !== -1 ? get(idx.approvedEuro) : (r[3] ?? ''),
-          receiptsEuro: idx.receiptsEuro !== -1 ? get(idx.receiptsEuro) : (r[4] ?? ''),
-          expendituresEuro: idx.expendituresEuro !== -1 ? get(idx.expendituresEuro) : (r[5] ?? ''),
-          balanceEuro: idx.balanceEuro !== -1 ? get(idx.balanceEuro) : (r[6] ?? ''),
-          receiptsUsd: idx.receiptsUsd !== -1 ? get(idx.receiptsUsd) : (r[7] ?? ''),
-          expendituresUsd: idx.expendituresUsd !== -1 ? get(idx.expendituresUsd) : (r[8] ?? ''),
+          approvedEuro: idx.approvedEuro !== -1 ? get(idx.approvedEuro) : (r[3 + offset] ?? ''),
+          receiptsEuro: idx.receiptsEuro !== -1 ? get(idx.receiptsEuro) : (r[4 + offset] ?? ''),
+          expendituresEuro: idx.expendituresEuro !== -1 ? get(idx.expendituresEuro) : (r[5 + offset] ?? ''),
+          balanceEuro: idx.balanceEuro !== -1 ? get(idx.balanceEuro) : (r[6 + offset] ?? ''),
+          receiptsUsd: idx.receiptsUsd !== -1 ? get(idx.receiptsUsd) : (r[7 + offset] ?? ''),
+          expendituresUsd: idx.expendituresUsd !== -1 ? get(idx.expendituresUsd) : (r[8 + offset] ?? ''),
         };
 
         const sectionName = String(rawSection ?? '').trim().toLowerCase();
@@ -3509,13 +5975,17 @@
         else section2.push(record);
       }
 
-      // Rebuild tbody from imported data
+      const existing = readExistingRecordsBySection();
+      const mergedSection1 = [...(existing.section1 || []), ...section1];
+      const mergedSection2 = [...(existing.section2 || []), ...section2];
+
+      // Rebuild tbody from merged data
       tbody.innerHTML = '';
-      for (const rec of section1) tbody.appendChild(buildDataRowFromRecord(rec));
+      for (const rec of mergedSection1) tbody.appendChild(buildDataRowFromRecord(rec));
       tbody.appendChild(buildSpacerRow());
       tbody.appendChild(buildTotalRow('Total Anticipated Values'));
       tbody.appendChild(buildSpacerRow());
-      for (const rec of section2) tbody.appendChild(buildDataRowFromRecord(rec));
+      for (const rec of mergedSection2) tbody.appendChild(buildDataRowFromRecord(rec));
       tbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
       tbody.appendChild(buildRemainingRow());
       for (const el of buildChecksumSection()) tbody.appendChild(el);
@@ -4150,6 +6620,41 @@
     window.addEventListener('resize', scheduleLeaderUpdate);
     scheduleLeaderUpdate();
 
+    // When the left navigation opens/closes or nested sections expand/collapse,
+    // the available width for cards changes but the window size does not.
+    // Recompute leader lines on layout changes.
+    if (!root.dataset.leaderLinesBound) {
+      root.dataset.leaderLinesBound = '1';
+
+      if (typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver(() => scheduleLeaderUpdate());
+        ro.observe(root);
+        const main = document.querySelector('.appMain');
+        if (main) ro.observe(main);
+      }
+
+      if (navToggleBtn) {
+        navToggleBtn.addEventListener('click', () => {
+          // Run once immediately, and once after any CSS transition.
+          scheduleLeaderUpdate();
+          requestAnimationFrame(scheduleLeaderUpdate);
+        });
+      }
+
+      const navTree = document.querySelector('[data-nav-tree]');
+      if (navTree) {
+        navTree.addEventListener('click', () => {
+          requestAnimationFrame(scheduleLeaderUpdate);
+        });
+      }
+
+      if (appShell) {
+        appShell.addEventListener('transitionend', () => {
+          scheduleLeaderUpdate();
+        });
+      }
+    }
+
     function getVisibleCardCount(gridEl) {
       if (!gridEl) return 0;
       const cards = gridEl.querySelectorAll('.budgetDash__card');
@@ -4515,18 +7020,40 @@
         const nextWith = normalizeWith(withSelect.value);
         const nextStatus = normalizeOrderStatus(statusSelect.value);
 
+        const prevStatus = normalizeOrderStatus(getOrderStatusLabel(latest));
+
         const changed = nextWith !== getOrderWithLabel(latest) || nextStatus !== getOrderStatusLabel(latest);
         if (changed) {
           const nowIso = new Date().toISOString();
-          const updated = {
+          let updated = {
             ...latest,
             with: nextWith,
             status: nextStatus,
             updatedAt: nowIso,
             timeline: appendTimelineEvent(latest, { at: nowIso, with: nextWith, status: nextStatus }),
           };
+
+          // If status transitions to Approved, deduct this order from the selected budget line once.
+          const alreadyDeducted = Boolean(updated && updated.budgetDeduction && updated.budgetDeduction.at);
+          const becomesApproved = prevStatus !== 'Approved' && nextStatus === 'Approved';
+          if (becomesApproved && !alreadyDeducted) {
+            const res = applyApprovedOrderBudgetDeduction(updated, year, nowIso);
+            if (res && res.ok) {
+              updated = {
+                ...updated,
+                budgetDeduction: {
+                  at: res.at,
+                  year: Number(year),
+                  budgetNumber: String(res.outCode),
+                  euro: res.euroApplied,
+                  usd: res.usdApplied,
+                },
+              };
+            }
+          }
+
           upsertOrder(updated, year);
-          renderOrders(loadOrders(year));
+          applyPaymentOrdersView();
         }
       }
 
@@ -4535,9 +7062,7 @@
     });
   }
 
-  if (clearAllBtn) {
-    clearAllBtn.addEventListener('click', clearAll);
-  }
+  // Note: "Clear All" button removed from UI.
 
   if (tbody) {
     // Delegate View/Delete buttons
@@ -4589,9 +7114,13 @@
   // Initial render for list page
   if (tbody) {
     initPaymentOrdersListPage();
+    initPaymentOrdersHeaderFilters();
     seedMockOrdersIfDev();
-    const year = getActiveBudgetYear();
-    renderOrders(loadOrders(year));
+    applyPaymentOrdersView();
+  }
+
+  if (incomeTbody) {
+    initIncomeListPage();
   }
 
   // ---- Itemize page logic ----
@@ -4821,19 +7350,17 @@
             return;
           }
 
-          if (action === 'download') {
-            const list = await listAttachments(attachmentTargetKey);
-            const att = list.find((a) => a.id === id);
+          if (action === 'view') {
+            const att = await getAttachmentById(id);
             if (!att) return;
-            const blob = att.blob;
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = att.name || 'attachment';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            openBlobInNewTab(att.blob);
+            return;
+          }
+
+          if (action === 'download') {
+            const att = await getAttachmentById(id);
+            if (!att) return;
+            downloadBlob(att.blob, att.name);
           }
         });
       }

@@ -67,19 +67,42 @@
                 Payment Orders
               </h2>
               <div class="list-actions">
-                <button type="button" id="clearAllBtn" class="btn btn--danger">
-                  Clear All
-                </button>
+                <div class="list-search">
+                  <label class="sr-only" for="ordersGlobalSearch"
+                    >Search all columns</label
+                  >
+                  <input
+                    id="ordersGlobalSearch"
+                    type="text"
+                    inputmode="search"
+                    placeholder="Search all columns…"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    id="ordersClearSearchBtn"
+                    class="searchClearBtn"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    hidden
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             </div>
 
             <div
-              class="table-wrap"
+              class="table-wrap ordersTableWrap"
               role="region"
               aria-label="Payment orders table"
               tabindex="0"
             >
-              <table class="table" aria-describedby="list-help">
+              <table
+                id="ordersTable"
+                class="table"
+                aria-describedby="list-help"
+              >
                 <caption id="list-help" class="sr-only">
                   Newest requests appear first. Use the leftmost column to
                   delete an entry, and use the Actions column to view details or
@@ -90,21 +113,122 @@
                     <th scope="col" class="col-delete">
                       <span class="sr-only">Delete</span>
                     </th>
-                    <th scope="col">Payment Order No.</th>
-                    <th scope="col">Date</th>
-                    <th scope="col">Name</th>
-                    <th scope="col" class="num">Euro (€)</th>
-                    <th scope="col" class="num">USD ($)</th>
-                    <th scope="col">Budget Number</th>
-                    <th scope="col">Purpose</th>
-                    <th scope="col">With</th>
-                    <th scope="col">Status</th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="paymentOrderNo"
+                    >
+                      Payment Order No.
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="date"
+                    >
+                      Date
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="name"
+                    >
+                      Name
+                    </th>
+                    <th
+                      scope="col"
+                      class="num is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="euro"
+                    >
+                      Euro (€)
+                    </th>
+                    <th
+                      scope="col"
+                      class="num is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="usd"
+                    >
+                      USD ($)
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="budgetNumber"
+                    >
+                      Budget Number
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="purpose"
+                    >
+                      Purpose
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="with"
+                    >
+                      With
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="status"
+                    >
+                      Status
+                    </th>
                     <th scope="col" class="col-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="ordersTbody">
                   <!-- rows inserted by app.js -->
                 </tbody>
+                <tfoot>
+                  <tr class="ordersTotalsRow">
+                    <td class="col-delete"></td>
+                    <td colspan="3" class="ordersTotalsRow__label">
+                      Unapproved Total
+                    </td>
+                    <td class="num" id="ordersTotalUnapprovedEuro"></td>
+                    <td class="num" id="ordersTotalUnapprovedUsd"></td>
+                    <td colspan="5"></td>
+                  </tr>
+                  <tr class="ordersTotalsRow">
+                    <td class="col-delete"></td>
+                    <td colspan="3" class="ordersTotalsRow__label">
+                      Approved Total
+                    </td>
+                    <td class="num" id="ordersTotalApprovedEuro"></td>
+                    <td class="num" id="ordersTotalApprovedUsd"></td>
+                    <td colspan="5"></td>
+                  </tr>
+                  <tr class="ordersTotalsRow">
+                    <td class="col-delete"></td>
+                    <td colspan="3" class="ordersTotalsRow__label">
+                      Grand Total
+                    </td>
+                    <td class="num" id="ordersTotalGrandEuro"></td>
+                    <td class="num" id="ordersTotalGrandUsd"></td>
+                    <td colspan="5"></td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
 

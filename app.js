@@ -20,12 +20,207 @@
   const BUDGET_TABLE_HTML_KEY = 'payment_order_budget_table_html_v1';
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
+  const USERS_KEY = 'payment_order_users_v1';
+  const CURRENT_USER_KEY = 'payment_order_current_user_v1';
+
+  function normalizeUsername(value) {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  function loadUsers() {
+    try {
+      const raw = localStorage.getItem(USERS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveUsers(users) {
+    const safe = Array.isArray(users) ? users : [];
+    localStorage.setItem(USERS_KEY, JSON.stringify(safe));
+  }
+
+  function getCurrentUsername() {
+    try {
+      return String(sessionStorage.getItem(CURRENT_USER_KEY) || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  function setCurrentUsername(username) {
+    const u = String(username || '').trim();
+    try {
+      if (!u) sessionStorage.removeItem(CURRENT_USER_KEY);
+      else sessionStorage.setItem(CURRENT_USER_KEY, u);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function hashPassword(password, salt) {
+    const pw = String(password ?? '');
+    const s = String(salt ?? '');
+    const input = `${s}:${pw}`;
+
+    // Prefer a real hash in secure contexts.
+    try {
+      if (crypto?.subtle?.digest) {
+        const bytes = new TextEncoder().encode(input);
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        const arr = Array.from(new Uint8Array(digest));
+        const b64 = btoa(String.fromCharCode(...arr));
+        return `sha256:${b64}`;
+      }
+    } catch {
+      // fall back
+    }
+
+    // Fallback: store an obfuscated but reversible marker (not secure).
+    return `pw:${btoa(unescape(encodeURIComponent(input)))}`;
+  }
+
+  function verifyPasswordSync(password, salt, storedHash) {
+    const pw = String(password ?? '');
+    const s = String(salt ?? '');
+    const h = String(storedHash ?? '');
+    if (h.startsWith('pw:')) {
+      try {
+        const decoded = decodeURIComponent(escape(atob(h.slice(3))));
+        return decoded === `${s}:${pw}`;
+      } catch {
+        return false;
+      }
+    }
+    return null;
+  }
+
+  async function verifyPassword(password, salt, storedHash) {
+    const fast = verifyPasswordSync(password, salt, storedHash);
+    if (fast !== null) return fast;
+    const computed = await hashPassword(password, salt);
+    return computed === String(storedHash || '');
+  }
+
+  function getUserByUsername(username) {
+    const u = normalizeUsername(username);
+    if (!u) return null;
+    const users = loadUsers();
+    return users.find((x) => normalizeUsername(x && x.username) === u) || null;
+  }
+
+  function getCurrentUser() {
+    const u = getCurrentUsername();
+    if (!u) return null;
+
+    // Dev bypass: allow username "Dev" to act as an always-admin user even if it
+    // doesn't exist in localStorage.
+    if (normalizeUsername(u) === 'dev') {
+      return { username: 'Dev', permissions: { budget: 'write', income: 'write', orders: 'write', ledger: 'write', settings: 'write' } };
+    }
+
+    return getUserByUsername(u);
+  }
+
+  function normalizePermissions(perms) {
+    const p = perms && typeof perms === 'object' ? perms : {};
+
+    const normalizeLevel = (value) => {
+      if (value === true) return 'write';
+      if (value === false || value == null) return 'none';
+      const v = String(value).trim().toLowerCase();
+      if (v === 'write' || v === 'full' || v === 'fullaccess') return 'write';
+      if (v === 'partial' || v === 'limited' || v === 'some') return 'partial';
+      if (v === 'read' || v === 'readonly' || v === 'read-only') return 'read';
+      if (v === 'none' || v === 'no' || v === 'noaccess') return 'none';
+      return 'none';
+    };
+
+    return {
+      budget: normalizeLevel(p.budget),
+      income: normalizeLevel(p.income),
+      orders: normalizeLevel(p.orders),
+      ledger: normalizeLevel(p.ledger),
+      settings: normalizeLevel(p.settings),
+    };
+  }
+
+  function isDevUser(user) {
+    return normalizeUsername(user && user.username) === 'dev';
+  }
+
+  function getEffectivePermissions(user) {
+    if (isDevUser(user)) {
+      return { budget: 'write', income: 'write', orders: 'write', ledger: 'write', settings: 'write' };
+    }
+    return normalizePermissions(user && user.permissions);
+  }
+
+  function requiredPermissionForPage(pathname) {
+    const base = getBasename(pathname);
+    if (base === 'budget.html' || base === 'budget_dashboard.html') return 'budget';
+    if (base === 'income.html') return 'income';
+    if (base === 'menu.html' || base === 'index.html' || base === 'itemize.html' || base === 'reconciliation.html') return 'orders';
+    if (base === 'grand_secretary_ledger.html') return 'ledger';
+    if (base === 'settings.html') return 'settings';
+    return null;
+  }
+
+  function hasPermission(user, permKey) {
+    if (!permKey) return true;
+    const p = getEffectivePermissions(user);
+    return p[permKey] !== 'none';
+  }
+
+  function canWrite(user, permKey) {
+    if (!permKey) return true;
+    const p = getEffectivePermissions(user);
+    return p[permKey] === 'write';
+  }
+
+  function requireWriteAccess(permKey, message) {
+    const user = getCurrentUser();
+    if (!user) {
+      window.alert('Please sign in.');
+      return false;
+    }
+    if (!canWrite(user, permKey)) {
+      window.alert(message || 'Read only access.');
+      return false;
+    }
+    return true;
+  }
+
+  function firstAllowedHrefForUser(user, resolvedYear) {
+    const year = Number.isInteger(Number(resolvedYear)) ? Number(resolvedYear) : getActiveBudgetYear();
+    const order = [
+      { key: 'orders', href: `menu.html?year=${encodeURIComponent(String(year))}` },
+      { key: 'income', href: `income.html?year=${encodeURIComponent(String(year))}` },
+      { key: 'budget', href: `budget_dashboard.html?year=${encodeURIComponent(String(year))}` },
+      { key: 'ledger', href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}` },
+      { key: 'settings', href: 'settings.html' },
+    ];
+    for (const it of order) {
+      if (hasPermission(user, it.key)) return it.href;
+    }
+    return 'settings.html';
+  }
 
   function getPaymentOrdersKeyForYear(year) {
     const y = Number(year);
     if (!Number.isInteger(y)) return null;
     if (y < 1900 || y > 3000) return null;
     return `payment_orders_${y}_v1`;
+  }
+
+  function getPaymentOrdersReconciliationKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    if (y < 1900 || y > 3000) return null;
+    return `payment_orders_reconciliation_${y}_v1`;
   }
 
   function migrateLegacyOrdersIfNeeded(targetYear) {
@@ -193,6 +388,7 @@
 
   function getNavConfig() {
     const years = migrateLegacyBudgetIfNeeded();
+    const currentUser = getCurrentUser();
     const activeYear = (() => {
       const stored = loadActiveBudgetYear();
       if (stored && years.includes(stored)) return stored;
@@ -205,8 +401,8 @@
       if (years.includes(candidate)) return candidate;
       return years.length ? years[0] : candidate;
     })();
-    return [
-      { label: 'New Request Form', href: 'index.html' },
+    const config = [
+      { key: 'orders', label: 'New Request Form', href: 'index.html' },
       {
         key: 'budget',
         label: 'Budget',
@@ -235,8 +431,127 @@
           href: `menu.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
-      { label: 'Settings', href: 'settings.html' },
+      {
+        key: 'ledger',
+        label: 'Ledger',
+        href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: years.map((year) => ({
+          label: String(year),
+          href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
+        })),
+      },
+      { key: 'settings', label: 'Settings', href: 'settings.html' },
     ];
+
+    // If no user is logged in, keep nav minimal.
+    if (!currentUser) {
+      return [{ key: 'settings', label: 'Settings', href: 'settings.html' }];
+    }
+
+    // Filter nav by role permissions.
+    return config.filter((it) => hasPermission(currentUser, it.key));
+  }
+
+  function renderAuthGate() {
+    const users = loadUsers();
+    const hasAnyUsers = users.length > 0;
+    const currentUser = getCurrentUser();
+
+    const base = getBasename(window.location.pathname);
+
+    // If no users exist yet, force Settings so the first user can be created.
+    if (!hasAnyUsers && !currentUser && isDevEnvironment()) {
+      // Dev convenience: in localhost dev mode, allow full access without creating users.
+      setCurrentUsername('dev');
+      return { blocked: false };
+    }
+
+    if (!hasAnyUsers && base !== 'settings.html') {
+      const year = getActiveBudgetYear();
+      window.location.href = `settings.html?year=${encodeURIComponent(String(year))}`;
+      return { blocked: true };
+    }
+
+    // If users exist but none logged in, show login gate.
+    if (hasAnyUsers && !currentUser) {
+      const overlay = document.createElement('div');
+      overlay.className = 'authGate';
+      overlay.innerHTML = `
+        <div class="authGate__card card">
+          <h2 class="authGate__title">Sign in</h2>
+          <form id="authLoginForm" class="authGate__form" novalidate>
+            <div class="field">
+              <label for="authUsername">Username</label>
+              <input id="authUsername" name="authUsername" type="text" autocomplete="username" required />
+            </div>
+            <div class="field">
+              <label for="authPassword">Password</label>
+              <input id="authPassword" name="authPassword" type="password" autocomplete="current-password" required />
+            </div>
+            <div id="authError" class="error" role="alert" aria-live="polite"></div>
+            <div class="actions">
+              <button type="submit" class="btn btn--primary">Sign in</button>
+            </div>
+          </form>
+        </div>
+      `.trim();
+      document.body.appendChild(overlay);
+
+      const form = overlay.querySelector('#authLoginForm');
+      const userEl = overlay.querySelector('#authUsername');
+      const passEl = overlay.querySelector('#authPassword');
+      const errEl = overlay.querySelector('#authError');
+      if (userEl && userEl.focus) userEl.focus();
+
+      if (form) {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          if (!userEl || !passEl) return;
+          const u = normalizeUsername(userEl.value);
+          const p = String(passEl.value || '');
+
+          // Dev bypass: allow signing in as "Dev" with no password/user record.
+          if (u === 'dev') {
+            setCurrentUsername(u);
+            window.location.reload();
+            return;
+          }
+
+          const user = getUserByUsername(u);
+          if (!user) {
+            if (errEl) errEl.textContent = 'Invalid username or password.';
+            return;
+          }
+          const ok = await verifyPassword(p, user.salt, user.passwordHash);
+          if (!ok) {
+            if (errEl) errEl.textContent = 'Invalid username or password.';
+            return;
+          }
+
+          setCurrentUsername(u);
+
+          const required = requiredPermissionForPage(window.location.pathname);
+          if (!hasPermission(user, required)) {
+            window.location.href = firstAllowedHrefForUser(user, getActiveBudgetYear());
+            return;
+          }
+
+          window.location.reload();
+        });
+      }
+      return { blocked: true };
+    }
+
+    // If logged in but lacks permission for this page, redirect.
+    if (currentUser) {
+      const required = requiredPermissionForPage(window.location.pathname);
+      if (required && !hasPermission(currentUser, required)) {
+        window.location.href = firstAllowedHrefForUser(currentUser, getActiveBudgetYear());
+        return { blocked: true };
+      }
+    }
+
+    return { blocked: false };
   }
 
   function getBasename(pathname) {
@@ -1006,6 +1321,13 @@
   const emptyState = document.getElementById('emptyState');
   const clearAllBtn = document.getElementById('clearAllBtn');
   const ordersClearSearchBtn = document.getElementById('ordersClearSearchBtn');
+  const reconciliationBtn = document.getElementById('reconciliationBtn');
+
+  // Payment Orders Reconciliation list page
+  const reconcileTbody = document.getElementById('reconcileOrdersTbody');
+  const reconcileEmptyState = document.getElementById('reconcileEmptyState');
+  const reconcileClearSearchBtn = document.getElementById('reconcileClearSearchBtn');
+  const reconcileToPaymentOrdersBtn = document.getElementById('reconcileToPaymentOrdersBtn');
 
   const modal = document.getElementById('detailsModal');
   const modalBody = document.getElementById('modalBody');
@@ -1021,6 +1343,11 @@
   const incomeModalBody = document.getElementById('incomeModalBody');
   const incomeSaveBtn = document.getElementById('incomeSaveBtn');
 
+  // Grand Secretary Ledger page
+  const gsLedgerTbody = document.getElementById('gsLedgerTbody');
+  const gsLedgerEmptyState = document.getElementById('gsLedgerEmptyState');
+  const gsLedgerClearSearchBtn = document.getElementById('gsLedgerClearSearchBtn');
+
   const themeToggle = document.getElementById('themeToggle');
 
   // Request form submission token
@@ -1032,6 +1359,9 @@
 
   let submitTokenHideTimer = null;
   let flashTokenHideTimer = null;
+
+  const authGateResult = renderAuthGate();
+  if (authGateResult && authGateResult.blocked) return;
 
   function positionToast(el) {
     if (!el) return;
@@ -1103,6 +1433,12 @@
   const numberingForm = document.getElementById('numberingForm');
   const masonicYearInput = document.getElementById('masonicYear');
   const firstNumberInput = document.getElementById('firstNumber');
+
+  // Settings page (roles)
+  const createUserForm = document.getElementById('createUserForm');
+  const usersTbody = document.getElementById('usersTbody');
+  const usersEmptyState = document.getElementById('usersEmptyState');
+  const logoutBtn = document.getElementById('logoutBtn');
 
   // Form page helpers
   const itemsStatus = document.getElementById('itemsStatus');
@@ -1230,6 +1566,45 @@
     } catch {
       return { ok: false, created: false };
     }
+  }
+
+  function ensurePaymentOrdersReconciliationListExistsForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return { ok: false, created: false };
+    const storageKey = getPaymentOrdersReconciliationKeyForYear(y);
+    if (!storageKey) return { ok: false, created: false };
+
+    try {
+      const existing = localStorage.getItem(storageKey);
+      if (existing !== null) return { ok: true, created: false };
+      localStorage.setItem(storageKey, JSON.stringify([]));
+      return { ok: true, created: true };
+    } catch {
+      return { ok: false, created: false };
+    }
+  }
+
+  /** @returns {Array<Object>} */
+  function loadReconciliationOrders(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const storageKey = getPaymentOrdersReconciliationKeyForYear(resolvedYear);
+    if (!storageKey) return [];
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** @param {Array<Object>} orders */
+  function saveReconciliationOrders(orders, year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const storageKey = getPaymentOrdersReconciliationKeyForYear(resolvedYear);
+    if (!storageKey) return;
+    localStorage.setItem(storageKey, JSON.stringify(orders));
   }
 
   /** @returns {Array<Object>} */
@@ -3740,6 +4115,686 @@
     document.title = `${year} Payment Orders`;
   }
 
+  // ---- Payment Orders Reconciliation (year-scoped) ----
+
+  const reconciliationViewState = {
+    globalFilter: '',
+  };
+
+  /** @param {Array<Object>} orders */
+  function renderReconciliationOrders(orders) {
+    if (!reconcileTbody || !reconcileEmptyState) return;
+    reconcileTbody.innerHTML = '';
+
+    if (!orders || orders.length === 0) {
+      reconcileEmptyState.hidden = false;
+      return;
+    }
+
+    reconcileEmptyState.hidden = true;
+
+    const rowsHtml = orders
+      .map((o) => {
+        return `
+          <tr data-id="${escapeHtml(o.id)}">
+            <td class="col-delete">
+              <button
+                type="button"
+                class="btn btn--x"
+                data-action="delete"
+                aria-label="Delete request"
+                title="Delete"
+              >
+                X
+              </button>
+            </td>
+            <td>${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo) || '—')}</td>
+            <td>${escapeHtml(formatDate(o.date))}</td>
+            <td>${escapeHtml(o.name)}</td>
+            <td class="num">${escapeHtml(formatCurrency(o.euro, 'EUR'))}</td>
+            <td class="num">${escapeHtml(formatCurrency(o.usd, 'USD'))}</td>
+            <td>${escapeHtml(o.budgetNumber || '')}</td>
+            <td>${escapeHtml(o.purpose || '')}</td>
+            <td>${escapeHtml(getOrderWithLabel(o))}</td>
+            <td>${escapeHtml(getOrderStatusLabel(o))}</td>
+            <td class="actions">
+              <button type="button" class="btn btn--editBlue" data-action="reconcile">Reconcile</button>
+            </td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    reconcileTbody.innerHTML = rowsHtml;
+  }
+
+  function updateReconciliationHeaderIndicators() {
+    const globalInput = document.getElementById('reconcileOrdersGlobalSearch');
+    if (globalInput) {
+      globalInput.classList.toggle('input-active', normalizeTextForSearch(reconciliationViewState.globalFilter) !== '');
+    }
+
+    if (reconcileClearSearchBtn) {
+      const hasSearch = normalizeTextForSearch(reconciliationViewState.globalFilter) !== '';
+      reconcileClearSearchBtn.hidden = !hasSearch;
+      reconcileClearSearchBtn.disabled = !hasSearch;
+    }
+  }
+
+  function updateReconciliationTotals(orders) {
+    const euroEl = document.getElementById('reconcileTotalEuro');
+    const usdEl = document.getElementById('reconcileTotalUsd');
+    if (!euroEl && !usdEl) return;
+
+    let totalEuro = 0;
+    let totalUsd = 0;
+    for (const o of orders || []) {
+      const e = Number(o && o.euro);
+      const u = Number(o && o.usd);
+      if (Number.isFinite(e)) totalEuro += e;
+      if (Number.isFinite(u)) totalUsd += u;
+    }
+
+    if (euroEl) euroEl.textContent = formatCurrency(totalEuro, 'EUR');
+    if (usdEl) usdEl.textContent = formatCurrency(totalUsd, 'USD');
+  }
+
+  function applyReconciliationView() {
+    if (!reconcileTbody || !reconcileEmptyState) return;
+    const year = getActiveBudgetYear();
+    const all = loadReconciliationOrders(year);
+    const filtered = filterOrdersForView(all, {}, reconciliationViewState.globalFilter);
+    const sorted = sortOrdersForView(filtered, null, 'asc');
+    renderReconciliationOrders(sorted);
+    updateReconciliationTotals(sorted);
+    updateReconciliationHeaderIndicators();
+  }
+
+  function deleteReconciliationOrderById(id) {
+    const year = getActiveBudgetYear();
+    const orders = loadReconciliationOrders(year);
+    const next = orders.filter((o) => o.id !== id);
+    saveReconciliationOrders(next, year);
+    applyReconciliationView();
+  }
+
+  function reconcileOrderById(id) {
+    const year = getActiveBudgetYear();
+    const rec = loadReconciliationOrders(year);
+    const idx = rec.findIndex((o) => o && o.id === id);
+    if (idx === -1) return false;
+
+    const [order] = rec.splice(idx, 1);
+    saveReconciliationOrders(rec, year);
+
+    ensurePaymentOrdersListExistsForYear(year);
+    syncNumberingSettingsToBudgetYear(year);
+
+    const nowIso = new Date().toISOString();
+    const needsNo = !String(order && order.paymentOrderNo || '').trim();
+    const paymentOrderNo = needsNo ? getNextPaymentOrderNo() : String(order.paymentOrderNo).trim();
+
+    const moved = {
+      ...order,
+      paymentOrderNo,
+      updatedAt: nowIso,
+    };
+
+    const existing = loadOrders(year);
+    saveOrders([moved, ...(Array.isArray(existing) ? existing : [])], year);
+
+    if (needsNo) advancePaymentOrderSequence();
+    return true;
+  }
+
+  function initReconciliationListPage() {
+    if (!reconcileTbody) return;
+    const year = getActiveBudgetYear();
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'reconciliation.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(year));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    const titleEl = document.querySelector('[data-reconciliation-title]');
+    if (titleEl) titleEl.textContent = `${year} Reconciliation`;
+
+    const listTitleEl = document.querySelector('[data-reconciliation-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${year} Reconciliation`;
+
+    document.title = `${year} Reconciliation`;
+
+    if (reconcileToPaymentOrdersBtn) {
+      reconcileToPaymentOrdersBtn.textContent = `${year} Payment Orders`;
+      reconcileToPaymentOrdersBtn.setAttribute('href', `menu.html?year=${encodeURIComponent(String(year))}`);
+    }
+
+    const globalInput = document.getElementById('reconcileOrdersGlobalSearch');
+    if (globalInput) {
+      globalInput.value = reconciliationViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        reconciliationViewState.globalFilter = globalInput.value;
+        applyReconciliationView();
+      });
+    }
+
+    if (reconcileClearSearchBtn && globalInput && !reconcileClearSearchBtn.dataset.bound) {
+      reconcileClearSearchBtn.dataset.bound = 'true';
+      reconcileClearSearchBtn.addEventListener('click', () => {
+        globalInput.value = '';
+        reconciliationViewState.globalFilter = '';
+        applyReconciliationView();
+        if (globalInput.focus) globalInput.focus();
+      });
+    }
+
+    reconcileTbody.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+
+      const row = btn.closest('tr[data-id]');
+      if (!row) return;
+
+      const id = row.getAttribute('data-id');
+      const action = btn.getAttribute('data-action');
+
+      if (action === 'delete') {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        const ok = window.confirm('Delete this reconciliation entry?');
+        if (!ok) return;
+        deleteReconciliationOrderById(id);
+        return;
+      }
+
+      if (action === 'reconcile') {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        const ok = window.confirm('Reconcile this entry and move it to Payment Orders?');
+        if (!ok) return;
+        const moved = reconcileOrderById(id);
+        if (moved && typeof showFlashToken === 'function') {
+          showFlashToken('Reconciled: moved entry to Payment Orders.');
+        }
+        applyReconciliationView();
+      }
+    });
+
+    applyReconciliationView();
+  }
+
+  // ---- Roles / Users (settings page) ----
+
+  function countSettingsUsers(users) {
+    const list = Array.isArray(users) ? users : [];
+    return list.filter((u) => u && getEffectivePermissions(u).settings !== 'none').length;
+  }
+
+  function renderUsersTable() {
+    if (!usersTbody || !usersEmptyState) return;
+    const users = loadUsers();
+    const currentUser = getCurrentUser();
+    const canEdit = currentUser ? canWrite(currentUser, 'settings') : false;
+
+    usersTbody.innerHTML = '';
+    if (!users || users.length === 0) {
+      usersEmptyState.hidden = false;
+      return;
+    }
+    usersEmptyState.hidden = true;
+
+    const rows = users
+      .slice()
+      .sort((a, b) => normalizeUsername(a && a.username).localeCompare(normalizeUsername(b && b.username)))
+      .map((u) => {
+        const username = normalizeUsername(u && u.username);
+        const p = getEffectivePermissions(u);
+        const safeName = escapeHtml(username);
+        const disabled = canEdit ? '' : 'disabled';
+
+        const accessChecks = (key, level) => {
+          const lv = String(level || 'none');
+          const checkedWrite = lv === 'write' ? 'checked' : '';
+          const checkedPartial = lv === 'partial' ? 'checked' : '';
+          const checkedRead = lv === 'read' ? 'checked' : '';
+          return `
+            <div class="rolesChecks" role="group" aria-label="${escapeHtml(key)} access">
+              <label class="rolesChecks__item"><input type="checkbox" data-perm="${escapeHtml(key)}" data-level="write" ${checkedWrite} ${disabled} /> Full</label>
+              <label class="rolesChecks__item"><input type="checkbox" data-perm="${escapeHtml(key)}" data-level="partial" ${checkedPartial} ${disabled} /> Partial</label>
+              <label class="rolesChecks__item"><input type="checkbox" data-perm="${escapeHtml(key)}" data-level="read" ${checkedRead} ${disabled} /> Read only</label>
+            </div>
+          `.trim();
+        };
+        return `
+          <tr data-username="${safeName}">
+            <td><strong>${safeName}</strong></td>
+            <td>${accessChecks('budget', p.budget)}</td>
+            <td>${accessChecks('income', p.income)}</td>
+            <td>${accessChecks('orders', p.orders)}</td>
+            <td>${accessChecks('ledger', p.ledger)}</td>
+            <td>${accessChecks('settings', p.settings)}</td>
+            <td><input type="password" data-new-password autocomplete="new-password" placeholder="(leave blank)" aria-label="New password" ${disabled} /></td>
+            <td class="actions">
+              <button type="button" class="btn btn--primary" data-action="save" ${disabled}>Save</button>
+              <button type="button" class="btn btn--danger" data-action="delete" ${disabled}>Delete</button>
+            </td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    usersTbody.innerHTML = rows;
+  }
+
+  async function createUser(usernameRaw, passwordRaw, permissions) {
+    const username = normalizeUsername(usernameRaw);
+    const password = String(passwordRaw || '');
+    if (!username) return { ok: false, reason: 'username' };
+    if (!password) return { ok: false, reason: 'password' };
+
+    const existing = loadUsers();
+    if (existing.some((u) => normalizeUsername(u && u.username) === username)) {
+      return { ok: false, reason: 'duplicate' };
+    }
+
+    const normalizedPerms = normalizePermissions(permissions);
+    // Bootstrap safety: the very first user must be able to access Settings.
+    if (existing.length === 0) normalizedPerms.settings = 'write';
+
+    const salt = (crypto?.randomUUID ? crypto.randomUUID() : `salt_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+    const passwordHash = await hashPassword(password, salt);
+    const nowIso = new Date().toISOString();
+
+    const user = {
+      id: (crypto?.randomUUID ? crypto.randomUUID() : `user_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      username,
+      salt,
+      passwordHash,
+      permissions: normalizedPerms,
+    };
+
+    const merged = [...existing, user];
+    saveUsers(merged);
+    return { ok: true, user };
+  }
+
+  async function updateUser(usernameRaw, nextPermissions, newPasswordRaw) {
+    const username = normalizeUsername(usernameRaw);
+    const newPassword = String(newPasswordRaw || '');
+    const users = loadUsers();
+    const idx = users.findIndex((u) => normalizeUsername(u && u.username) === username);
+    if (idx === -1) return { ok: false, reason: 'notfound' };
+
+    const nextPerms = normalizePermissions(nextPermissions);
+
+    // Ensure at least one Settings-capable user remains.
+    const current = users[idx];
+    const wasSettings = getEffectivePermissions(current).settings;
+    if (wasSettings !== 'none' && nextPerms.settings === 'none') {
+      const others = users.filter((u, i) => i !== idx);
+      if (countSettingsUsers(others) === 0) {
+        return { ok: false, reason: 'lastSettings' };
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const updated = { ...current, permissions: nextPerms, updatedAt: nowIso };
+
+    if (newPassword) {
+      const salt = current && current.salt ? String(current.salt) : (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()));
+      updated.salt = salt;
+      updated.passwordHash = await hashPassword(newPassword, salt);
+    }
+
+    const next = users.map((u, i) => (i === idx ? updated : u));
+    saveUsers(next);
+    return { ok: true, user: updated };
+  }
+
+  function deleteUser(usernameRaw) {
+    const username = normalizeUsername(usernameRaw);
+    const users = loadUsers();
+    const idx = users.findIndex((u) => normalizeUsername(u && u.username) === username);
+    if (idx === -1) return { ok: false, reason: 'notfound' };
+
+    const target = users[idx];
+    const isSettingsUser = getEffectivePermissions(target).settings !== 'none';
+    if (isSettingsUser) {
+      const others = users.filter((_, i) => i !== idx);
+      if (countSettingsUsers(others) === 0) {
+        return { ok: false, reason: 'lastSettings' };
+      }
+    }
+
+    const next = users.filter((_, i) => i !== idx);
+    saveUsers(next);
+
+    const current = normalizeUsername(getCurrentUsername());
+    if (current && current === username) {
+      setCurrentUsername('');
+    }
+
+    return { ok: true };
+  }
+
+  function initRolesSettingsPage() {
+    if (!createUserForm || !usersTbody || !usersEmptyState) return;
+
+    const hasAnyUsers = loadUsers().length > 0;
+    const currentUser = getCurrentUser();
+    const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings') : false);
+
+    renderUsersTable();
+
+    // If the current user cannot write Settings (and users already exist), make the
+    // create-user form visibly read-only (submit handler also blocks).
+    if (hasAnyUsers && !canEdit) {
+      const createInputs = Array.from(createUserForm.querySelectorAll('input, select, textarea, button'));
+      createInputs.forEach((el) => {
+        el.disabled = true;
+      });
+    }
+
+    function bindExclusiveCheckboxGroup(...els) {
+      const inputs = els.filter(Boolean);
+      if (inputs.length < 2) return;
+      for (const el of inputs) {
+        el.addEventListener('change', () => {
+          if (!el.checked) return;
+          inputs.forEach((other) => {
+            if (other !== el) other.checked = false;
+          });
+        });
+      }
+    }
+
+    function setModuleAccess(moduleKey, level) {
+      const lv = String(level || 'none');
+      const w = document.getElementById(`perm${moduleKey}Write`);
+      const p = document.getElementById(`perm${moduleKey}Partial`);
+      const r = document.getElementById(`perm${moduleKey}Read`);
+      if (w) w.checked = lv === 'write';
+      if (p) p.checked = lv === 'partial';
+      if (r) r.checked = lv === 'read';
+    }
+
+    const pairs = [
+      ['Budget', 'budget'],
+      ['Income', 'income'],
+      ['Orders', 'orders'],
+      ['Ledger', 'ledger'],
+      ['Settings', 'settings'],
+    ];
+
+    // Bind mutual exclusivity for each module checkbox group in the create-user form.
+    bindExclusiveCheckboxGroup(
+      document.getElementById('permBudgetWrite'),
+      document.getElementById('permBudgetPartial'),
+      document.getElementById('permBudgetRead')
+    );
+    bindExclusiveCheckboxGroup(
+      document.getElementById('permIncomeWrite'),
+      document.getElementById('permIncomePartial'),
+      document.getElementById('permIncomeRead')
+    );
+    bindExclusiveCheckboxGroup(
+      document.getElementById('permOrdersWrite'),
+      document.getElementById('permOrdersPartial'),
+      document.getElementById('permOrdersRead')
+    );
+    bindExclusiveCheckboxGroup(
+      document.getElementById('permLedgerWrite'),
+      document.getElementById('permLedgerPartial'),
+      document.getElementById('permLedgerRead')
+    );
+    bindExclusiveCheckboxGroup(
+      document.getElementById('permSettingsWrite'),
+      document.getElementById('permSettingsPartial'),
+      document.getElementById('permSettingsRead')
+    );
+
+    const allWrite = document.getElementById('permAllWrite');
+    const allPartial = document.getElementById('permAllPartial');
+    const allRead = document.getElementById('permAllRead');
+    if (allWrite && allRead && !allWrite.dataset.bound) {
+      allWrite.dataset.bound = 'true';
+      allWrite.disabled = hasAnyUsers && !canEdit;
+      if (allPartial) allPartial.disabled = hasAnyUsers && !canEdit;
+      allRead.disabled = hasAnyUsers && !canEdit;
+
+      bindExclusiveCheckboxGroup(allWrite, allPartial, allRead);
+
+      allWrite.addEventListener('change', () => {
+        if (allWrite.checked) {
+          setModuleAccess('Budget', 'write');
+          setModuleAccess('Income', 'write');
+          setModuleAccess('Orders', 'write');
+          setModuleAccess('Ledger', 'write');
+          setModuleAccess('Settings', 'write');
+        } else {
+          setModuleAccess('Budget', 'none');
+          setModuleAccess('Income', 'none');
+          setModuleAccess('Orders', 'none');
+          setModuleAccess('Ledger', 'none');
+          setModuleAccess('Settings', 'none');
+        }
+      });
+      allRead.addEventListener('change', () => {
+        if (allRead.checked) {
+          setModuleAccess('Budget', 'read');
+          setModuleAccess('Income', 'read');
+          setModuleAccess('Orders', 'read');
+          setModuleAccess('Ledger', 'read');
+          setModuleAccess('Settings', 'read');
+        } else {
+          setModuleAccess('Budget', 'none');
+          setModuleAccess('Income', 'none');
+          setModuleAccess('Orders', 'none');
+          setModuleAccess('Ledger', 'none');
+          setModuleAccess('Settings', 'none');
+        }
+      });
+
+      if (allPartial) {
+        allPartial.addEventListener('change', () => {
+          if (allPartial.checked) {
+            setModuleAccess('Budget', 'partial');
+            setModuleAccess('Income', 'partial');
+            setModuleAccess('Orders', 'partial');
+            setModuleAccess('Ledger', 'partial');
+            setModuleAccess('Settings', 'partial');
+          } else {
+            setModuleAccess('Budget', 'none');
+            setModuleAccess('Income', 'none');
+            setModuleAccess('Orders', 'none');
+            setModuleAccess('Ledger', 'none');
+            setModuleAccess('Settings', 'none');
+          }
+        });
+      }
+    }
+
+    if (logoutBtn && !logoutBtn.dataset.bound) {
+      logoutBtn.dataset.bound = 'true';
+      logoutBtn.addEventListener('click', () => {
+        setCurrentUsername('');
+        window.location.reload();
+      });
+    }
+
+    createUserForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      if (loadUsers().length > 0 && !canEdit) {
+        window.alert('This Settings page is read only for your account.');
+        return;
+      }
+
+      const newUsername = document.getElementById('newUsername');
+      const newPassword = document.getElementById('newPassword');
+      const errUser = document.getElementById('error-newUsername');
+      const errPass = document.getElementById('error-newPassword');
+      if (errUser) errUser.textContent = '';
+      if (errPass) errPass.textContent = '';
+
+      const username = newUsername ? newUsername.value : '';
+      const password = newPassword ? newPassword.value : '';
+
+      const perms = {
+        budget: document.getElementById('permBudgetWrite')?.checked
+          ? 'write'
+          : document.getElementById('permBudgetPartial')?.checked
+            ? 'partial'
+            : document.getElementById('permBudgetRead')?.checked
+              ? 'read'
+              : 'none',
+        income: document.getElementById('permIncomeWrite')?.checked
+          ? 'write'
+          : document.getElementById('permIncomePartial')?.checked
+            ? 'partial'
+            : document.getElementById('permIncomeRead')?.checked
+              ? 'read'
+              : 'none',
+        orders: document.getElementById('permOrdersWrite')?.checked
+          ? 'write'
+          : document.getElementById('permOrdersPartial')?.checked
+            ? 'partial'
+            : document.getElementById('permOrdersRead')?.checked
+              ? 'read'
+              : 'none',
+        ledger: document.getElementById('permLedgerWrite')?.checked
+          ? 'write'
+          : document.getElementById('permLedgerPartial')?.checked
+            ? 'partial'
+            : document.getElementById('permLedgerRead')?.checked
+              ? 'read'
+              : 'none',
+        settings: document.getElementById('permSettingsWrite')?.checked
+          ? 'write'
+          : document.getElementById('permSettingsPartial')?.checked
+            ? 'partial'
+            : document.getElementById('permSettingsRead')?.checked
+              ? 'read'
+              : 'none',
+      };
+
+      const hadNoUsers = loadUsers().length === 0;
+      const res = await createUser(username, password, perms);
+      if (!res.ok) {
+        if (res.reason === 'username' && errUser) errUser.textContent = 'Username is required.';
+        else if (res.reason === 'password' && errPass) errPass.textContent = 'Password is required.';
+        else if (res.reason === 'duplicate' && errUser) errUser.textContent = 'Username already exists.';
+        return;
+      }
+
+      if (newUsername) newUsername.value = '';
+      if (newPassword) newPassword.value = '';
+      [
+        'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
+        'permIncomeWrite', 'permIncomePartial', 'permIncomeRead',
+        'permOrdersWrite', 'permOrdersPartial', 'permOrdersRead',
+        'permLedgerWrite', 'permLedgerPartial', 'permLedgerRead',
+        'permSettingsWrite', 'permSettingsPartial', 'permSettingsRead',
+        'permAllWrite', 'permAllPartial', 'permAllRead',
+      ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = false;
+      });
+
+      renderUsersTable();
+
+      // Auto-login the first created user to start using the app.
+      if (hadNoUsers) {
+        setCurrentUsername(normalizeUsername(username));
+        window.location.href = firstAllowedHrefForUser(res.user, getActiveBudgetYear());
+      }
+    });
+
+    usersTbody.addEventListener('click', async (e) => {
+      const btn = e.target && e.target.closest ? e.target.closest('button[data-action]') : null;
+      if (!btn) return;
+
+      if (!canEdit) {
+        window.alert('This Settings page is read only for your account.');
+        return;
+      }
+      const row = btn.closest('tr[data-username]');
+      if (!row) return;
+
+      const username = row.getAttribute('data-username');
+      const action = btn.getAttribute('data-action');
+
+      if (action === 'delete') {
+        const ok = window.confirm(`Delete user "${username}"?`);
+        if (!ok) return;
+        const res = deleteUser(username);
+        if (!res.ok && res.reason === 'lastSettings') {
+          window.alert('At least one user must keep Settings access.');
+          return;
+        }
+        renderUsersTable();
+        return;
+      }
+
+      if (action === 'save') {
+        const perms = { budget: 'none', income: 'none', orders: 'none', ledger: 'none', settings: 'none' };
+        const inputs = Array.from(row.querySelectorAll('input[type="checkbox"][data-perm][data-level]'));
+        for (const key of Object.keys(perms)) {
+          const writeBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'write');
+          const partialBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'partial');
+          const readBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'read');
+          perms[key] = writeBox && writeBox.checked ? 'write' : partialBox && partialBox.checked ? 'partial' : readBox && readBox.checked ? 'read' : 'none';
+        }
+        const pwEl = row.querySelector('input[type="password"][data-new-password]');
+        const newPw = pwEl ? String(pwEl.value || '') : '';
+
+        const res = await updateUser(username, perms, newPw);
+        if (!res.ok && res.reason === 'lastSettings') {
+          window.alert('At least one user must keep Settings access.');
+          return;
+        }
+        if (pwEl) pwEl.value = '';
+        renderUsersTable();
+
+        const current = normalizeUsername(getCurrentUsername());
+        if (current && current === normalizeUsername(username)) {
+          // Refresh permissions immediately for the active user.
+          window.location.reload();
+        }
+      }
+    });
+
+    // Enforce mutual exclusivity for per-module checkbox pairs in the Users table.
+    usersTbody.addEventListener('change', (e) => {
+      const input = e.target && e.target.matches ? (e.target.matches('input[type="checkbox"][data-perm][data-level]') ? e.target : null) : null;
+      if (!input) return;
+      const row = input.closest('tr[data-username]');
+      if (!row) return;
+
+      const key = input.getAttribute('data-perm');
+      const level = input.getAttribute('data-level');
+      if (!key || !level) return;
+
+      if (!input.checked) return;
+
+      const levels = ['write', 'partial', 'read'];
+      for (const lv of levels) {
+        if (lv === level) continue;
+        const other = row.querySelector(
+          `input[type="checkbox"][data-perm="${CSS.escape(key)}"][data-level="${CSS.escape(lv)}"]`
+        );
+        if (other) other.checked = false;
+      }
+    });
+  }
+
   // ---- Income (year-scoped) ----
 
   function getIncomeKeyForYear(year) {
@@ -3759,6 +4814,574 @@
     } catch {
       return { ok: false, created: false };
     }
+  }
+
+  // ---- Grand Secretary Ledger (year-scoped; derived from Income + Payment Orders) ----
+
+  function getGsLedgerVerifiedKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_gs_ledger_verified_${y}_v1`;
+  }
+
+  function ensureGsLedgerVerifiedStoreExistsForYear(year) {
+    const key = getGsLedgerVerifiedKeyForYear(year);
+    if (!key) return { ok: false, created: false };
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing !== null) return { ok: true, created: false };
+      localStorage.setItem(key, JSON.stringify({}));
+      return { ok: true, created: true };
+    } catch {
+      return { ok: false, created: false };
+    }
+  }
+
+  function loadGsLedgerVerifiedMap(year) {
+    const key = getGsLedgerVerifiedKeyForYear(year);
+    if (!key) return {};
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveGsLedgerVerifiedMap(map, year) {
+    const key = getGsLedgerVerifiedKeyForYear(year);
+    if (!key) return;
+    const safe = map && typeof map === 'object' ? map : {};
+    localStorage.setItem(key, JSON.stringify(safe));
+  }
+
+  function buildGsLedgerRowsForYear(year) {
+    const verified = loadGsLedgerVerifiedMap(year);
+    const rows = [];
+
+    // Income rows
+    const incomeEntries = loadIncome(year);
+    for (const inc of Array.isArray(incomeEntries) ? incomeEntries : []) {
+      if (!inc || !inc.id) continue;
+      const ledgerId = `inc:${String(inc.id)}`;
+      rows.push({
+        ledgerId,
+        date: String(inc.date || ''),
+        budgetNumber: extractInCodeFromBudgetNumberText(inc.budgetNumber),
+        creditorDebtor: String(inc.remitter || ''),
+        paymentOrderNo: '',
+        euro: inc.euro,
+        usd: null,
+        verified: Boolean(verified[ledgerId]),
+        with: '',
+        status: '',
+        details: String(inc.description || ''),
+      });
+    }
+
+    // Payment Order rows (Approved or Paid only)
+    const orders = loadOrders(year);
+    for (const o of Array.isArray(orders) ? orders : []) {
+      if (!o || !o.id) continue;
+      const statusRaw = String(o.status || '').trim().toLowerCase();
+      if (statusRaw !== 'approved' && statusRaw !== 'paid') continue;
+      const ledgerId = `po:${String(o.id)}`;
+
+      const euroRaw = String(o.euro ?? '').trim();
+      const usdRaw = String(o.usd ?? '').trim();
+      const euroNum = euroRaw === '' ? Number.NaN : Number(euroRaw);
+      const usdNum = usdRaw === '' ? Number.NaN : Number(usdRaw);
+
+      rows.push({
+        ledgerId,
+        date: String(o.date || ''),
+        budgetNumber: extractInCodeFromBudgetNumberText(o.budgetNumber),
+        creditorDebtor: String(o.name || ''),
+        paymentOrderNo: String(o.paymentOrderNo || ''),
+        euro: Number.isFinite(euroNum) ? -Math.abs(euroNum) : null,
+        usd: Number.isFinite(usdNum) ? -Math.abs(usdNum) : null,
+        verified: Boolean(verified[ledgerId]),
+        with: String(o.with || ''),
+        status: String(o.status || ''),
+        details: String(o.purpose || ''),
+      });
+    }
+
+    return rows;
+  }
+
+  const GS_LEDGER_COL_TYPES = {
+    date: 'date',
+    budgetNumber: 'text',
+    creditorDebtor: 'text',
+    paymentOrderNo: 'text',
+    euro: 'number',
+    usd: 'number',
+    verified: 'boolean',
+    with: 'text',
+    status: 'text',
+    details: 'text',
+  };
+
+  const gsLedgerViewState = {
+    globalFilter: '',
+    sortKey: 'date',
+    sortDir: 'desc',
+    defaultEmptyText: null,
+  };
+
+  function ensureGsLedgerDefaultEmptyText() {
+    if (!gsLedgerEmptyState) return;
+    if (gsLedgerViewState.defaultEmptyText !== null) return;
+    gsLedgerViewState.defaultEmptyText = gsLedgerEmptyState.textContent || 'No ledger entries yet.';
+  }
+
+  function getGsLedgerDisplayValueForColumn(row, colKey) {
+    if (!row) return '';
+    switch (colKey) {
+      case 'date':
+        return formatDate(row.date);
+      case 'budgetNumber':
+        return row.budgetNumber || '';
+      case 'creditorDebtor':
+        return row.creditorDebtor || '';
+      case 'paymentOrderNo':
+        return row.paymentOrderNo || '';
+      case 'euro':
+        return row.euro === null || row.euro === undefined || row.euro === '' ? '' : formatCurrency(row.euro, 'EUR');
+      case 'usd':
+        return row.usd === null || row.usd === undefined || row.usd === '' ? '' : formatCurrency(row.usd, 'USD');
+      case 'verified':
+        return row.verified ? 'Yes' : '';
+      case 'with':
+        return row.with || '';
+      case 'status':
+        return row.status || '';
+      case 'details':
+        return row.details || '';
+      default:
+        return '';
+    }
+  }
+
+  function getGsLedgerSortValueForColumn(row, colKey, colType) {
+    if (!row) return null;
+    if (colType === 'number') {
+      const raw = colKey === 'usd' ? row.usd : row.euro;
+      const num = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+      return Number.isFinite(num) ? num : null;
+    }
+    if (colType === 'date') {
+      const raw = String(row.date || '').trim();
+      return raw ? raw : null;
+    }
+    if (colType === 'boolean') {
+      return row.verified ? 1 : 0;
+    }
+    return normalizeTextForSearch(getGsLedgerDisplayValueForColumn(row, colKey));
+  }
+
+  function filterGsLedgerForView(rows, globalFilter) {
+    const needle = normalizeTextForSearch(globalFilter);
+    if (!needle) return rows || [];
+
+    const cols = Object.keys(GS_LEDGER_COL_TYPES);
+    return (rows || []).filter((r) => cols.some((k) => normalizeTextForSearch(getGsLedgerDisplayValueForColumn(r, k)).includes(needle)));
+  }
+
+  function sortGsLedgerForView(rows, sortKey, sortDir) {
+    const dir = sortDir === 'desc' ? -1 : 1;
+    const key = sortKey || 'date';
+    const colType = GS_LEDGER_COL_TYPES[key] || 'text';
+    const withIndex = (rows || []).map((row, index) => ({ row, index }));
+    withIndex.sort((a, b) => {
+      const av = getGsLedgerSortValueForColumn(a.row, key, colType);
+      const bv = getGsLedgerSortValueForColumn(b.row, key, colType);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'number' || colType === 'boolean') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+    return withIndex.map((x) => x.row);
+  }
+
+  function renderGsLedgerRows(rows) {
+    if (!gsLedgerTbody) return;
+    const html = (rows || [])
+      .map((r) => {
+        const ledgerId = escapeHtml(r.ledgerId);
+        const date = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'date'));
+        const budgetNumber = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'budgetNumber'));
+        const creditorDebtor = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'creditorDebtor'));
+        const poNo = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'paymentOrderNo'));
+        const euro = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'euro'));
+        const usd = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'usd'));
+        const withVal = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'with'));
+        const status = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'status'));
+        const details = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'details'));
+
+        const checked = r.verified ? 'checked' : '';
+        return `
+          <tr data-ledger-id="${ledgerId}">
+            <td>${date}</td>
+            <td>${budgetNumber}</td>
+            <td>${creditorDebtor}</td>
+            <td>${poNo}</td>
+            <td class="num">${euro}</td>
+            <td class="num">${usd}</td>
+            <td class="num">
+              <input type="checkbox" data-ledger-verify="1" data-ledger-id="${ledgerId}" aria-label="Verified" ${checked} />
+            </td>
+            <td>${withVal}</td>
+            <td>${status}</td>
+            <td>${details}</td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    gsLedgerTbody.innerHTML = html;
+  }
+
+  function updateGsLedgerSortIndicators() {
+    if (!gsLedgerTbody) return;
+    const table = gsLedgerTbody.closest('table');
+    if (!table) return;
+
+    const sortKey = gsLedgerViewState.sortKey;
+    const sortDir = gsLedgerViewState.sortDir === 'desc' ? 'desc' : 'asc';
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) {
+        aria = sortDir === 'desc' ? 'descending' : 'ascending';
+      }
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initGsLedgerColumnSorting() {
+    if (!gsLedgerTbody) return;
+    const table = gsLedgerTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (gsLedgerViewState.sortKey === colKey) {
+        gsLedgerViewState.sortDir = gsLedgerViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        gsLedgerViewState.sortKey = colKey;
+        gsLedgerViewState.sortDir = 'asc';
+      }
+      applyGsLedgerView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateGsLedgerSortIndicators();
+  }
+
+  function applyGsLedgerView() {
+    if (!gsLedgerTbody || !gsLedgerEmptyState) return;
+    ensureGsLedgerDefaultEmptyText();
+
+    const year = getActiveBudgetYear();
+    const all = buildGsLedgerRowsForYear(year);
+    const filtered = filterGsLedgerForView(all, gsLedgerViewState.globalFilter);
+    const sorted = sortGsLedgerForView(filtered, gsLedgerViewState.sortKey, gsLedgerViewState.sortDir);
+
+    if (normalizeTextForSearch(gsLedgerViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
+      gsLedgerEmptyState.textContent = 'No ledger entries match your search.';
+    } else {
+      gsLedgerEmptyState.textContent = gsLedgerViewState.defaultEmptyText;
+    }
+
+    gsLedgerEmptyState.hidden = sorted.length > 0;
+    renderGsLedgerRows(sorted);
+    updateGsLedgerTotals(sorted);
+    updateGsLedgerSortIndicators();
+  }
+
+  function updateGsLedgerTotals(rows) {
+    const euroEl = document.getElementById('gsLedgerTotalEuro');
+    const usdEl = document.getElementById('gsLedgerTotalUsd');
+    if (!euroEl && !usdEl) return;
+
+    let totalEuro = 0;
+    let totalUsd = 0;
+    for (const r of rows || []) {
+      const e = Number(r && r.euro);
+      const u = Number(r && r.usd);
+      if (Number.isFinite(e)) totalEuro += e;
+      if (Number.isFinite(u)) totalUsd += u;
+    }
+
+    if (euroEl) euroEl.textContent = formatCurrency(totalEuro, 'EUR');
+    if (usdEl) usdEl.textContent = formatCurrency(totalUsd, 'USD');
+  }
+
+  function initGsLedgerListPage() {
+    if (!gsLedgerTbody || !gsLedgerEmptyState) return;
+    const year = getActiveBudgetYear();
+
+    const exportCsvLink = document.getElementById('gsLedgerExportCsvLink');
+    const menuBtn = document.getElementById('gsLedgerActionsMenuBtn');
+    const menuPanel = document.getElementById('gsLedgerActionsMenu');
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'grand_secretary_ledger.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(year));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    ensureIncomeListExistsForYear(year);
+    ensureGsLedgerVerifiedStoreExistsForYear(year);
+
+    const titleEl = document.querySelector('[data-gs-ledger-title]');
+    if (titleEl) titleEl.textContent = `${year} Ledger`;
+    const listTitleEl = document.querySelector('[data-gs-ledger-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${year} Ledger`;
+    const subheadEl = document.querySelector('[data-gs-ledger-subhead]');
+    if (subheadEl) subheadEl.textContent = `Consolidated ledger for ${year} (Income + Approved/Paid Payment Orders).`;
+    document.title = `${year} Ledger`;
+
+    initGsLedgerColumnSorting();
+
+    const globalInput = document.getElementById('gsLedgerGlobalSearch');
+    if (globalInput) {
+      globalInput.value = gsLedgerViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        gsLedgerViewState.globalFilter = globalInput.value;
+        if (gsLedgerClearSearchBtn) {
+          const hasSearch = normalizeTextForSearch(gsLedgerViewState.globalFilter) !== '';
+          gsLedgerClearSearchBtn.hidden = !hasSearch;
+          gsLedgerClearSearchBtn.disabled = !hasSearch;
+        }
+        applyGsLedgerView();
+      });
+    }
+
+    if (gsLedgerClearSearchBtn && globalInput) {
+      const hasSearch = normalizeTextForSearch(gsLedgerViewState.globalFilter) !== '';
+      gsLedgerClearSearchBtn.hidden = !hasSearch;
+      gsLedgerClearSearchBtn.disabled = !hasSearch;
+      if (!gsLedgerClearSearchBtn.dataset.bound) {
+        gsLedgerClearSearchBtn.dataset.bound = 'true';
+        gsLedgerClearSearchBtn.addEventListener('click', () => {
+          globalInput.value = '';
+          gsLedgerViewState.globalFilter = '';
+          gsLedgerClearSearchBtn.hidden = true;
+          gsLedgerClearSearchBtn.disabled = true;
+          applyGsLedgerView();
+          if (globalInput.focus) globalInput.focus();
+        });
+      }
+    }
+
+    // Persist Verified checkbox state per source record.
+    if (!gsLedgerTbody.dataset.verifiedBound) {
+      gsLedgerTbody.dataset.verifiedBound = '1';
+      gsLedgerTbody.addEventListener('change', (e) => {
+        const input = e.target && e.target.matches ? (e.target.matches('input[type="checkbox"][data-ledger-verify]') ? e.target : null) : null;
+        if (!input) return;
+
+        if (!requireWriteAccess('ledger', 'Ledger is read only for your account.')) {
+          input.checked = !input.checked;
+          return;
+        }
+        const ledgerId = String(input.getAttribute('data-ledger-id') || '').trim();
+        if (!ledgerId) return;
+        const map = loadGsLedgerVerifiedMap(year);
+        map[ledgerId] = Boolean(input.checked);
+        saveGsLedgerVerifiedMap(map, year);
+
+        // Keep sort/search values consistent.
+        applyGsLedgerView();
+      });
+    }
+
+    function escapeCsvValue(value) {
+      const s = String(value ?? '');
+      const normalized = s.replace(/\u00A0/g, ' ').replace(/\r\n|\r|\n/g, ' ').trim();
+      const mustQuote = /[",\n\r]/.test(normalized);
+      const escaped = normalized.replace(/"/g, '""');
+      return mustQuote ? `"${escaped}"` : escaped;
+    }
+
+    function downloadCsvFile(csvText, fileName) {
+      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function getTodayStamp() {
+      const d = new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function exportGsLedgerToCsv() {
+      const header = ['Date', 'Budget Number', 'Creditor/Debtor', 'Payment Order Nr.', 'Euro (€)', 'USD ($)', 'Verified', 'With', 'Status', 'Details'];
+      const all = buildGsLedgerRowsForYear(year);
+      const sorted = sortGsLedgerForView(all, 'date', 'desc');
+      const lines = [];
+      lines.push(header.map(escapeCsvValue).join(','));
+
+      for (const r of sorted) {
+        const values = [
+          String(r && r.date ? r.date : ''),
+          String(r && r.budgetNumber ? r.budgetNumber : ''),
+          String(r && r.creditorDebtor ? r.creditorDebtor : ''),
+          String(r && r.paymentOrderNo ? r.paymentOrderNo : ''),
+          r && r.euro !== null && r.euro !== undefined && r.euro !== '' ? String(r.euro) : '',
+          r && r.usd !== null && r.usd !== undefined && r.usd !== '' ? String(r.usd) : '',
+          r && r.verified ? 'TRUE' : 'FALSE',
+          String(r && r.with ? r.with : ''),
+          String(r && r.status ? r.status : ''),
+          String(r && r.details ? r.details : ''),
+        ];
+        lines.push(values.map(escapeCsvValue).join(','));
+      }
+
+      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
+      downloadCsvFile(csv, `ledger_${year}_${getTodayStamp()}.csv`);
+    }
+
+    if (exportCsvLink) {
+      exportCsvLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        exportGsLedgerToCsv();
+        if (menuPanel && menuBtn) {
+          menuPanel.setAttribute('hidden', '');
+          menuBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    if (menuBtn) {
+      const MENU_CLOSE_DELAY_MS = 250;
+      let menuCloseTimer = 0;
+
+      function isMenuOpen() {
+        return Boolean(menuPanel && !menuPanel.hasAttribute('hidden'));
+      }
+
+      function closeMenu() {
+        if (!menuPanel || !menuBtn) return;
+        menuPanel.setAttribute('hidden', '');
+        menuBtn.setAttribute('aria-expanded', 'false');
+      }
+
+      function openMenu() {
+        if (!menuPanel || !menuBtn) return;
+        menuPanel.removeAttribute('hidden');
+        menuBtn.setAttribute('aria-expanded', 'true');
+      }
+
+      function toggleMenu() {
+        if (isMenuOpen()) closeMenu();
+        else openMenu();
+      }
+
+      function cancelScheduledClose() {
+        if (!menuCloseTimer) return;
+        clearTimeout(menuCloseTimer);
+        menuCloseTimer = 0;
+      }
+
+      function scheduleClose() {
+        cancelScheduledClose();
+        if (!isMenuOpen()) return;
+        menuCloseTimer = window.setTimeout(() => {
+          closeMenu();
+          menuCloseTimer = 0;
+        }, MENU_CLOSE_DELAY_MS);
+      }
+
+      menuBtn.addEventListener('click', () => {
+        toggleMenu();
+      });
+
+      menuBtn.addEventListener('mouseenter', cancelScheduledClose);
+      menuBtn.addEventListener('mouseleave', scheduleClose);
+
+      if (menuPanel) {
+        menuPanel.addEventListener('mouseenter', cancelScheduledClose);
+        menuPanel.addEventListener('mouseleave', scheduleClose);
+      }
+
+      document.addEventListener('click', (e) => {
+        if (!isMenuOpen()) return;
+        const menuRoot = e.target?.closest ? e.target.closest('[data-gs-ledger-menu]') : null;
+        if (menuRoot) return;
+        cancelScheduledClose();
+        closeMenu();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (!isMenuOpen()) return;
+        if (e.key === 'Escape') {
+          cancelScheduledClose();
+          closeMenu();
+        }
+      });
+    }
+
+    // Keep the ledger in sync across tabs/windows.
+    if (!gsLedgerTbody.dataset.storageBound) {
+      gsLedgerTbody.dataset.storageBound = '1';
+      window.addEventListener('storage', (e) => {
+        const key = e && typeof e.key === 'string' ? e.key : '';
+        if (!key) return;
+        if (key.startsWith('payment_orders_') || key.startsWith('payment_order_income_') || key.startsWith('payment_order_gs_ledger_verified_')) {
+          applyGsLedgerView();
+        }
+      });
+    }
+
+    applyGsLedgerView();
   }
 
   /** @returns {Array<Object>} */
@@ -3830,7 +5453,7 @@
       case 'remitter':
         return entry.remitter || '';
       case 'budgetNumber':
-        return formatInBudgetNumberForDisplay(entry.budgetNumber, year);
+        return extractInCodeFromBudgetNumberText(entry.budgetNumber);
       case 'euro':
         return formatCurrency(entry.euro, 'EUR');
       case 'description':
@@ -4176,7 +5799,20 @@
 
     incomeEmptyState.hidden = sorted.length > 0;
     renderIncomeRows(sorted, year);
+    updateIncomeTotals(sorted);
     updateIncomeSortIndicators();
+  }
+
+  function updateIncomeTotals(entries) {
+    const totalEuroEl = document.getElementById('incomeTotalEuro');
+    if (!totalEuroEl) return;
+
+    let total = 0;
+    for (const e of entries || []) {
+      const n = Number(e && e.euro);
+      if (Number.isFinite(n)) total += n;
+    }
+    totalEuroEl.textContent = formatCurrency(total, 'EUR');
   }
 
   function initIncomeListPage() {
@@ -4249,6 +5885,7 @@
     if (incomeNewLink) {
       incomeNewLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         openIncomeModal(null, year);
         if (incomeMenuPanel && incomeMenuBtn) {
           incomeMenuPanel.setAttribute('hidden', '');
@@ -4259,6 +5896,7 @@
 
     if (incomeClearAllBtn) {
       incomeClearAllBtn.addEventListener('click', () => {
+        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         const all = loadIncome(year);
         if (all.length === 0) return;
         const ok = window.confirm('Clear all income entries? This cannot be undone.');
@@ -4466,6 +6104,36 @@
       return n;
     }
 
+    function parseSignedEuroAmount(raw) {
+      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
+      if (!s) return null;
+      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
+      const n = Number(cleaned);
+      if (!Number.isFinite(n)) return null;
+      return n;
+    }
+
+    function findHeaderIndex(headerNames, candidates) {
+      const names = Array.isArray(headerNames) ? headerNames : [];
+      const cands = (Array.isArray(candidates) ? candidates : []).map(normalizeHeaderName).filter(Boolean);
+      if (cands.length === 0) return -1;
+
+      for (const c of cands) {
+        const exact = names.indexOf(c);
+        if (exact !== -1) return exact;
+      }
+
+      for (let i = 0; i < names.length; i += 1) {
+        const h = String(names[i] ?? '').trim();
+        if (!h) continue;
+        if (cands.some((c) => h === c || h.startsWith(`${c} `) || h.startsWith(`${c}(`) || h.startsWith(`${c}—`) || h.startsWith(`${c}-`) || h.startsWith(c))) {
+          return i;
+        }
+      }
+
+      return -1;
+    }
+
     function importIncomeFromCsvText(csvText, fileName) {
       const ok = window.confirm(
         `Importing a CSV will add entries to the current income list for ${year}. Continue?\n\nFile: ${fileName || 'CSV'}`
@@ -4482,11 +6150,11 @@
       const dataRows = rows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
 
       const idx = {
-        date: header.indexOf('transaction date') !== -1 ? header.indexOf('transaction date') : header.indexOf('date'),
-        remitter: header.indexOf('remitter'),
-        budgetNumber: header.indexOf('budget number'),
-        euro: header.indexOf('euro'),
-        description: header.indexOf('description'),
+        date: findHeaderIndex(header, ['transaction date', 'date']),
+        remitter: findHeaderIndex(header, ['remitter']),
+        budgetNumber: findHeaderIndex(header, ['budget number', 'budget']),
+        euro: findHeaderIndex(header, ['euro', 'eur', 'euro (€)', 'euro (eur)']),
+        description: findHeaderIndex(header, ['description', 'details', 'memo', 'reference']),
       };
 
       const hasHeaders = idx.remitter !== -1 && idx.euro !== -1 && idx.description !== -1 && idx.date !== -1;
@@ -4502,6 +6170,7 @@
 
       const nowIso = new Date().toISOString();
       const imported = [];
+      const createdReconciliationOrders = [];
       const errors = [];
 
       for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
@@ -4511,15 +6180,55 @@
         const date = normalizeCsvDate(get(idx.date));
         const remitter = String(get(idx.remitter)).trim();
         const budgetNumber = String(get(idx.budgetNumber)).trim();
-        const euroNum = parseEuroAmount(get(idx.euro));
+        const euroSigned = parseSignedEuroAmount(get(idx.euro));
         const description = String(get(idx.description)).trim();
 
         const rowNo = rowIndex + 2; // 1-based + header row
         if (!date) errors.push(`Row ${rowNo}: invalid Transaction Date.`);
         if (!remitter) errors.push(`Row ${rowNo}: Remitter is required.`);
-        if (euroNum === null) errors.push(`Row ${rowNo}: Euro is required and must be 0 or greater.`);
+        if (euroSigned === null) errors.push(`Row ${rowNo}: Euro is required and must be a valid number.`);
         if (!description) errors.push(`Row ${rowNo}: Description is required.`);
-        if (!date || !remitter || euroNum === null || !description) continue;
+        if (!date || !remitter || euroSigned === null || !description) continue;
+
+        // Negative amounts are expenditures: skip Income import and create Payment Orders instead.
+        if (euroSigned < 0) {
+          const absEuro = Math.abs(euroSigned);
+          const itemTitle = description || 'Imported from Income CSV';
+          const po = buildPaymentOrder({
+            paymentOrderNo: '',
+            date,
+            name: remitter,
+            euro: absEuro,
+            usd: null,
+            items: [
+              {
+                id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+                title: itemTitle,
+                euro: absEuro,
+                usd: null,
+              },
+            ],
+            address: '',
+            iban: '',
+            bic: '',
+            specialInstructions: '',
+            budgetNumber: '',
+            purpose: description,
+            with: 'Grand Secretary',
+            status: 'Submitted',
+          });
+
+          po.updatedAt = po.createdAt;
+
+          createdReconciliationOrders.push(po);
+          continue;
+        }
+
+        const euroNum = parseEuroAmount(String(euroSigned));
+        if (euroNum === null) {
+          errors.push(`Row ${rowNo}: Euro must be 0 or greater.`);
+          continue;
+        }
 
         imported.push({
           id: (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`),
@@ -4533,25 +6242,46 @@
         });
       }
 
-      if (imported.length === 0) {
-        window.alert(errors.length ? `No rows were imported:\n\n${errors.slice(0, 15).join('\n')}` : 'No rows were imported.');
+      if (imported.length === 0 && createdReconciliationOrders.length === 0) {
+        window.alert(
+          errors.length
+            ? `No rows were imported or converted:\n\n${errors.slice(0, 15).join('\n')}`
+            : 'No rows were imported or converted.'
+        );
         return;
       }
 
       if (errors.length > 0) {
         const proceed = window.confirm(
-          `Some rows could not be imported. Import ${imported.length} valid row(s) anyway?\n\n${errors.slice(0, 15).join('\n')}${errors.length > 15 ? '\n…' : ''}`
+          `Some rows could not be processed. Continue with ${imported.length} income row(s) and ${createdReconciliationOrders.length} payment order(s) in Reconciliation?\n\n${errors
+            .slice(0, 15)
+            .join('\n')}${errors.length > 15 ? '\n…' : ''}`
         );
         if (!proceed) return;
       }
 
-      const existing = loadIncome(year);
-      const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
-      saveIncome(merged, year);
+      if (createdReconciliationOrders.length > 0) {
+        ensurePaymentOrdersReconciliationListExistsForYear(year);
+        const existingOrders = loadReconciliationOrders(year);
+        const mergedOrders = [...createdReconciliationOrders, ...(Array.isArray(existingOrders) ? existingOrders : [])];
+        saveReconciliationOrders(mergedOrders, year);
+      }
+
+      if (imported.length > 0) {
+        const existing = loadIncome(year);
+        const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
+        saveIncome(merged, year);
+      }
 
       // Apply Budget receipts impacts for any newly imported rows that have Budget Numbers.
-      backfillIncomeBudgetReceiptImpactsIfNeeded(year);
+      if (imported.length > 0) backfillIncomeBudgetReceiptImpactsIfNeeded(year);
       applyIncomeView();
+
+      if (typeof showFlashToken === 'function') {
+        showFlashToken(
+          `Imported ${imported.length} income row(s). Added ${createdReconciliationOrders.length} payment order(s) to Reconciliation from negative amounts.`
+        );
+      }
     }
 
     if (incomeExportCsvLink) {
@@ -4575,6 +6305,7 @@
 
       incomeImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         input.value = '';
         input.click();
       });
@@ -4671,6 +6402,7 @@
       const action = btn.getAttribute('data-income-action');
 
       if (action === 'delete') {
+        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         const ok = window.confirm('Delete this income entry?');
         if (!ok) return;
 
@@ -4693,6 +6425,7 @@
       }
 
       if (action === 'edit') {
+        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         const all = loadIncome(year);
         const entry = all.find((x) => x && x.id === id);
         if (!entry) return;
@@ -4715,6 +6448,7 @@
 
     if (incomeSaveBtn) {
       incomeSaveBtn.addEventListener('click', () => {
+        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         clearIncomeModalErrors();
         const res = validateIncomeModalValues();
         if (!res.ok) {
@@ -4879,6 +6613,7 @@
     if (setActiveBtn) {
       setActiveBtn.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         saveActiveBudgetYear(budgetYear);
 
         // First activation: if no Payment Orders list exists for this year,
@@ -4895,6 +6630,9 @@
         // Income: create the year list on first activation (if missing).
         ensureIncomeListExistsForYear(budgetYear);
 
+        // Grand Secretary Ledger: initialize Verified store on first activation (if missing).
+        ensureGsLedgerVerifiedStoreExistsForYear(budgetYear);
+
         syncActiveBudgetButton();
         // Re-render nav so the parent Budget link points at the new active year.
         initBudgetYearNav();
@@ -4904,6 +6642,7 @@
     if (deactivateLink) {
       deactivateLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (deactivateLink.getAttribute('aria-disabled') === 'true') return;
         clearActiveBudgetYear();
         syncActiveBudgetButton();
@@ -6003,12 +7742,14 @@
 
     editLink.addEventListener('click', (e) => {
       e.preventDefault();
+      if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
       if (isEditing) return;
       editStartHtml = tbody.innerHTML;
       setEditing(true);
     });
 
     saveBtn.addEventListener('click', () => {
+      if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
       if (!isEditing) return;
       saveEdits();
       setEditing(false);
@@ -6038,6 +7779,7 @@
     if (addLineLink) {
       addLineLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (addLineLink.getAttribute('aria-disabled') === 'true') return;
         if (!isEditing) return;
         addLine();
@@ -6046,6 +7788,7 @@
     if (removeLineLink) {
       removeLineLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (removeLineLink.getAttribute('aria-disabled') === 'true') return;
         if (!isEditing) return;
         removeLine();
@@ -6074,6 +7817,7 @@
 
       importCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (isEditing) return;
         input.value = '';
         input.click();
@@ -6096,6 +7840,7 @@
     if (newYearLink) {
       newYearLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (newYearLink.getAttribute('aria-disabled') === 'true') return;
         if (isEditing) return;
         const y = promptForBudgetYear(budgetYear + 1);
@@ -6755,8 +8500,22 @@
     if (masonicYearInput) masonicYearInput.value = String(Number(settings.year2));
     if (firstNumberInput) firstNumberInput.value = String(settings.nextSeq);
 
+    {
+      const hasAnyUsers = loadUsers().length > 0;
+      const currentUser = getCurrentUser();
+      const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings') : false);
+      if (hasAnyUsers && !canEdit) {
+        if (masonicYearInput) masonicYearInput.disabled = true;
+        if (firstNumberInput) firstNumberInput.disabled = true;
+        const submitBtn = numberingForm.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+      }
+    }
+
     numberingForm.addEventListener('submit', (e) => {
       e.preventDefault();
+
+      if (!requireWriteAccess('settings', 'Settings is read only for your account.')) return;
 
       const yearErr = document.getElementById('error-masonicYear');
       const seqErr = document.getElementById('error-firstNumber');
@@ -6793,6 +8552,9 @@
       }
     });
   }
+
+  // Settings page roles management
+  initRolesSettingsPage();
 
   if (form) {
     // Restore draft fields (so Itemize -> back to form doesn't lose work)
@@ -6868,6 +8630,8 @@
 
     form.addEventListener('submit', (e) => {
       e.preventDefault();
+
+      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
 
       clearFieldErrors();
       clearItemsError();
@@ -6996,6 +8760,7 @@
 
   if (editOrderBtn) {
     editOrderBtn.addEventListener('click', () => {
+      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
       const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
       if (!id) return;
       const year = getActiveBudgetYear();
@@ -7009,6 +8774,7 @@
 
   if (saveOrderBtn) {
     saveOrderBtn.addEventListener('click', () => {
+      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
       const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
       const year = getActiveBudgetYear();
       const latest = id ? getOrderById(id, year) : null;
@@ -7086,9 +8852,11 @@
       } else if (action === 'items') {
         window.location.href = `itemize.html?orderId=${encodeURIComponent(id)}&year=${encodeURIComponent(String(year))}`;
       } else if (action === 'edit') {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
         beginEditingOrder(order);
         window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
       } else if (action === 'delete') {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
         const ok = window.confirm('Delete this request?');
         if (!ok) return;
         deleteOrderById(id);
@@ -7119,8 +8887,23 @@
     applyPaymentOrdersView();
   }
 
+  if (reconciliationBtn) {
+    reconciliationBtn.addEventListener('click', () => {
+      const year = getActiveBudgetYear();
+      window.location.href = `reconciliation.html?year=${encodeURIComponent(String(year))}`;
+    });
+  }
+
+  if (reconcileTbody) {
+    initReconciliationListPage();
+  }
+
   if (incomeTbody) {
     initIncomeListPage();
+  }
+
+  if (gsLedgerTbody) {
+    initGsLedgerListPage();
   }
 
   // ---- Itemize page logic ----
@@ -7343,6 +9126,7 @@
           const action = btn.getAttribute('data-attachment-action');
 
           if (action === 'delete') {
+            if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
             const ok = window.confirm('Remove this attachment?');
             if (!ok) return;
             await deleteAttachmentById(id);
@@ -7368,6 +9152,7 @@
 
     itemForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
       clearItemErrors();
 
       const result = validateItemInput(mode);
@@ -7414,6 +9199,7 @@
       if (action === 'edit') {
         populateItemEditor(current);
       } else if (action === 'delete') {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
         const ok = window.confirm('Delete this item?');
         if (!ok) return;
         items = items.filter((it) => it.id !== itemId);
@@ -7424,6 +9210,7 @@
 
     if (saveItemsBtn) {
       saveItemsBtn.addEventListener('click', () => {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
         if (items.length < 1) {
           window.alert('Add at least one item before saving.');
           return;

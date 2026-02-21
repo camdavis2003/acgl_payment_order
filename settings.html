@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Payment Order Settings</title>
+    <title>Settings</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -27,7 +27,7 @@
                 >
                   <span class="navIconBtn__lines" aria-hidden="true"></span>
                 </button>
-                <h1>Payment Order Settings</h1>
+                <h1>Settings</h1>
               </div>
               <label class="switch" for="themeToggle">
                 <input
@@ -41,21 +41,22 @@
                 <span class="switch__text">Dark mode</span>
               </label>
             </div>
-            <p class="subhead">
-              Set the masonic year and the first Payment Order number for the
-              year.
-            </p>
           </div>
         </header>
 
         <main class="container">
           <section class="card" aria-labelledby="settings-title">
-            <h2 id="settings-title">Numbering</h2>
+            <h2 id="settings-title">Payment Order Numbering</h2>
+
+            <p class="subhead">
+              Set the masonic year and the first Payment Order number for the
+              year.
+            </p>
 
             <form id="numberingForm" novalidate>
               <div class="grid">
                 <div class="field">
-                  <label for="masonicYear">Masonic Year (2 digits)</label>
+                  <label for="masonicYear">Budget Year (2 digits)</label>
                   <select id="masonicYear" name="masonicYear" required>
                     <option value="" selected disabled>Select a budget…</option>
                   </select>
@@ -90,12 +91,214 @@
                 </div>
               </div>
 
-              <div class="actions">
+              <div class="actions actions--right">
                 <button type="submit" class="btn btn--primary">
                   Save Settings
                 </button>
               </div>
             </form>
+          </section>
+
+          <section class="card" aria-labelledby="roles-title">
+            <div class="list-header">
+              <h2 id="roles-title">User Roles</h2>
+              <div class="list-actions">
+                <button type="button" class="btn btn--ghost" id="logoutBtn">
+                  Log out
+                </button>
+              </div>
+            </div>
+
+            <form id="createUserForm" novalidate>
+              <div class="grid">
+                <div class="field">
+                  <label for="newUsername">Username</label>
+                  <input
+                    id="newUsername"
+                    name="newUsername"
+                    type="text"
+                    autocomplete="username"
+                    required
+                  />
+                  <div
+                    class="error"
+                    id="error-newUsername"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+                <div class="field">
+                  <label for="newPassword">Password</label>
+                  <input
+                    id="newPassword"
+                    name="newPassword"
+                    type="password"
+                    autocomplete="new-password"
+                    required
+                  />
+                  <div
+                    class="error"
+                    id="error-newPassword"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+              </div>
+
+              <div class="rolesGrid" aria-label="Module access">
+                <div
+                  class="rolesGrid__row"
+                  role="group"
+                  aria-label="Select all module access"
+                >
+                  <div class="rolesGrid__label">Select all</div>
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permAllWrite" /> Full
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permAllPartial" /> Partial
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permAllRead" /> Read only</label
+                  >
+                </div>
+
+                <div
+                  class="rolesGrid__row"
+                  role="group"
+                  aria-label="Budget access"
+                >
+                  <div class="rolesGrid__label">Budget</div>
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permBudgetWrite" /> Full
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permBudgetPartial" /> Partial
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permBudgetRead" /> Read
+                    only</label
+                  >
+                </div>
+
+                <div
+                  class="rolesGrid__row"
+                  role="group"
+                  aria-label="Income access"
+                >
+                  <div class="rolesGrid__label">Income</div>
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permIncomeWrite" /> Full
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permIncomePartial" /> Partial
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permIncomeRead" /> Read
+                    only</label
+                  >
+                </div>
+
+                <div
+                  class="rolesGrid__row"
+                  role="group"
+                  aria-label="Payment Orders access"
+                >
+                  <div class="rolesGrid__label">Payment Orders</div>
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permOrdersWrite" /> Full
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permOrdersPartial" /> Partial
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permOrdersRead" /> Read
+                    only</label
+                  >
+                </div>
+
+                <div
+                  class="rolesGrid__row"
+                  role="group"
+                  aria-label="Ledger access"
+                >
+                  <div class="rolesGrid__label">Ledger</div>
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permLedgerWrite" /> Full
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permLedgerPartial" /> Partial
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permLedgerRead" /> Read
+                    only</label
+                  >
+                </div>
+
+                <div
+                  class="rolesGrid__row"
+                  role="group"
+                  aria-label="Settings access"
+                >
+                  <div class="rolesGrid__label">Settings</div>
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permSettingsWrite" /> Full
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permSettingsPartial" /> Partial
+                    access</label
+                  >
+                  <label class="rolesGrid__check"
+                    ><input type="checkbox" id="permSettingsRead" /> Read
+                    only</label
+                  >
+                </div>
+              </div>
+
+              <div class="actions actions--createUser actions--right">
+                <button type="submit" class="btn btn--primary">Add User</button>
+              </div>
+            </form>
+
+            <div
+              class="table-wrap"
+              role="region"
+              aria-label="Users table"
+              tabindex="0"
+            >
+              <table class="table" id="usersTable">
+                <thead>
+                  <tr>
+                    <th scope="col">Username</th>
+                    <th scope="col">Budget</th>
+                    <th scope="col">Income</th>
+                    <th scope="col">Orders</th>
+                    <th scope="col">Ledger</th>
+                    <th scope="col">Settings</th>
+                    <th scope="col">New Password</th>
+                    <th scope="col" class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTbody">
+                  <!-- rows inserted by app.js -->
+                </tbody>
+              </table>
+            </div>
+
+            <div id="usersEmptyState" class="empty" hidden>
+              No users yet. Create the first user above.
+            </div>
           </section>
         </main>
       </div>

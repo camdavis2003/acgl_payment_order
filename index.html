@@ -21,6 +21,7 @@
                   type="button"
                   class="navIconBtn"
                   id="navToggle"
+                  hidden
                   aria-label="Open navigation"
                   aria-controls="appNav"
                   aria-expanded="false"
@@ -29,17 +30,23 @@
                 </button>
                 <h1>Payment Order Request</h1>
               </div>
-              <label class="switch" for="themeToggle">
-                <input
-                  type="checkbox"
-                  id="themeToggle"
-                  class="switch__input"
-                  role="switch"
-                  aria-label="Dark mode"
-                />
-                <span class="switch__track" aria-hidden="true"></span>
-                <span class="switch__text">Dark mode</span>
-              </label>
+              <div class="header-actions">
+                <label class="switch" for="themeToggle">
+                  <input
+                    type="checkbox"
+                    id="themeToggle"
+                    class="switch__input"
+                    role="switch"
+                    aria-label="Dark mode"
+                  />
+                  <span class="switch__track" aria-hidden="true"></span>
+                  <span class="switch__text">Dark mode</span>
+                </label>
+
+                <button type="button" class="btn btn--ghost" id="authHeaderBtn">
+                  Sign in
+                </button>
+              </div>
             </div>
             <p class="subhead">
               Complete the form and add it to the submitted list. Entries are
@@ -241,14 +248,10 @@
                 </div>
 
                 <div class="field">
-                  <label for="budgetNumber"
-                    >Budget Number<span class="req" aria-hidden="true"
-                      >*</span
-                    ></label
-                  >
-                  <select id="budgetNumber" name="budgetNumber" required>
-                    <option value="" selected disabled>
-                      Select a budget number…
+                  <label for="budgetNumber">Budget Number</label>
+                  <select id="budgetNumber" name="budgetNumber">
+                    <option value="" selected>
+                      Select a budget number… (restricted)
                     </option>
                   </select>
                   <div
@@ -272,6 +275,31 @@
                   <div
                     class="error"
                     id="error-purpose"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+
+                <div class="field field--span2">
+                  <label for="captchaAnswer"
+                    >Captcha<span class="req" aria-hidden="true">*</span></label
+                  >
+                  <div
+                    id="captchaPrompt"
+                    class="muted"
+                    aria-live="polite"
+                  ></div>
+                  <input
+                    id="captchaAnswer"
+                    name="captchaAnswer"
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    required
+                  />
+                  <div
+                    class="error"
+                    id="error-captchaAnswer"
                     role="alert"
                     aria-live="polite"
                   ></div>

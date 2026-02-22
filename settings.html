@@ -29,17 +29,19 @@
                 </button>
                 <h1>Settings</h1>
               </div>
-              <label class="switch" for="themeToggle">
-                <input
-                  type="checkbox"
-                  id="themeToggle"
-                  class="switch__input"
-                  role="switch"
-                  aria-label="Dark mode"
-                />
-                <span class="switch__track" aria-hidden="true"></span>
-                <span class="switch__text">Dark mode</span>
-              </label>
+              <div class="header-actions">
+                <label class="switch" for="themeToggle">
+                  <input
+                    type="checkbox"
+                    id="themeToggle"
+                    class="switch__input"
+                    role="switch"
+                    aria-label="Dark mode"
+                  />
+                  <span class="switch__track" aria-hidden="true"></span>
+                  <span class="switch__text">Dark mode</span>
+                </label>
+              </div>
             </div>
           </div>
         </header>
@@ -102,11 +104,6 @@
           <section class="card" aria-labelledby="roles-title">
             <div class="list-header">
               <h2 id="roles-title">User Roles</h2>
-              <div class="list-actions">
-                <button type="button" class="btn btn--ghost" id="logoutBtn">
-                  Log out
-                </button>
-              </div>
             </div>
 
             <form id="createUserForm" novalidate>
@@ -143,6 +140,23 @@
                     aria-live="polite"
                   ></div>
                 </div>
+
+                <div class="field field--span2">
+                  <label for="newEmail">Email</label>
+                  <input
+                    id="newEmail"
+                    name="newEmail"
+                    type="email"
+                    inputmode="email"
+                    autocomplete="email"
+                  />
+                  <div
+                    class="error"
+                    id="error-newEmail"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
               </div>
 
               <div class="rolesGrid" aria-label="Module access">
@@ -175,7 +189,9 @@
                     ><input type="checkbox" id="permBudgetWrite" /> Full
                     access</label
                   >
-                  <label class="rolesGrid__check"
+                  <label
+                    class="rolesGrid__check"
+                    data-tooltip="Allows: view/edit/save budget table, add/remove lines, export/template. Restricted (no access): Activate Budget, New Budget Year, Deactivate Budget, Import CSV."
                     ><input type="checkbox" id="permBudgetPartial" /> Partial
                     access</label
                   >
@@ -195,7 +211,9 @@
                     ><input type="checkbox" id="permIncomeWrite" /> Full
                     access</label
                   >
-                  <label class="rolesGrid__check"
+                  <label
+                    class="rolesGrid__check"
+                    data-tooltip="Allows: view/edit/save existing income entries, export/template. Restricted (no access): New Income, Import CSV."
                     ><input type="checkbox" id="permIncomePartial" /> Partial
                     access</label
                   >
@@ -215,7 +233,9 @@
                     ><input type="checkbox" id="permOrdersWrite" /> Full
                     access</label
                   >
-                  <label class="rolesGrid__check"
+                  <label
+                    class="rolesGrid__check"
+                    data-tooltip="Allows: view Payment Orders and open the View form. Partial access can update only the 'With' and 'Status' fields from the View form. Restricted (no access): Create new requests, Edit requests, Delete requests, Items editing, and all Reconciliation actions."
                     ><input type="checkbox" id="permOrdersPartial" /> Partial
                     access</label
                   >
@@ -235,7 +255,9 @@
                     ><input type="checkbox" id="permLedgerWrite" /> Full
                     access</label
                   >
-                  <label class="rolesGrid__check"
+                  <label
+                    class="rolesGrid__check"
+                    data-tooltip="Allows: view Ledger and export CSV. Restricted (no access): checking/unchecking Verified."
                     ><input type="checkbox" id="permLedgerPartial" /> Partial
                     access</label
                   >
@@ -255,7 +277,9 @@
                     ><input type="checkbox" id="permSettingsWrite" /> Full
                     access</label
                   >
-                  <label class="rolesGrid__check"
+                  <label
+                    class="rolesGrid__check"
+                    data-tooltip="Allows: view Settings and edit/save Payment Order Numbering settings, view Audit Log. Restricted (read-only): User Roles (no add/edit/delete users or permissions)."
                     ><input type="checkbox" id="permSettingsPartial" /> Partial
                     access</label
                   >
@@ -286,7 +310,6 @@
                     <th scope="col">Orders</th>
                     <th scope="col">Ledger</th>
                     <th scope="col">Settings</th>
-                    <th scope="col">New Password</th>
                     <th scope="col" class="col-actions">Actions</th>
                   </tr>
                 </thead>
@@ -298,6 +321,50 @@
 
             <div id="usersEmptyState" class="empty" hidden>
               No users yet. Create the first user above.
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="audit-title">
+            <div class="list-header">
+              <h2 id="audit-title">Audit Log</h2>
+              <div class="list-actions">
+                <div class="subhead" id="auditLogMeta"></div>
+
+                <div class="list-search">
+                  <label class="sr-only" for="auditLogSearch"
+                    >Search audit log</label
+                  >
+                  <input
+                    id="auditLogSearch"
+                    type="text"
+                    inputmode="search"
+                    placeholder="Search audit log…"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    id="auditLogClearSearchBtn"
+                    class="searchClearBtn"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    hidden
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div id="auditLogEmptyState" class="empty" hidden>
+              No timeline events found for the active year.
+            </div>
+
+            <div
+              id="auditLogList"
+              class="auditLog"
+              aria-label="Timeline audit log"
+            >
+              <!-- items inserted by app.js -->
             </div>
           </section>
         </main>

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Financial Management System (FMS)</title>
+
+    <style>
+      :root {
+        --size: 180px;
+        --spinDuration: 3.2s;
+
+        /* Ring mask (shows ONLY outer ring + text) */
+        --ringInnerCut: 0 44%;
+        --ringOuterCut: 45%;
+
+        /* Center mask (shows ONLY square & compass) */
+        --centerInner: 0 38%;
+        --centerOuter: 39%;
+
+        --centerScale: 1;
+        --perspective: 900px;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #fff;
+        color: #111;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+
+      .wrap {
+        display: grid;
+        place-items: center;
+        gap: 18px;
+        padding: 24px;
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+
+      .loader {
+        width: var(--size);
+        height: var(--size);
+        position: relative;
+      }
+
+      /* ===== STATIC OUTER RING ONLY ===== */
+      .ring {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+
+        -webkit-mask-image: radial-gradient(
+          circle,
+          transparent var(--ringInnerCut),
+          #000 var(--ringOuterCut)
+        );
+        mask-image: radial-gradient(
+          circle,
+          transparent var(--ringInnerCut),
+          #000 var(--ringOuterCut)
+        );
+      }
+
+      /* ===== 3D STAGE FOR SPINNING CENTER ===== */
+      .stage {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        perspective: var(--perspective);
+        pointer-events: none;
+      }
+
+      .coin {
+        width: 100%;
+        height: 100%;
+        transform-style: preserve-3d;
+        animation: spinY var(--spinDuration) linear infinite;
+      }
+
+      /* ===== CENTER EMBLEM (FRONT + BACK) ===== */
+      .face {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+
+        -webkit-mask-image: radial-gradient(
+          circle,
+          #000 var(--centerInner),
+          transparent var(--centerOuter)
+        );
+        mask-image: radial-gradient(
+          circle,
+          #000 var(--centerInner),
+          transparent var(--centerOuter)
+        );
+
+        transform: scale(var(--centerScale));
+        backface-visibility: hidden;
+      }
+
+      .back {
+        transform: rotateY(180deg) scale(var(--centerScale));
+      }
+
+      @keyframes spinY {
+        from {
+          transform: rotateY(0deg);
+        }
+        to {
+          transform: rotateY(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .coin {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <main class="wrap">
+      <div class="loader" aria-label="Loading">
+        <!-- Static blue ring + text ONLY -->
+        <img
+          class="ring"
+          src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+          alt=""
+        />
+
+        <!-- Spinning square & compass ONLY -->
+        <div class="stage" aria-hidden="true">
+          <div class="coin">
+            <img
+              class="face front"
+              src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+              alt=""
+            />
+            <img
+              class="face back"
+              src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+              alt=""
+            />
+          </div>
+        </div>
+      </div>
+
+      <h1>Financial Management System (FMS)</h1>
+    </main>
+  </body>
+</html>

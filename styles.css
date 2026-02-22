@@ -38,6 +38,11 @@ html[data-theme="dark"] {
 
 * { box-sizing: border-box; }
 
+/* Ensure the HTML `hidden` attribute always wins over author display rules. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -61,10 +66,31 @@ body {
   background: var(--card);
   border-right: 1px solid var(--border);
   padding: 12px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
+}
 
 /* Tree-style sidebar navigation */
 .appNavTree {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* Session footer row at the very bottom of the nested menu pane */
+.appNavSession {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.appNavSession__row {
+  margin: 2px 0;
+  word-break: break-word;
 }
 
 .appNavTree__list,
@@ -142,12 +168,6 @@ body {
   font-size: 0.85em;
   font-weight: 600;
   color: var(--muted);
-}
-
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow: auto;
 }
 
 .appShell.appShell--navClosed .appNav {
@@ -523,6 +543,14 @@ body {
   flex-wrap: wrap;
 }
 
+/* Request form header: stack theme toggle + auth button */
+.header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
 /* Light/Dark switch (top-right) */
 .switch {
   display: inline-flex;
@@ -792,6 +820,36 @@ input:focus, textarea:focus, select:focus, button:focus {
 .incomeTableWrap {
   max-height: 60vh;
   overflow: auto;
+
+/* Income: highlight rows missing Budget Number */
+.incomeRow--missingBudget td {
+  background: var(--danger);
+  color: var(--primary-text);
+}
+
+.incomeRow--missingBudget td.col-delete {
+  background: var(--danger);
+}
+
+.incomeRow--missingBudget .btn--x {
+  color: var(--primary-text);
+}
+
+.incomeRow--missingBudget .btn--x:hover {
+  background: transparent;
+  color: var(--primary-text);
+}
+
+.incomeRow--missingBudget .btn--editBlue {
+  background: var(--surface);
+  border-color: var(--focus);
+  color: var(--focus);
+}
+
+.incomeRow--missingBudget .btn--editBlue:hover {
+  background: var(--surface);
+  filter: brightness(0.98);
+}
 }
 
 .budgetTable th,
@@ -1289,6 +1347,43 @@ input:focus, textarea:focus, select:focus, button:focus {
   margin: 0 6px 0 0;
 }
 
+/* Tooltip popup for Settings roles grid labels (e.g., Budget Partial access) */
+.rolesGrid__check[data-tooltip] {
+  position: relative;
+}
+
+.rolesGrid__check[data-tooltip]:hover::after,
+.rolesGrid__check[data-tooltip]:focus-within::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 10px);
+  width: max-content;
+  max-width: 360px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  white-space: normal;
+  z-index: 40;
+}
+
+.rolesGrid__check[data-tooltip]:hover::before,
+.rolesGrid__check[data-tooltip]:focus-within::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: calc(100% + 4px);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 7px solid var(--border);
+  z-index: 41;
+}
+
 @media (max-width: 900px) {
   .rolesGrid__row {
     grid-template-columns: 1fr;
@@ -1391,6 +1486,43 @@ input:focus, textarea:focus, select:focus, button:focus {
   z-index: 1;
   text-align: left;
   font-size: 0.95rem;
+}
+
+/* Settings: Users table email under username */
+#usersTable td {
+  vertical-align: top;
+}
+
+#usersTable .usersTable__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+/* Settings: Users table password/email line under access columns */
+#usersTable .usersTable__detailsRow td {
+  padding-top: 0;
+}
+
+#usersTable .usersTable__details {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+#usersTable .usersTable__detailsLabel {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+#usersTable .usersTable__detailsInput {
+  width: 100%;
+  min-width: 0;
 }
 
 /* Payment Orders header background like Budget table */
@@ -1664,6 +1796,8 @@ input[type='checkbox'].cb {
   box-shadow: 0 10px 30px rgba(0,0,0,0.25);
   overflow: hidden;
   max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
 }
 
 .modal__header {
@@ -1717,7 +1851,9 @@ input[type='checkbox'].cb {
 .modal__body {
   padding: 14px;
   overflow: auto;
-  max-height: calc(100vh - 160px);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 .modal__poHeader {
@@ -1882,6 +2018,11 @@ input[type='checkbox'].cb {
   overscroll-behavior: contain;
 }
 
+/* Income (Edit) modal: keep the Save button visible even with long timelines */
+#incomeTimelineGraphWrap .timelinegraph__events {
+  max-height: 90px;
+}
+
 .timelinegraph__event {
   display: flex;
   flex-wrap: wrap;
@@ -1899,6 +2040,75 @@ input[type='checkbox'].cb {
 
 .timelinegraph__eventSep {
   opacity: 0.7;
+}
+
+.auditLog {
+  display: grid;
+  gap: 5px;
+  margin-top: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.auditLog__item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 6px 8px;
+}
+
+.auditLog__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.auditLog__header strong {
+  color: var(--text);
+}
+
+.auditLog__changes {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 3px;
+}
+
+.auditLog__change {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.auditLog__field {
+  font-weight: 800;
+}
+
+.auditLog__values {
+  min-width: 0;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.auditLog__values strong {
+  color: var(--text);
+}
+
+.auditLog__noChanges {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 520px) {
+  .auditLog__change {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
 }
 
 .icon-btn {

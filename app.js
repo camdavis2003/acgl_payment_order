@@ -22,12 +22,102 @@
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
   const USERS_KEY = 'payment_order_users_v1';
   const CURRENT_USER_KEY = 'payment_order_current_user_v1';
+  const LOGIN_AT_KEY = 'payment_order_login_at_v1';
+  const AUTH_AUDIT_KEY = 'payment_order_auth_audit_v1';
+
+  const HARD_CODED_ADMIN_USERNAME = 'admin.pass';
+  const HARD_CODED_ADMIN_PASSWORD = 'acgl1962ADM';
+  const HARD_CODED_ADMIN_SALT = 'acgl_fms_admin_v1';
+
+  let hardcodedAdminSeedAttempted = false;
+
+  function isHardcodedAdminUsername(username) {
+    return normalizeUsername(username) === normalizeUsername(HARD_CODED_ADMIN_USERNAME);
+  }
+
+  function buildLegacyPwHash(password, salt) {
+    const pw = String(password ?? '');
+    const s = String(salt ?? '');
+    return `pw:${btoa(unescape(encodeURIComponent(`${s}:${pw}`)))}`;
+  }
+
+  function extractLegacyPasswordPlain(storedHash, salt) {
+    const h = String(storedHash ?? '');
+    const s = String(salt ?? '');
+    if (!h.startsWith('pw:')) return '';
+    try {
+      const decoded = decodeURIComponent(escape(atob(h.slice(3))));
+      const prefix = `${s}:`;
+      if (!decoded.startsWith(prefix)) return '';
+      return decoded.slice(prefix.length);
+    } catch {
+      return '';
+    }
+  }
+
+  function ensureHardcodedAdminUserExists() {
+    if (hardcodedAdminSeedAttempted) return;
+    hardcodedAdminSeedAttempted = true;
+
+    try {
+      const nowIso = new Date().toISOString();
+      const desired = {
+        id: 'user_admin_pass_v1',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        username: normalizeUsername(HARD_CODED_ADMIN_USERNAME),
+        email: '',
+        salt: HARD_CODED_ADMIN_SALT,
+        passwordHash: buildLegacyPwHash(HARD_CODED_ADMIN_PASSWORD, HARD_CODED_ADMIN_SALT),
+        passwordPlain: HARD_CODED_ADMIN_PASSWORD,
+        permissions: { budget: 'write', income: 'write', orders: 'write', ledger: 'write', settings: 'write' },
+      };
+
+      const raw = localStorage.getItem(USERS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const users = Array.isArray(parsed) ? parsed : [];
+
+      const idx = users.findIndex((u) => normalizeUsername(u && u.username) === desired.username);
+      if (idx === -1) {
+        users.push(desired);
+      } else {
+        const current = users[idx] && typeof users[idx] === 'object' ? users[idx] : {};
+        users[idx] = {
+          ...current,
+          id: current.id || desired.id,
+          createdAt: current.createdAt || desired.createdAt,
+          updatedAt: nowIso,
+          username: desired.username,
+          salt: desired.salt,
+          passwordHash: desired.passwordHash,
+          passwordPlain: desired.passwordPlain,
+          permissions: desired.permissions,
+        };
+      }
+
+      localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    } catch {
+      // ignore (e.g., storage disabled)
+    }
+  }
 
   function normalizeUsername(value) {
     return String(value ?? '').trim().toLowerCase();
   }
 
+  function normalizeEmail(value) {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  function isValidEmail(value) {
+    const v = String(value ?? '').trim();
+    if (!v) return false;
+    // Simple client-side check (no backend): allow common emails.
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  }
+
   function loadUsers() {
+    ensureHardcodedAdminUserExists();
     try {
       const raw = localStorage.getItem(USERS_KEY);
       if (!raw) return [];
@@ -51,14 +141,123 @@
     }
   }
 
-  function setCurrentUsername(username) {
-    const u = String(username || '').trim();
+  function getCurrentLoginAtIso() {
     try {
-      if (!u) sessionStorage.removeItem(CURRENT_USER_KEY);
-      else sessionStorage.setItem(CURRENT_USER_KEY, u);
+      return String(sessionStorage.getItem(LOGIN_AT_KEY) || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  function ensureCurrentLoginAtIso() {
+    // Older sessions may not have a stored timestamp; set it once.
+    const currentUser = getCurrentUser();
+    if (!currentUser) return '';
+
+    const existing = getCurrentLoginAtIso();
+    if (existing) return existing;
+
+    const nowIso = new Date().toISOString();
+    try {
+      sessionStorage.setItem(LOGIN_AT_KEY, nowIso);
     } catch {
       // ignore
     }
+    return nowIso;
+  }
+
+  function setCurrentUsername(username) {
+    const u = String(username || '').trim();
+    try {
+      if (!u) {
+        sessionStorage.removeItem(CURRENT_USER_KEY);
+        sessionStorage.removeItem(LOGIN_AT_KEY);
+      } else {
+        sessionStorage.setItem(CURRENT_USER_KEY, u);
+        // Capture the time of successful sign-in for this session.
+        sessionStorage.setItem(LOGIN_AT_KEY, new Date().toISOString());
+      }
+    } catch {
+      // ignore
+    }
+
+    // Persist an audit trail of sign-in events (in localStorage) so it is visible
+    // on the Settings -> Audit Log page.
+    if (u) {
+      appendAuthAuditEvent('Login', u);
+    }
+  }
+
+  function formatLoginAtForDisplay(isoString) {
+    const raw = String(isoString || '').trim();
+    if (!raw) return '';
+    try {
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) return '';
+      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+    } catch {
+      return '';
+    }
+  }
+
+  function formatDurationMs(msRaw) {
+    const ms = Number(msRaw);
+    if (!Number.isFinite(ms) || ms < 0) return '';
+
+    const totalMinutes = Math.floor(ms / 60000);
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+    const minutes = totalMinutes % 60;
+
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours || days) parts.push(`${hours}h`);
+    parts.push(`${minutes}m`);
+    return parts.join(' ');
+  }
+
+  function performLogout() {
+    const prev = normalizeUsername(getCurrentUsername());
+    if (prev) appendAuthAuditEvent('Logout', prev);
+    setCurrentUsername('');
+  }
+
+  function loadAuthAuditEvents() {
+    try {
+      const raw = localStorage.getItem(AUTH_AUDIT_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const arr = Array.isArray(parsed) ? parsed : [];
+      const filtered = arr.filter((e) => !isHardcodedAdminUsername(e && e.user));
+      // If we removed any admin records, persist the cleanup.
+      if (filtered.length !== arr.length) saveAuthAuditEvents(filtered);
+      return filtered;
+    } catch {
+      return [];
+    }
+  }
+
+  function saveAuthAuditEvents(events) {
+    try {
+      const safe = Array.isArray(events) ? events : [];
+      localStorage.setItem(AUTH_AUDIT_KEY, JSON.stringify(safe));
+    } catch {
+      // ignore
+    }
+  }
+
+  function appendAuthAuditEvent(actionRaw, usernameRaw) {
+    const action = String(actionRaw || '').trim() || 'Event';
+    const user = normalizeUsername(usernameRaw) || '—';
+    if (isHardcodedAdminUsername(user)) return;
+    const at = new Date().toISOString();
+
+    const existing = loadAuthAuditEvents();
+    const next = [...existing, { at, module: 'Auth', record: 'Session', user, action, changes: [] }];
+
+    // Keep storage bounded.
+    const MAX = 500;
+    const trimmed = next.length > MAX ? next.slice(next.length - MAX) : next;
+    saveAuthAuditEvents(trimmed);
   }
 
   async function hashPassword(password, salt) {
@@ -115,13 +314,6 @@
   function getCurrentUser() {
     const u = getCurrentUsername();
     if (!u) return null;
-
-    // Dev bypass: allow username "Dev" to act as an always-admin user even if it
-    // doesn't exist in localStorage.
-    if (normalizeUsername(u) === 'dev') {
-      return { username: 'Dev', permissions: { budget: 'write', income: 'write', orders: 'write', ledger: 'write', settings: 'write' } };
-    }
-
     return getUserByUsername(u);
   }
 
@@ -148,25 +340,27 @@
     };
   }
 
-  function isDevUser(user) {
-    return normalizeUsername(user && user.username) === 'dev';
-  }
-
   function getEffectivePermissions(user) {
-    if (isDevUser(user)) {
-      return { budget: 'write', income: 'write', orders: 'write', ledger: 'write', settings: 'write' };
-    }
     return normalizePermissions(user && user.permissions);
   }
 
   function requiredPermissionForPage(pathname) {
     const base = getBasename(pathname);
+
+    // Public pages: always accessible without login.
+    if (base === 'index.html' || base === 'itemize.html') return null;
+
     if (base === 'budget.html' || base === 'budget_dashboard.html') return 'budget';
     if (base === 'income.html') return 'income';
-    if (base === 'menu.html' || base === 'index.html' || base === 'itemize.html' || base === 'reconciliation.html') return 'orders';
+    if (base === 'menu.html' || base === 'reconciliation.html') return 'orders';
     if (base === 'grand_secretary_ledger.html') return 'ledger';
     if (base === 'settings.html') return 'settings';
     return null;
+  }
+
+  function isPublicRequestPage(pathname) {
+    const base = getBasename(pathname);
+    return base === 'index.html' || base === 'itemize.html';
   }
 
   function hasPermission(user, permKey) {
@@ -181,13 +375,103 @@
     return p[permKey] === 'write';
   }
 
+  function canBudgetEdit(user) {
+    const p = getEffectivePermissions(user);
+    return p.budget === 'write' || p.budget === 'partial';
+  }
+
+  function canIncomeEdit(user) {
+    const p = getEffectivePermissions(user);
+    return p.income === 'write' || p.income === 'partial';
+  }
+
+  function canOrdersViewEdit(user) {
+    const p = getEffectivePermissions(user);
+    return p.orders === 'write' || p.orders === 'partial';
+  }
+
+  function canSettingsEdit(user) {
+    const p = getEffectivePermissions(user);
+    return p.settings === 'write' || p.settings === 'partial';
+  }
+
+  function requireBudgetEditAccess(message) {
+    const user = getCurrentUser();
+    if (!user) {
+      window.alert('Please sign in.');
+      return false;
+    }
+    if (!canBudgetEdit(user)) {
+      window.alert(message || 'Read only access.');
+      return false;
+    }
+    return true;
+  }
+
+  function requireIncomeEditAccess(message) {
+    const user = getCurrentUser();
+    if (!user) {
+      window.alert('Please sign in.');
+      return false;
+    }
+    if (!canIncomeEdit(user)) {
+      window.alert(message || 'Read only access.');
+      return false;
+    }
+    return true;
+  }
+
   function requireWriteAccess(permKey, message) {
+    // Public New Request Form flow: allow creating a new request without login.
+    // If editing an existing order, keep normal permission checks.
+    if (permKey === 'orders' && isPublicRequestPage(window.location.pathname) && !getEditOrderId()) {
+      // Anonymous users can submit new requests.
+      // Signed-in users must have Full access for Payment Orders to create.
+      const maybeUser = getCurrentUser();
+      if (!maybeUser) return true;
+      if (!canWrite(maybeUser, 'orders')) {
+        window.alert(message || 'Read only access.');
+        return false;
+      }
+      return true;
+    }
+
     const user = getCurrentUser();
     if (!user) {
       window.alert('Please sign in.');
       return false;
     }
     if (!canWrite(user, permKey)) {
+      window.alert(message || 'Read only access.');
+      return false;
+    }
+    return true;
+  }
+
+  function requireOrdersViewEditAccess(message) {
+    const user = getCurrentUser();
+    if (!user) {
+      window.alert('Please sign in.');
+      return false;
+    }
+    if (!canOrdersViewEdit(user)) {
+      window.alert(message || 'Read only access.');
+      return false;
+    }
+    return true;
+  }
+
+  function requireSettingsEditAccess(message) {
+    // Bootstrap: allow initial setup before any users exist.
+    const hasAnyUsers = loadUsers().length > 0;
+    if (!hasAnyUsers) return true;
+
+    const user = getCurrentUser();
+    if (!user) {
+      window.alert('Please sign in.');
+      return false;
+    }
+    if (!canSettingsEdit(user)) {
       window.alert(message || 'Read only access.');
       return false;
     }
@@ -402,7 +686,7 @@
       return years.length ? years[0] : candidate;
     })();
     const config = [
-      { key: 'orders', label: 'New Request Form', href: 'index.html' },
+      { key: null, label: 'New Request Form', href: 'index.html?new=1' },
       {
         key: 'budget',
         label: 'Budget',
@@ -441,11 +725,14 @@
         })),
       },
       { key: 'settings', label: 'Settings', href: 'settings.html' },
+      { key: null, label: 'Log out', href: 'index.html?logout=1' },
     ];
 
     // If no user is logged in, keep nav minimal.
     if (!currentUser) {
-      return [{ key: 'settings', label: 'Settings', href: 'settings.html' }];
+      return [
+        { key: null, label: 'New Request Form', href: 'index.html?new=1' },
+      ];
     }
 
     // Filter nav by role permissions.
@@ -459,13 +746,13 @@
 
     const base = getBasename(window.location.pathname);
 
-    // If no users exist yet, force Settings so the first user can be created.
-    if (!hasAnyUsers && !currentUser && isDevEnvironment()) {
-      // Dev convenience: in localhost dev mode, allow full access without creating users.
-      setCurrentUsername('dev');
+    // Public pages are always accessible without login.
+    if (isPublicRequestPage(window.location.pathname)) {
       return { blocked: false };
     }
 
+    // If no users exist yet, force Settings so the first user can be created.
+    // (Normally, a hard-coded admin is seeded into localStorage.)
     if (!hasAnyUsers && base !== 'settings.html') {
       const year = getActiveBudgetYear();
       window.location.href = `settings.html?year=${encodeURIComponent(String(year))}`;
@@ -510,13 +797,6 @@
           const u = normalizeUsername(userEl.value);
           const p = String(passEl.value || '');
 
-          // Dev bypass: allow signing in as "Dev" with no password/user record.
-          if (u === 'dev') {
-            setCurrentUsername(u);
-            window.location.reload();
-            return;
-          }
-
           const user = getUserByUsername(u);
           if (!user) {
             if (errEl) errEl.textContent = 'Invalid username or password.';
@@ -526,6 +806,19 @@
           if (!ok) {
             if (errEl) errEl.textContent = 'Invalid username or password.';
             return;
+          }
+
+          // Persist the entered password for display in Settings.
+          try {
+            const users = loadUsers();
+            const idx = users.findIndex((x) => normalizeUsername(x && x.username) === normalizeUsername(u));
+            if (idx !== -1) {
+              const nowIso = new Date().toISOString();
+              users[idx] = { ...users[idx], passwordPlain: p, updatedAt: nowIso };
+              saveUsers(users);
+            }
+          } catch {
+            // ignore
           }
 
           setCurrentUsername(u);
@@ -554,10 +847,131 @@
     return { blocked: false };
   }
 
+  function openAuthLoginOverlay() {
+    const users = loadUsers();
+    const hasAnyUsers = users.length > 0;
+    if (!hasAnyUsers) {
+      // If no users exist yet, there is nothing to verify against.
+      window.location.href = 'settings.html';
+      return;
+    }
+
+    const alreadyOpen = document.querySelector('.authGate[data-manual-auth-gate="1"]');
+    if (alreadyOpen) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'authGate';
+    overlay.setAttribute('data-manual-auth-gate', '1');
+    overlay.innerHTML = `
+      <div class="authGate__card card">
+        <h2 class="authGate__title">Sign in</h2>
+        <form id="authLoginForm" class="authGate__form" novalidate>
+          <div class="field">
+            <label for="authUsername">Username</label>
+            <input id="authUsername" name="authUsername" type="text" autocomplete="username" required />
+          </div>
+          <div class="field">
+            <label for="authPassword">Password</label>
+            <input id="authPassword" name="authPassword" type="password" autocomplete="current-password" required />
+          </div>
+          <div id="authError" class="error" role="alert" aria-live="polite"></div>
+          <div class="actions">
+            <button type="submit" class="btn btn--primary">Sign in</button>
+          </div>
+        </form>
+      </div>
+    `.trim();
+    document.body.appendChild(overlay);
+
+    const form = overlay.querySelector('#authLoginForm');
+    const userEl = overlay.querySelector('#authUsername');
+    const passEl = overlay.querySelector('#authPassword');
+    const errEl = overlay.querySelector('#authError');
+    if (userEl && userEl.focus) userEl.focus();
+
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!userEl || !passEl) return;
+        const u = normalizeUsername(userEl.value);
+        const p = String(passEl.value || '');
+
+        const user = getUserByUsername(u);
+        if (!user) {
+          if (errEl) errEl.textContent = 'Invalid username or password.';
+          return;
+        }
+        const ok = await verifyPassword(p, user.salt, user.passwordHash);
+        if (!ok) {
+          if (errEl) errEl.textContent = 'Invalid username or password.';
+          return;
+        }
+
+        // Persist the entered password for display in Settings.
+        try {
+          const users = loadUsers();
+          const idx = users.findIndex((x) => normalizeUsername(x && x.username) === normalizeUsername(u));
+          if (idx !== -1) {
+            const nowIso = new Date().toISOString();
+            users[idx] = { ...users[idx], passwordPlain: p, updatedAt: nowIso };
+            saveUsers(users);
+          }
+        } catch {
+          // ignore
+        }
+
+        setCurrentUsername(u);
+        window.location.reload();
+      });
+    }
+  }
+
+  function syncAuthHeaderBtn() {
+    if (!authHeaderBtn) return;
+    const user = getCurrentUser();
+    if (user) {
+      // When signed in, hide the header Sign in button.
+      authHeaderBtn.hidden = true;
+      authHeaderBtn.setAttribute('aria-hidden', 'true');
+    } else {
+      authHeaderBtn.hidden = false;
+      authHeaderBtn.setAttribute('aria-hidden', 'false');
+      authHeaderBtn.textContent = 'Sign in';
+      authHeaderBtn.title = 'Sign in';
+      authHeaderBtn.setAttribute('aria-label', 'Sign in');
+    }
+  }
+
+  function syncRequestFormHamburgerVisibility() {
+    if (!navToggleBtn) return;
+    const base = getBasename(window.location.pathname);
+    if (base !== 'index.html') return;
+
+    const user = getCurrentUser();
+    const show = Boolean(user);
+
+    const navAside = document.getElementById('appNav');
+    if (navAside) navAside.hidden = !show;
+
+    navToggleBtn.hidden = !show;
+    navToggleBtn.setAttribute('aria-hidden', String(!show));
+    navToggleBtn.tabIndex = show ? 0 : -1;
+
+    // Ensure nav is closed when anonymous (button is hidden so it can't be reopened).
+    if (!show && appShell) {
+      appShell.classList.add('appShell--navClosed');
+    }
+
+    // Keep aria state consistent when toggling visibility.
+    updateNavToggleUi();
+  }
+
   function getBasename(pathname) {
     const raw = String(pathname || '').replace(/\\/g, '/');
     const parts = raw.split('/').filter(Boolean);
-    return parts.length ? parts[parts.length - 1].toLowerCase() : '';
+    // When a static server serves / as index.html, the browser pathname is just "/".
+    // Treat that as index.html so public-page logic behaves correctly.
+    return parts.length ? parts[parts.length - 1].toLowerCase() : 'index.html';
   }
 
   function isActiveHref(href) {
@@ -689,6 +1103,30 @@
       }
 
       mount.appendChild(list);
+
+      // Footer row (very bottom): show who is signed in + when.
+      const currentUser = getCurrentUser();
+      if (currentUser) {
+        const loginAtIso = ensureCurrentLoginAtIso();
+        const loginAtText = formatLoginAtForDisplay(loginAtIso) || '—';
+        const username = String(currentUser && currentUser.username ? currentUser.username : '').trim() || '—';
+
+        const footer = document.createElement('div');
+        footer.className = 'appNavSession';
+        footer.setAttribute('data-nav-session-footer', '1');
+
+        const row1 = document.createElement('div');
+        row1.className = 'appNavSession__row';
+        row1.appendChild(document.createTextNode(`User: ${username}`));
+
+        const row2 = document.createElement('div');
+        row2.className = 'appNavSession__row';
+        row2.appendChild(document.createTextNode(`Accessed: ${loginAtText}`));
+
+        footer.appendChild(row1);
+        footer.appendChild(row2);
+        mount.appendChild(footer);
+      }
     }
   }
 
@@ -1350,6 +1788,9 @@
 
   const themeToggle = document.getElementById('themeToggle');
 
+  // Request form (index.html) header auth button
+  const authHeaderBtn = document.getElementById('authHeaderBtn');
+
   // Request form submission token
   const submitToken = document.getElementById('submitToken');
   const cancelEditBtn = document.getElementById('cancelEditBtn');
@@ -1448,6 +1889,22 @@
   const usdField = document.getElementById('usd');
 
   let currentViewedOrderId = null;
+
+  // Request form CAPTCHA (client-side human check)
+  let requestCaptchaExpected = null;
+
+  function generateRequestCaptcha() {
+    if (!form) return;
+    const promptEl = document.getElementById('captchaPrompt');
+    const inputEl = form.elements.namedItem('captchaAnswer');
+    if (!promptEl || !inputEl) return;
+
+    const a = 2 + Math.floor(Math.random() * 8); // 2..9
+    const b = 2 + Math.floor(Math.random() * 8); // 2..9
+    requestCaptchaExpected = String(a + b);
+    promptEl.textContent = `What is ${a} + ${b}?`;
+    if (typeof inputEl.value === 'string') inputEl.value = '';
+  }
 
   function getEditOrderId() {
     const id = localStorage.getItem(EDIT_ORDER_ID_KEY);
@@ -1998,6 +2455,7 @@
       specialInstructions: form.specialInstructions.value.trim(),
       budgetNumber: form.budgetNumber.value.trim(),
       purpose: form.purpose.value.trim(),
+      captchaAnswer: form.captchaAnswer ? String(form.captchaAnswer.value || '').trim() : '',
     };
 
     const errors = {};
@@ -2011,11 +2469,19 @@
       'iban',
       'bic',
       'specialInstructions',
-      'budgetNumber',
       'purpose',
+      'captchaAnswer',
     ];
     for (const key of requiredKeys) {
       if (!values[key]) errors[key] = 'This field is required.';
+    }
+
+    if (!errors.captchaAnswer) {
+      if (requestCaptchaExpected === null) {
+        errors.captchaAnswer = 'Captcha is not ready. Please reload the page.';
+      } else if (values.captchaAnswer !== requestCaptchaExpected) {
+        errors.captchaAnswer = 'Incorrect captcha answer.';
+      }
     }
 
     if (Object.keys(errors).length > 0) {
@@ -2230,6 +2696,8 @@
       .map((a) => {
         const safeId = escapeHtml(a.id);
         const safeName = escapeHtml(a.name || 'attachment');
+        const passwordPlain = String(u && typeof u.passwordPlain === 'string' ? u.passwordPlain : '')
+          || extractLegacyPasswordPlain(u && u.passwordHash, u && u.salt);
         const safeSize = escapeHtml(formatBytes(a.size));
         return `
           <div class="modalAttRow" data-attachment-id="${safeId}">
@@ -3092,6 +3560,9 @@
           at: createdAt,
           with: getOrderWithLabel(built),
           status: getOrderStatusLabel(built),
+          user: getTimelineUsername(),
+          action: 'Created',
+          changes: computeOrderAuditChanges(null, built),
         },
       ],
     };
@@ -3149,6 +3620,9 @@
         at: createdAt,
         with: getOrderWithLabel(order),
         status: getOrderStatusLabel(order),
+        user: '—',
+        action: 'Created',
+        changes: [],
       },
     ];
   }
@@ -3156,6 +3630,184 @@
   function appendTimelineEvent(order, evt) {
     const timeline = ensureOrderTimeline(order);
     return [...timeline, evt];
+  }
+
+  function auditIsBlank(value) {
+    if (value === null || value === undefined) return true;
+    const s = String(value).trim();
+    return !s || s === '—' || s === '-';
+  }
+
+  function auditMoney(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return n.toFixed(2);
+  }
+
+  function auditValue(value) {
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    const s = String(value).trim();
+    return s ? s : '—';
+  }
+
+  /**
+   * @param {any|null} prev
+   * @param {any} next
+   * @returns {Array<{field:string, from:string, to:string}>}
+   */
+  function computeIncomeAuditChanges(prev, next) {
+    const p = prev && typeof prev === 'object' ? prev : null;
+    const n = next && typeof next === 'object' ? next : null;
+    if (!n) return [];
+
+    const fields = [
+      { key: 'date', label: 'Date', fmt: (v) => auditValue(v) },
+      { key: 'remitter', label: 'Remitter', fmt: (v) => auditValue(v) },
+      { key: 'budgetNumber', label: 'Budget Number', fmt: (v) => auditValue(v) },
+      { key: 'euro', label: 'Euro', fmt: (v) => (auditIsBlank(v) ? '—' : auditMoney(v)) },
+      { key: 'description', label: 'Description', fmt: (v) => auditValue(v) },
+    ];
+
+    const changes = [];
+    for (const f of fields) {
+      const from = f.fmt(p ? p[f.key] : null);
+      const to = f.fmt(n ? n[f.key] : null);
+      if (from === to) continue;
+      changes.push({ field: f.label, from, to });
+    }
+    return changes;
+  }
+
+  /**
+   * @param {any|null} prev
+   * @param {any} next
+   * @returns {Array<{field:string, from:string, to:string}>}
+   */
+  function computeOrderAuditChanges(prev, next) {
+    const p = prev && typeof prev === 'object' ? prev : null;
+    const n = next && typeof next === 'object' ? next : null;
+    if (!n) return [];
+
+    const fields = [
+      {
+        key: 'paymentOrderNo',
+        label: 'Payment Order No.',
+        fmt: (v) => {
+          const raw = auditValue(v);
+          if (raw === '—') return '—';
+          return formatPaymentOrderNoForDisplay(raw);
+        },
+      },
+      { key: 'date', label: 'Date', fmt: (v) => auditValue(v) },
+      { key: 'name', label: 'Name', fmt: (v) => auditValue(v) },
+      { key: 'budgetNumber', label: 'Budget Number', fmt: (v) => auditValue(v) },
+      { key: 'purpose', label: 'Purpose', fmt: (v) => auditValue(v) },
+      { key: 'address', label: 'Address', fmt: (v) => auditValue(v) },
+      { key: 'iban', label: 'IBAN', fmt: (v) => auditValue(v) },
+      { key: 'bic', label: 'BIC', fmt: (v) => auditValue(v) },
+      { key: 'specialInstructions', label: 'Special Instructions', fmt: (v) => auditValue(v) },
+      { key: 'euro', label: 'Euro Total', fmt: (v) => (auditIsBlank(v) ? '—' : auditMoney(v)) },
+      { key: 'usd', label: 'USD Total', fmt: (v) => (auditIsBlank(v) ? '—' : auditMoney(v)) },
+      { key: 'with', label: 'With', fmt: (v) => (auditIsBlank(v) ? '—' : normalizeWith(v)) },
+      { key: 'status', label: 'Status', fmt: (v) => (auditIsBlank(v) ? '—' : normalizeOrderStatus(v)) },
+    ];
+
+    const changes = [];
+    for (const f of fields) {
+      const from = f.fmt(p ? p[f.key] : null);
+      const to = f.fmt(n ? n[f.key] : null);
+      if (from === to) continue;
+      changes.push({ field: f.label, from, to });
+    }
+
+    const prevItems = Array.isArray(p && p.items) ? p.items : [];
+    const nextItems = Array.isArray(n && n.items) ? n.items : [];
+    if (prevItems.length !== nextItems.length) {
+      changes.push({ field: 'Items', from: `${prevItems.length} item(s)`, to: `${nextItems.length} item(s)` });
+    }
+
+    return changes;
+  }
+
+  function getTimelineUsername() {
+    const u = getCurrentUser && getCurrentUser();
+    const name = u && u.username ? String(u.username).trim() : '';
+    if (!name) return 'Unknown';
+    if (isHardcodedAdminUsername(name)) return '—';
+    return name;
+  }
+
+  function ensureIncomeTimeline(entry) {
+    const existing = Array.isArray(entry && entry.timeline) ? entry.timeline : [];
+    if (existing.length > 0) return existing;
+
+    const createdAt = String((entry && entry.createdAt) || new Date().toISOString());
+    return [
+      {
+        at: createdAt,
+        user: '—',
+        action: 'Created',
+        changes: computeIncomeAuditChanges(null, entry),
+      },
+    ];
+  }
+
+  function appendIncomeTimelineEvent(entry, evt) {
+    const timeline = ensureIncomeTimeline(entry);
+    return [...timeline, evt];
+  }
+
+  function renderIncomeTimelineGraph(entry) {
+    const timeline = ensureIncomeTimeline(entry);
+
+    const timelineSorted = [...timeline]
+      .filter((e) => e && typeof e === 'object' && e.at)
+      .map((e) => ({ ...e, _ms: toTimeMs(e.at) }))
+      .filter((e) => e._ms !== null)
+      .sort((a, b) => a._ms - b._ms);
+
+    const createdAt = String(entry && entry.createdAt ? entry.createdAt : '').trim();
+    const updatedAt = String(entry && entry.updatedAt ? entry.updatedAt : '').trim();
+    const txDate = formatDate(entry && entry.date);
+
+    const createdLabel = createdAt ? formatIsoDateOnly(createdAt) : '—';
+    const updatedLabel = updatedAt ? formatIsoDateOnly(updatedAt) : '—';
+    const rangeEndLabel = formatIsoDateOnly(updatedAt || createdAt);
+
+    const timelineForDisplay = [...timelineSorted].sort((a, b) => b._ms - a._ms);
+    const eventsHtml = timelineForDisplay
+      .map((e) => {
+        const t = formatIsoDateTimeShort(e.at);
+        const user = e.user !== undefined ? String(e.user || '—') : '—';
+        const action = e.action !== undefined ? String(e.action || '—') : '—';
+        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>User: <strong>${escapeHtml(user)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Action: <strong>${escapeHtml(action)}</strong></span></div>`;
+      })
+      .join('');
+
+    return `
+      <div id="incomeTimelineGraphWrap">
+        <div class="timelinegraph" aria-label="Income timeline">
+          <div class="timelinegraph__header">
+            <div class="timelinegraph__title">Timeline</div>
+            <div class="timelinegraph__range">${escapeHtml(createdLabel)} → ${escapeHtml(rangeEndLabel)}</div>
+          </div>
+
+          <div class="timelinegraph__meta">
+            <span>Transaction Date: <strong>${escapeHtml(txDate)}</strong></span>
+            <span class="timelinegraph__sep">|</span>
+            <span>Created: <strong>${escapeHtml(createdLabel)}</strong></span>
+            <span class="timelinegraph__sep">|</span>
+            <span>Updated: <strong>${escapeHtml(updatedLabel)}</strong></span>
+          </div>
+
+          <div class="timelinegraph__events" aria-label="Timeline events">
+            ${eventsHtml}
+          </div>
+        </div>
+      </div>
+    `.trim();
   }
 
   function buildTimelineSegments({ startMs, endMs, initialValue, events, field, normalizeFn }) {
@@ -3251,6 +3903,12 @@
     if (!tbody || !emptyState) return;
     tbody.innerHTML = '';
 
+    const currentUser = getCurrentUser();
+    const canFullWrite = currentUser ? canWrite(currentUser, 'orders') : false;
+    const writeDisabledAttr = canFullWrite ? '' : ' disabled';
+    const writeAriaDisabled = canFullWrite ? 'false' : 'true';
+    const writeTooltipAttr = canFullWrite ? '' : ' data-tooltip="Requires Full access for Payment Orders."';
+
     if (!orders || orders.length === 0) {
       emptyState.hidden = false;
       return;
@@ -3268,7 +3926,8 @@
                 class="btn btn--x"
                 data-action="delete"
                 aria-label="Delete request"
-                title="Delete"
+                title="${canFullWrite ? 'Delete' : 'Requires Full access for Payment Orders.'}"
+                aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}
               >
                 X
               </button>
@@ -3283,8 +3942,8 @@
             <td>${escapeHtml(getOrderWithLabel(o))}</td>
             <td>${escapeHtml(getOrderStatusLabel(o))}</td>
             <td class="actions">
-              <button type="button" class="btn btn--ghost btn--items" data-action="items">Items</button>
-              <button type="button" class="btn btn--editBlue" data-action="edit">Edit</button>
+              <button type="button" class="btn btn--ghost btn--items" data-action="items" title="${canFullWrite ? 'Items' : 'Requires Full access for Payment Orders.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>Items</button>
+              <button type="button" class="btn btn--editBlue" data-action="edit" title="${canFullWrite ? 'Edit' : 'Requires Full access for Payment Orders.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>Edit</button>
               <button type="button" class="btn btn--viewGrey" data-action="view">View</button>
             </td>
           </tr>
@@ -4023,6 +4682,27 @@
       });
     }
 
+    // Access rules:
+    // - Orders Partial: read-only everywhere (including Reconciliation) EXCEPT this View modal
+    //   where the user may update only With + Status.
+    const currentUser = getCurrentUser();
+    const canFullWrite = currentUser ? canWrite(currentUser, 'orders') : false;
+    const canViewWrite = currentUser ? canOrdersViewEdit(currentUser) : false;
+
+    if (statusSelect) statusSelect.disabled = !canViewWrite;
+    if (withSelect) withSelect.disabled = !canViewWrite;
+
+    if (editOrderBtn) {
+      editOrderBtn.disabled = !canFullWrite;
+      if (!canFullWrite) editOrderBtn.setAttribute('data-tooltip', 'Requires Full access for Payment Orders.');
+      else editOrderBtn.removeAttribute('data-tooltip');
+    }
+    if (saveOrderBtn) {
+      saveOrderBtn.disabled = !canViewWrite;
+      if (!canViewWrite) saveOrderBtn.setAttribute('data-tooltip', 'Read only access.');
+      else saveOrderBtn.removeAttribute('data-tooltip');
+    }
+
     modal.classList.add('is-open');
     modal.setAttribute('aria-hidden', 'false');
 
@@ -4335,27 +5015,48 @@
     return list.filter((u) => u && getEffectivePermissions(u).settings !== 'none').length;
   }
 
+  const usersTableViewState = {
+    editingUsername: null,
+  };
+
+  function formatAccessLabel(level) {
+    const lv = String(level || 'none').toLowerCase();
+    if (lv === 'write') return 'Full';
+    if (lv === 'partial') return 'Partial';
+    if (lv === 'read') return 'Read only';
+    return 'None';
+  }
+
   function renderUsersTable() {
     if (!usersTbody || !usersEmptyState) return;
     const users = loadUsers();
+    const visibleUsers = (Array.isArray(users) ? users : []).filter((u) => (
+      normalizeUsername(u && u.username) !== normalizeUsername(HARD_CODED_ADMIN_USERNAME)
+    ));
     const currentUser = getCurrentUser();
     const canEdit = currentUser ? canWrite(currentUser, 'settings') : false;
 
     usersTbody.innerHTML = '';
-    if (!users || users.length === 0) {
+    if (!visibleUsers || visibleUsers.length === 0) {
       usersEmptyState.hidden = false;
       return;
     }
     usersEmptyState.hidden = true;
 
-    const rows = users
+    const rows = visibleUsers
       .slice()
       .sort((a, b) => normalizeUsername(a && a.username).localeCompare(normalizeUsername(b && b.username)))
       .map((u) => {
         const username = normalizeUsername(u && u.username);
+        const email = normalizeEmail(u && u.email);
+        const passwordPlain = String(u && typeof u.passwordPlain === 'string' ? u.passwordPlain : '')
+          || extractLegacyPasswordPlain(u && u.passwordHash, u && u.salt);
         const p = getEffectivePermissions(u);
+        const isEditing = Boolean(usersTableViewState.editingUsername && usersTableViewState.editingUsername === username);
+        const isProtected = username === normalizeUsername(HARD_CODED_ADMIN_USERNAME);
         const safeName = escapeHtml(username);
-        const disabled = canEdit ? '' : 'disabled';
+        const safeEmail = escapeHtml(email);
+        const disabled = canEdit && !isProtected ? '' : 'disabled';
 
         const accessChecks = (key, level) => {
           const lv = String(level || 'none');
@@ -4370,19 +5071,73 @@
             </div>
           `.trim();
         };
+
+        const accessDisplay = (key, level) => {
+          const label = formatAccessLabel(level);
+          const safe = escapeHtml(label);
+          return `<span class="usersTable__permLabel" aria-label="${escapeHtml(key)} access">${safe}</span>`;
+        };
+
+        const safePw = escapeHtml(passwordPlain);
+        const passwordControl = isEditing
+          ? `<input type="text" class="usersTable__detailsInput" data-new-password autocomplete="new-password" value="${safePw}" aria-label="Password" ${disabled} />`
+          : '<span class="usersTable__permLabel">—</span>';
+
+        const emailControl = isEditing
+          ? `<input type="email" class="usersTable__detailsInput" data-email autocomplete="email" placeholder="(optional)" value="${safeEmail}" aria-label="Email" ${disabled} />`
+          : `<span class="usersTable__permLabel">${email ? escapeHtml(email) : '—'}</span>`;
+
+        const emailDetailsCell = `
+          <div class="usersTable__details" aria-label="Email">
+            <span class="usersTable__detailsLabel">Email:</span>
+            ${emailControl}
+          </div>
+        `.trim();
+
+        const passwordDetailsCell = `
+          <div class="usersTable__details" aria-label="Password">
+            <span class="usersTable__detailsLabel">Password:</span>
+            ${passwordControl}
+          </div>
+        `.trim();
+
+        const actionsCell = (() => {
+          const editDisabled = disabled ? 'disabled' : '';
+          const deleteDisabled = disabled ? 'disabled' : '';
+          const protectTitle = isProtected ? ' title="This user is protected."' : '';
+
+          if (!isEditing) {
+            return `
+              <button type="button" class="btn btn--primary" data-action="edit" ${editDisabled}${protectTitle}>Edit</button>
+              <button type="button" class="btn btn--danger" data-action="delete" ${deleteDisabled}${protectTitle}>Delete</button>
+            `.trim();
+          }
+
+          return `
+            <button type="button" class="btn btn--primary" data-action="save" ${editDisabled}${protectTitle}>Save</button>
+            <button type="button" class="btn" data-action="cancel" ${editDisabled}${protectTitle}>Cancel</button>
+            <button type="button" class="btn btn--danger" data-action="delete" ${deleteDisabled}${protectTitle}>Delete</button>
+          `.trim();
+        })();
+
         return `
           <tr data-username="${safeName}">
-            <td><strong>${safeName}</strong></td>
-            <td>${accessChecks('budget', p.budget)}</td>
-            <td>${accessChecks('income', p.income)}</td>
-            <td>${accessChecks('orders', p.orders)}</td>
-            <td>${accessChecks('ledger', p.ledger)}</td>
-            <td>${accessChecks('settings', p.settings)}</td>
-            <td><input type="password" data-new-password autocomplete="new-password" placeholder="(leave blank)" aria-label="New password" ${disabled} /></td>
-            <td class="actions">
-              <button type="button" class="btn btn--primary" data-action="save" ${disabled}>Save</button>
-              <button type="button" class="btn btn--danger" data-action="delete" ${disabled}>Delete</button>
+            <td>
+              <div class="usersTable__identity">
+                <strong>${safeName}</strong>
+              </div>
             </td>
+            <td>${isEditing ? accessChecks('budget', p.budget) : accessDisplay('budget', p.budget)}</td>
+            <td>${isEditing ? accessChecks('income', p.income) : accessDisplay('income', p.income)}</td>
+            <td>${isEditing ? accessChecks('orders', p.orders) : accessDisplay('orders', p.orders)}</td>
+            <td>${isEditing ? accessChecks('ledger', p.ledger) : accessDisplay('ledger', p.ledger)}</td>
+            <td>${isEditing ? accessChecks('settings', p.settings) : accessDisplay('settings', p.settings)}</td>
+            <td class="actions">${actionsCell}</td>
+          </tr>
+          <tr class="usersTable__detailsRow" data-details-for="${safeName}">
+            <td>${emailDetailsCell}</td>
+            <td colspan="5">${passwordDetailsCell}</td>
+            <td></td>
           </tr>
         `.trim();
       })
@@ -4391,11 +5146,13 @@
     usersTbody.innerHTML = rows;
   }
 
-  async function createUser(usernameRaw, passwordRaw, permissions) {
+  async function createUser(usernameRaw, passwordRaw, permissions, emailRaw) {
     const username = normalizeUsername(usernameRaw);
     const password = String(passwordRaw || '');
+    const email = normalizeEmail(emailRaw);
     if (!username) return { ok: false, reason: 'username' };
-    if (!password) return { ok: false, reason: 'password' };
+    if (!password || !password.trim()) return { ok: false, reason: 'password' };
+    if (email && !isValidEmail(email)) return { ok: false, reason: 'email' };
 
     const existing = loadUsers();
     if (existing.some((u) => normalizeUsername(u && u.username) === username)) {
@@ -4415,8 +5172,10 @@
       createdAt: nowIso,
       updatedAt: nowIso,
       username,
+      email,
       salt,
       passwordHash,
+      passwordPlain: password,
       permissions: normalizedPerms,
     };
 
@@ -4425,12 +5184,20 @@
     return { ok: true, user };
   }
 
-  async function updateUser(usernameRaw, nextPermissions, newPasswordRaw) {
+  async function updateUser(usernameRaw, nextPermissions, newPasswordRaw, nextEmailRaw) {
     const username = normalizeUsername(usernameRaw);
     const newPassword = String(newPasswordRaw || '');
+    const nextEmail = normalizeEmail(nextEmailRaw);
+    if (nextEmail && !isValidEmail(nextEmail)) return { ok: false, reason: 'email' };
     const users = loadUsers();
     const idx = users.findIndex((u) => normalizeUsername(u && u.username) === username);
     if (idx === -1) return { ok: false, reason: 'notfound' };
+
+    // Hard-coded admin: always enforce full access.
+    if (username === normalizeUsername(HARD_CODED_ADMIN_USERNAME)) {
+      ensureHardcodedAdminUserExists();
+      return { ok: true, user: getUserByUsername(username) };
+    }
 
     const nextPerms = normalizePermissions(nextPermissions);
 
@@ -4445,12 +5212,14 @@
     }
 
     const nowIso = new Date().toISOString();
-    const updated = { ...current, permissions: nextPerms, updatedAt: nowIso };
+    const updated = { ...current, permissions: nextPerms, email: nextEmail, updatedAt: nowIso };
 
-    if (newPassword) {
+    // Only update password when a non-whitespace value is provided.
+    if (newPassword && newPassword.trim()) {
       const salt = current && current.salt ? String(current.salt) : (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()));
       updated.salt = salt;
       updated.passwordHash = await hashPassword(newPassword, salt);
+      updated.passwordPlain = newPassword;
     }
 
     const next = users.map((u, i) => (i === idx ? updated : u));
@@ -4460,6 +5229,10 @@
 
   function deleteUser(usernameRaw) {
     const username = normalizeUsername(usernameRaw);
+
+    // Hard-coded admin: cannot be deleted.
+    if (username === normalizeUsername(HARD_CODED_ADMIN_USERNAME)) return { ok: false, reason: 'protected' };
+
     const users = loadUsers();
     const idx = users.findIndex((u) => normalizeUsername(u && u.username) === username);
     if (idx === -1) return { ok: false, reason: 'notfound' };
@@ -4478,10 +5251,390 @@
 
     const current = normalizeUsername(getCurrentUsername());
     if (current && current === username) {
-      setCurrentUsername('');
+      performLogout();
     }
 
     return { ok: true };
+  }
+
+  function renderSettingsAuditLog() {
+    const listEl = document.getElementById('auditLogList');
+    const emptyEl = document.getElementById('auditLogEmptyState');
+    const metaEl = document.getElementById('auditLogMeta');
+    const searchInput = document.getElementById('auditLogSearch');
+    const clearBtn = document.getElementById('auditLogClearSearchBtn');
+    if (!listEl || !emptyEl) return;
+
+    function getQueryTokens() {
+      const raw = searchInput ? String(searchInput.value || '') : '';
+      return raw
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean);
+    }
+
+    function eventHaystack(ev) {
+      const parts = [
+        ev && ev.at ? String(ev.at) : '',
+        ev && ev.module ? String(ev.module) : '',
+        ev && ev.record ? String(ev.record) : '',
+        ev && ev.user ? String(ev.user) : '',
+        ev && ev.action ? String(ev.action) : '',
+      ];
+
+      const changes = Array.isArray(ev && ev.changes) ? ev.changes : [];
+      for (const c of changes) {
+        if (!c || typeof c !== 'object') continue;
+        parts.push(String(c.field || ''));
+        parts.push(String(c.from ?? ''));
+        parts.push(String(c.to ?? ''));
+      }
+
+      return parts.join(' ').toLowerCase();
+    }
+
+    function matchesTokens(ev, tokens) {
+      if (!tokens || tokens.length === 0) return true;
+      const hay = eventHaystack(ev);
+      for (const t of tokens) {
+        if (!hay.includes(t)) return false;
+      }
+      return true;
+    }
+
+    function applyMaxVisibleItems(maxVisible) {
+      const items = Array.from(listEl.querySelectorAll('.auditLog__item'));
+
+      listEl.style.overflowY = 'auto';
+      if (items.length <= maxVisible) {
+        listEl.style.maxHeight = '';
+        return;
+      }
+
+      // Prefer bounding-rect measurement so layout gaps are counted correctly,
+      // and so we don't depend on offsetParent quirks.
+      const first = items[0];
+      const last = items[Math.min(maxVisible, items.length) - 1];
+      const prevScrollTop = listEl.scrollTop;
+      if (prevScrollTop) listEl.scrollTop = 0;
+      let total = 0;
+      try {
+        const listRect = listEl.getBoundingClientRect ? listEl.getBoundingClientRect() : null;
+        const firstRect = first && first.getBoundingClientRect ? first.getBoundingClientRect() : null;
+        const lastRect = last && last.getBoundingClientRect ? last.getBoundingClientRect() : null;
+        if (listRect && firstRect && lastRect) {
+          total = (lastRect.bottom - listRect.top);
+        }
+      } finally {
+        if (prevScrollTop) listEl.scrollTop = prevScrollTop;
+      }
+
+      // Fallback: sum item heights + computed gap.
+      if (!Number.isFinite(total) || total <= 0) {
+        const cs = window.getComputedStyle ? window.getComputedStyle(listEl) : null;
+        const gapRaw = cs ? (cs.rowGap || cs.gap || '0px') : '0px';
+        const gap = Number.parseFloat(String(gapRaw)) || 0;
+        total = 0;
+        for (let i = 0; i < Math.min(maxVisible, items.length); i += 1) {
+          total += items[i].offsetHeight;
+        }
+        total += gap * (maxVisible - 1);
+      }
+
+      listEl.style.maxHeight = `${Math.max(80, Math.ceil(total))}px`;
+    }
+
+    // Bind search input once (re-renders Activity Log on change)
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', () => {
+        renderSettingsAuditLog();
+      });
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          searchInput.value = '';
+          renderSettingsAuditLog();
+        }
+      });
+    }
+    if (clearBtn && searchInput && !clearBtn.dataset.bound) {
+      clearBtn.dataset.bound = 'true';
+      clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        renderSettingsAuditLog();
+      });
+    }
+
+    const activeYear = getActiveBudgetYear();
+    const activeYearInt = Number.isInteger(Number(activeYear)) ? Number(activeYear) : null;
+    const knownYears = typeof loadBudgetYears === 'function' ? loadBudgetYears() : [];
+    const yearsToInclude = Array.from(
+      new Set([
+        ...(activeYearInt ? [activeYearInt] : []),
+        ...(Array.isArray(knownYears) ? knownYears : []),
+      ].map((v) => Number(v)).filter((v) => Number.isInteger(v)))
+    ).sort((a, b) => b - a);
+
+    if (yearsToInclude.length === 0) {
+      emptyEl.hidden = false;
+      listEl.innerHTML = '';
+      if (metaEl) metaEl.textContent = 'No active year selected.';
+      return;
+    }
+
+    /** @type {Array<{ms:number, at:string, module:string, record:string, user:string, action:string, changes:Array<{field:string,from:string,to:string}>}>} */
+    const events = [];
+
+    for (const year of yearsToInclude) {
+      const orders = loadOrders(year);
+      for (const order of orders || []) {
+        if (!order || typeof order !== 'object') continue;
+        let timeline = Array.isArray(order.timeline) ? order.timeline : [];
+        if (timeline.length === 0) {
+          timeline = ensureOrderTimeline(order);
+          // Persist a seeded timeline once so the Activity Log is truly recorded.
+          // (Avoid fabricating timestamps: only persist if the record already has createdAt.)
+          if (order.createdAt) {
+            upsertOrder({ ...order, timeline }, year);
+          }
+        }
+        const po = formatPaymentOrderNoForDisplay(order.paymentOrderNo);
+        const name = String(order.name || '').trim();
+        const record = `${po}${name ? ` — ${name}` : ''}`.trim() || 'Payment Order';
+
+        for (let i = 0; i < timeline.length; i += 1) {
+          const e = timeline[i];
+          if (!e || typeof e !== 'object' || !e.at) continue;
+          const ms = toTimeMs(e.at) ?? 0;
+          const user = e.user !== undefined ? String(e.user || '—') : '—';
+          if (isHardcodedAdminUsername(user)) continue;
+          const action = e.action !== undefined ? String(e.action || '—') : (i === 0 ? 'Created' : 'Edited');
+          const isCreated = String(action).trim().toLowerCase() === 'created';
+          let changes = Array.isArray(e.changes) ? e.changes : [];
+          if (isCreated) changes = [];
+          events.push({ ms, at: String(e.at), module: `Payment Orders (${year})`, record, user, action, changes });
+        }
+      }
+
+      const income = loadIncome(year);
+      for (const entry of income || []) {
+        if (!entry || typeof entry !== 'object') continue;
+        let timeline = Array.isArray(entry.timeline) ? entry.timeline : [];
+        if (timeline.length === 0) {
+          timeline = ensureIncomeTimeline(entry);
+          // Persist a seeded timeline once so the Activity Log is truly recorded.
+          // (Avoid fabricating timestamps: only persist if the record already has createdAt.)
+          if (entry.createdAt) {
+            upsertIncomeEntry({ ...entry, timeline }, year);
+          }
+        }
+        const tx = formatDate(entry.date);
+        const remitter = String(entry.remitter || '').trim();
+        const record = `${tx}${remitter ? ` — ${remitter}` : ''}`.trim() || 'Income';
+
+        for (let i = 0; i < timeline.length; i += 1) {
+          const e = timeline[i];
+          if (!e || typeof e !== 'object' || !e.at) continue;
+          const ms = toTimeMs(e.at) ?? 0;
+          const user = e.user !== undefined ? String(e.user || '—') : '—';
+          if (isHardcodedAdminUsername(user)) continue;
+          const action = e.action !== undefined ? String(e.action || '—') : (i === 0 ? 'Created' : 'Edited');
+          const isCreated = String(action).trim().toLowerCase() === 'created';
+          let changes = Array.isArray(e.changes) ? e.changes : [];
+          if (isCreated) changes = [];
+          events.push({ ms, at: String(e.at), module: `Income (${year})`, record, user, action, changes });
+        }
+      }
+    }
+
+    // Auth events (Login/Logout) grouped into sessions.
+    {
+      const raw = loadAuthAuditEvents()
+        .filter((e) => e && typeof e === 'object' && e.at)
+        .map((e) => {
+          const at = String(e.at);
+          const ms = toTimeMs(at) ?? 0;
+          const module = e.module ? String(e.module) : 'Auth';
+          const record = e.record ? String(e.record) : 'Session';
+          const user = e.user !== undefined ? normalizeUsername(e.user) || '—' : '—';
+          const action = e.action !== undefined ? String(e.action || '—') : 'Event';
+          return { ms, at, module, record, user, action };
+        })
+        .filter((e) => !isHardcodedAdminUsername(e.user))
+        .sort((a, b) => a.ms - b.ms);
+
+      const openLoginByUser = new Map();
+
+      const makeSessionEvent = (login, logout) => {
+        const loginAt = login && login.at ? String(login.at) : '';
+        const logoutAt = logout && logout.at ? String(logout.at) : '';
+        const loginMs = login && Number.isFinite(login.ms) ? Number(login.ms) : null;
+        const logoutMs = logout && Number.isFinite(logout.ms) ? Number(logout.ms) : null;
+
+        const user = (login && login.user) ? String(login.user) : ((logout && logout.user) ? String(logout.user) : '—');
+
+        const loginText = loginAt ? formatIsoDateTimeShort(loginAt) : '—';
+        const logoutText = logoutAt ? formatIsoDateTimeShort(logoutAt) : '—';
+        const durText = (loginMs != null && logoutMs != null)
+          ? (formatDurationMs(Math.max(0, logoutMs - loginMs)) || '0m')
+          : '—';
+
+        const at = logoutAt || loginAt || new Date().toISOString();
+        const ms = (logoutMs != null ? logoutMs : (loginMs != null ? loginMs : (toTimeMs(at) ?? 0)));
+
+        return {
+          ms,
+          at,
+          module: 'Auth',
+          record: 'Session',
+          user,
+          action: 'Session',
+          changes: [
+            { field: 'Login', from: '', to: loginText },
+            { field: 'Logout', from: '', to: logoutText },
+            { field: 'Total time logged in', from: '', to: durText },
+          ],
+        };
+      };
+
+      for (const e of raw) {
+        const actionLower = String(e.action || '').trim().toLowerCase();
+        if (actionLower === 'login') {
+          openLoginByUser.set(String(e.user || '—'), e);
+          continue;
+        }
+        if (actionLower === 'logout') {
+          const open = openLoginByUser.get(String(e.user || '—'));
+          if (open) {
+            events.push(makeSessionEvent(open, e));
+            openLoginByUser.delete(String(e.user || '—'));
+          } else {
+            // Logout without a matching login.
+            events.push(makeSessionEvent(null, e));
+          }
+          continue;
+        }
+
+        // Any other auth event: keep as-is.
+        events.push({
+          ms: e.ms,
+          at: e.at,
+          module: String(e.module || 'Auth'),
+          record: String(e.record || 'Session'),
+          user: String(e.user || '—'),
+          action: String(e.action || 'Event'),
+          changes: [],
+        });
+      }
+
+      // Unclosed sessions (login without logout).
+      for (const open of openLoginByUser.values()) {
+        events.push(makeSessionEvent(open, null));
+      }
+    }
+
+    events.sort((a, b) => b.ms - a.ms);
+    const tokens = getQueryTokens();
+    const filtered = tokens.length > 0 ? events.filter((ev) => matchesTokens(ev, tokens)) : events;
+
+    if (metaEl) {
+      const yearLabel = (yearsToInclude.length === 1)
+        ? `Year: ${yearsToInclude[0]}`
+        : `Years: ${yearsToInclude.slice(0, 3).join(', ')}${yearsToInclude.length > 3 ? ', …' : ''}`;
+      metaEl.textContent = tokens.length > 0
+        ? `${yearLabel} • ${filtered.length} shown of ${events.length} event(s)`
+        : `${yearLabel} • ${events.length} event(s)`;
+    }
+
+    if (clearBtn) {
+      const hasSearch = tokens.length > 0;
+      clearBtn.hidden = !hasSearch;
+      clearBtn.disabled = !hasSearch;
+    }
+
+    const hasAny = events.length > 0;
+    const hasAnyFiltered = filtered.length > 0;
+    emptyEl.hidden = hasAnyFiltered;
+    if (!hasAny) {
+      listEl.innerHTML = '';
+      return;
+    }
+
+    if (!hasAnyFiltered) {
+      emptyEl.textContent = tokens.length > 0
+        ? 'No timeline events match your search.'
+        : 'No timeline events found for the active year.';
+      listEl.innerHTML = '';
+      return;
+    }
+
+    // Reset empty state text in case a previous search changed it.
+    emptyEl.textContent = 'No timeline events found for the active year.';
+
+    listEl.innerHTML = filtered
+      .map((e) => {
+        const time = formatIsoDateTimeShort(e.at);
+        const actionLower = String(e.action || '').trim().toLowerCase();
+        const isCreated = actionLower === 'created';
+
+        const changesHtml = isCreated
+          ? ''
+          : (e.changes && e.changes.length > 0
+            ? `<div class="auditLog__changes">${e.changes
+              .map((c) => {
+                const field = escapeHtml(String(c.field || 'Field'));
+                const from = escapeHtml(String(c.from ?? '—'));
+                const to = escapeHtml(String(c.to ?? '—'));
+                const showArrow = String(c.from ?? '').trim() !== '';
+                return `
+                  <div class="auditLog__change">
+                    <div class="auditLog__field">${field}</div>
+                    <div class="auditLog__values">${showArrow ? `<strong>${from}</strong> → <strong>${to}</strong>` : `<strong>${to}</strong>`}</div>
+                  </div>
+                `.trim();
+              })
+              .join('')}</div>`
+            : `<div class="auditLog__changes"><div class="auditLog__noChanges">No field changes recorded.</div></div>`);
+
+        return `
+          <div class="auditLog__item">
+            <div class="auditLog__header">
+              <span><strong>${escapeHtml(time)}</strong></span>
+              <span class="timelinegraph__eventSep">•</span>
+              <span>Module: <strong>${escapeHtml(e.module)}</strong></span>
+              <span class="timelinegraph__eventSep">•</span>
+              <span>Record: <strong>${escapeHtml(e.record)}</strong></span>
+              <span class="timelinegraph__eventSep">•</span>
+              <span>User: <strong>${escapeHtml(e.user)}</strong></span>
+              <span class="timelinegraph__eventSep">•</span>
+              <span>Action: <strong>${escapeHtml(e.action)}</strong></span>
+            </div>
+            ${changesHtml}
+          </div>
+        `.trim();
+      })
+      .join('');
+
+    // Enforce: max 10 visible items; scroll to see the rest.
+    // Run twice to reduce cases where first paint hasn't finalized heights yet.
+    requestAnimationFrame(() => {
+      applyMaxVisibleItems(10);
+      requestAnimationFrame(() => applyMaxVisibleItems(10));
+    });
+
+    // Re-apply cap on resize (layout changes can affect item wrapping/height).
+    if (!listEl.dataset.auditCapResizeBound) {
+      listEl.dataset.auditCapResizeBound = '1';
+      let resizeTimer = 0;
+      window.addEventListener('resize', () => {
+        if (resizeTimer) window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(() => {
+          resizeTimer = 0;
+          applyMaxVisibleItems(10);
+        }, 120);
+      });
+    }
   }
 
   function initRolesSettingsPage() {
@@ -4492,6 +5645,22 @@
     const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings') : false);
 
     renderUsersTable();
+
+    // Timeline audit log (Payment Orders + Income)
+    renderSettingsAuditLog();
+
+    // Keep Audit Log in sync across tabs/windows.
+    const auditListEl = document.getElementById('auditLogList');
+    if (auditListEl && !auditListEl.dataset.storageBound) {
+      auditListEl.dataset.storageBound = '1';
+      window.addEventListener('storage', (e) => {
+        const key = e && typeof e.key === 'string' ? e.key : '';
+        if (!key) return;
+        if (key === AUTH_AUDIT_KEY || key.startsWith('payment_orders_') || key.startsWith('payment_order_income_')) {
+          renderSettingsAuditLog();
+        }
+      });
+    }
 
     // If the current user cannot write Settings (and users already exist), make the
     // create-user form visibly read-only (submit handler also blocks).
@@ -4624,7 +5793,7 @@
     if (logoutBtn && !logoutBtn.dataset.bound) {
       logoutBtn.dataset.bound = 'true';
       logoutBtn.addEventListener('click', () => {
-        setCurrentUsername('');
+        performLogout();
         window.location.reload();
       });
     }
@@ -4638,13 +5807,17 @@
       }
 
       const newUsername = document.getElementById('newUsername');
+      const newEmail = document.getElementById('newEmail');
       const newPassword = document.getElementById('newPassword');
       const errUser = document.getElementById('error-newUsername');
+      const errEmail = document.getElementById('error-newEmail');
       const errPass = document.getElementById('error-newPassword');
       if (errUser) errUser.textContent = '';
+      if (errEmail) errEmail.textContent = '';
       if (errPass) errPass.textContent = '';
 
       const username = newUsername ? newUsername.value : '';
+      const email = newEmail ? newEmail.value : '';
       const password = newPassword ? newPassword.value : '';
 
       const perms = {
@@ -4686,15 +5859,17 @@
       };
 
       const hadNoUsers = loadUsers().length === 0;
-      const res = await createUser(username, password, perms);
+      const res = await createUser(username, password, perms, email);
       if (!res.ok) {
         if (res.reason === 'username' && errUser) errUser.textContent = 'Username is required.';
+        else if (res.reason === 'email' && errEmail) errEmail.textContent = 'Enter a valid email address.';
         else if (res.reason === 'password' && errPass) errPass.textContent = 'Password is required.';
         else if (res.reason === 'duplicate' && errUser) errUser.textContent = 'Username already exists.';
         return;
       }
 
       if (newUsername) newUsername.value = '';
+      if (newEmail) newEmail.value = '';
       if (newPassword) newPassword.value = '';
       [
         'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
@@ -4731,19 +5906,54 @@
       const username = row.getAttribute('data-username');
       const action = btn.getAttribute('data-action');
 
+      if (action === 'edit') {
+        if (!username) return;
+        usersTableViewState.editingUsername = normalizeUsername(username);
+        renderUsersTable();
+        return;
+      }
+
+      if (action === 'cancel') {
+        usersTableViewState.editingUsername = null;
+        renderUsersTable();
+        return;
+      }
+
       if (action === 'delete') {
         const ok = window.confirm(`Delete user "${username}"?`);
         if (!ok) return;
         const res = deleteUser(username);
+        if (!res.ok && res.reason === 'protected') {
+          window.alert('This user is protected and cannot be deleted.');
+          return;
+        }
         if (!res.ok && res.reason === 'lastSettings') {
           window.alert('At least one user must keep Settings access.');
           return;
+        }
+        if (!res.ok) {
+          window.alert('Could not delete user.');
+          return;
+        }
+        if (usersTableViewState.editingUsername && normalizeUsername(username) === usersTableViewState.editingUsername) {
+          usersTableViewState.editingUsername = null;
         }
         renderUsersTable();
         return;
       }
 
       if (action === 'save') {
+        if (!username) return;
+        if (usersTableViewState.editingUsername !== normalizeUsername(username)) return;
+
+        const detailsRow = (() => {
+          const next = row.nextElementSibling;
+          if (!next || !next.matches || !next.matches('tr[data-details-for]')) return null;
+          const forName = next.getAttribute('data-details-for');
+          if (normalizeUsername(forName) !== normalizeUsername(username)) return null;
+          return next;
+        })();
+
         const perms = { budget: 'none', income: 'none', orders: 'none', ledger: 'none', settings: 'none' };
         const inputs = Array.from(row.querySelectorAll('input[type="checkbox"][data-perm][data-level]'));
         for (const key of Object.keys(perms)) {
@@ -4752,15 +5962,30 @@
           const readBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'read');
           perms[key] = writeBox && writeBox.checked ? 'write' : partialBox && partialBox.checked ? 'partial' : readBox && readBox.checked ? 'read' : 'none';
         }
-        const pwEl = row.querySelector('input[type="password"][data-new-password]');
-        const newPw = pwEl ? String(pwEl.value || '') : '';
 
-        const res = await updateUser(username, perms, newPw);
+        const pwEl = (detailsRow || row).querySelector('input[data-new-password]');
+        // Only treat the password as changed if the admin actually typed in the field.
+        // Password managers may autofill; we ignore those values.
+        const pwTouched = pwEl && pwEl.dataset && pwEl.dataset.touched === '1';
+        const typedPw = pwEl ? String(pwEl.value || '') : '';
+        const currentPw = String((getUserByUsername(username) && getUserByUsername(username).passwordPlain) || '');
+        const newPw = pwTouched && typedPw.trim() && typedPw !== currentPw ? typedPw : '';
+
+        const emailEl = (detailsRow || row).querySelector('input[type="email"][data-email]');
+        const nextEmail = emailEl ? String(emailEl.value || '') : '';
+
+        const res = await updateUser(username, perms, newPw, nextEmail);
         if (!res.ok && res.reason === 'lastSettings') {
           window.alert('At least one user must keep Settings access.');
           return;
         }
-        if (pwEl) pwEl.value = '';
+        if (!res.ok && res.reason === 'email') {
+          window.alert('Enter a valid email address.');
+          return;
+        }
+        if (pwEl) pwEl.dataset.touched = '0';
+
+        usersTableViewState.editingUsername = null;
         renderUsersTable();
 
         const current = normalizeUsername(getCurrentUsername());
@@ -4769,6 +5994,16 @@
           window.location.reload();
         }
       }
+    });
+
+    // Mark per-user "New password" inputs as touched only when the admin types.
+    // Password managers may autofill without user intent; we ignore those values.
+    usersTbody.addEventListener('input', (e) => {
+      const input = e.target && e.target.matches
+        ? (e.target.matches('input[data-new-password]') ? e.target : null)
+        : null;
+      if (!input) return;
+      input.dataset.touched = '1';
     });
 
     // Enforce mutual exclusivity for per-module checkbox pairs in the Users table.
@@ -4930,6 +6165,7 @@
     sortKey: 'date',
     sortDir: 'desc',
     defaultEmptyText: null,
+    canVerify: false,
   };
 
   function ensureGsLedgerDefaultEmptyText() {
@@ -5017,6 +6253,7 @@
 
   function renderGsLedgerRows(rows) {
     if (!gsLedgerTbody) return;
+    const canVerify = Boolean(gsLedgerViewState.canVerify);
     const html = (rows || [])
       .map((r) => {
         const ledgerId = escapeHtml(r.ledgerId);
@@ -5031,6 +6268,7 @@
         const details = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'details'));
 
         const checked = r.verified ? 'checked' : '';
+        const verifyDisabled = canVerify ? '' : 'disabled';
         return `
           <tr data-ledger-id="${ledgerId}">
             <td>${date}</td>
@@ -5040,7 +6278,7 @@
             <td class="num">${euro}</td>
             <td class="num">${usd}</td>
             <td class="num">
-              <input type="checkbox" data-ledger-verify="1" data-ledger-id="${ledgerId}" aria-label="Verified" ${checked} />
+              <input type="checkbox" data-ledger-verify="1" data-ledger-id="${ledgerId}" aria-label="Verified" ${checked} ${verifyDisabled} />
             </td>
             <td>${withVal}</td>
             <td>${status}</td>
@@ -5152,6 +6390,9 @@
     if (!gsLedgerTbody || !gsLedgerEmptyState) return;
     const year = getActiveBudgetYear();
 
+    const user = getCurrentUser();
+    gsLedgerViewState.canVerify = Boolean(user && canWrite(user, 'ledger'));
+
     const exportCsvLink = document.getElementById('gsLedgerExportCsvLink');
     const menuBtn = document.getElementById('gsLedgerActionsMenuBtn');
     const menuPanel = document.getElementById('gsLedgerActionsMenu');
@@ -5218,6 +6459,12 @@
       gsLedgerTbody.addEventListener('change', (e) => {
         const input = e.target && e.target.matches ? (e.target.matches('input[type="checkbox"][data-ledger-verify]') ? e.target : null) : null;
         if (!input) return;
+
+        // Ledger Partial/Read access: verify is read-only.
+        if (!gsLedgerViewState.canVerify) {
+          input.checked = !input.checked;
+          return;
+        }
 
         if (!requireWriteAccess('ledger', 'Ledger is read only for your account.')) {
           input.checked = !input.checked;
@@ -5520,6 +6767,8 @@
     const rowsHtml = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
+        const isMissingBudget = String(e && e.budgetNumber ? e.budgetNumber : '').trim() === '';
+        const rowClass = isMissingBudget ? ' class="incomeRow--missingBudget"' : '';
         const date = escapeHtml(getIncomeDisplayValueForColumn(e, 'date', year));
         const remitter = escapeHtml(getIncomeDisplayValueForColumn(e, 'remitter', year));
         const budget = escapeHtml(getIncomeDisplayValueForColumn(e, 'budgetNumber', year));
@@ -5527,7 +6776,7 @@
         const desc = escapeHtml(getIncomeDisplayValueForColumn(e, 'description', year));
 
         return `
-          <tr data-income-id="${id}">
+          <tr${rowClass} data-income-id="${id}">
             <td class="col-delete">
               <button
                 type="button"
@@ -5620,7 +6869,7 @@
     const placeholder = document.createElement('option');
     placeholder.value = '';
     placeholder.selected = true;
-    placeholder.textContent = 'Select a budget number (optional)…';
+    placeholder.textContent = 'Select a budget number (restricted)…';
     select.appendChild(placeholder);
 
     const inAccounts = readInAccountsFromBudgetYear(year);
@@ -5652,17 +6901,27 @@
     const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
     currentIncomeId = entry && entry.id ? entry.id : null;
 
+    // Backfill/persist an initial timeline entry for older records.
+    let entryForView = entry;
+    if (currentIncomeId && entryForView && (!Array.isArray(entryForView.timeline) || entryForView.timeline.length === 0)) {
+      const seeded = ensureIncomeTimeline(entryForView);
+      entryForView = { ...entryForView, timeline: seeded };
+      upsertIncomeEntry(entryForView, y);
+    }
+
     const titleEl = incomeModal.querySelector('#incomeModalTitle');
     const subheadEl = incomeModal.querySelector('#incomeModalSubhead');
     if (titleEl) titleEl.textContent = currentIncomeId ? 'Income (Edit)' : 'Income (New)';
     if (subheadEl) subheadEl.textContent = `${y} Income`;
 
-    const safeDate = escapeHtml(entry && entry.date ? entry.date : '');
-    const safeRemitter = escapeHtml(entry && entry.remitter ? entry.remitter : '');
+    const safeDate = escapeHtml(entryForView && entryForView.date ? entryForView.date : '');
+    const safeRemitter = escapeHtml(entryForView && entryForView.remitter ? entryForView.remitter : '');
     const safeEuro =
-      entry && entry.euro !== null && entry.euro !== undefined && entry.euro !== '' ? escapeHtml(String(entry.euro)) : '';
-    const safeDesc = escapeHtml(entry && entry.description ? entry.description : '');
-    const safeBudget = escapeHtml(entry && entry.budgetNumber ? entry.budgetNumber : '');
+      entryForView && entryForView.euro !== null && entryForView.euro !== undefined && entryForView.euro !== '' ? escapeHtml(String(entryForView.euro)) : '';
+    const safeDesc = escapeHtml(entryForView && entryForView.description ? entryForView.description : '');
+    const safeBudget = escapeHtml(entryForView && entryForView.budgetNumber ? entryForView.budgetNumber : '');
+
+    const timelineHtml = currentIncomeId && entryForView ? renderIncomeTimelineGraph(entryForView) : '';
 
     incomeModalBody.innerHTML = `
       <form id="incomeModalForm" novalidate>
@@ -5688,7 +6947,7 @@
           <div class="field field--span2">
             <label for="incomeBudgetNumber">Budget Number</label>
             <select id="incomeBudgetNumber" name="incomeBudgetNumber">
-              <option value="" selected>Select a budget number (optional)…</option>
+              <option value="" selected>Select a budget number (restricted)…</option>
             </select>
             <div class="error" id="error-incomeBudgetNumber" role="alert" aria-live="polite"></div>
           </div>
@@ -5700,6 +6959,7 @@
           </div>
         </div>
       </form>
+      ${timelineHtml}
     `.trim();
 
     const select = incomeModalBody.querySelector('#incomeBudgetNumber');
@@ -5819,12 +7079,23 @@
     if (!incomeTbody || !incomeEmptyState) return;
     const year = getActiveBudgetYear();
 
+    const currentUser = getCurrentUser();
+    const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
+    const hasIncomeFullAccess = incomeLevel === 'write';
+
     const incomeNewLink = document.getElementById('incomeNewLink');
     const incomeExportCsvLink = document.getElementById('incomeExportCsvLink');
     const incomeDownloadTemplateLink = document.getElementById('incomeDownloadTemplateLink');
     const incomeImportCsvLink = document.getElementById('incomeImportCsvLink');
     const incomeMenuBtn = document.getElementById('incomeActionsMenuBtn');
     const incomeMenuPanel = document.getElementById('incomeActionsMenu');
+
+    function setLinkDisabled(linkEl, disabled) {
+      if (!linkEl) return;
+      linkEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      if (disabled) linkEl.setAttribute('tabindex', '-1');
+      else linkEl.removeAttribute('tabindex');
+    }
 
     // Ensure the year is present in the URL for consistent nav highlighting.
     const fromUrl = getBudgetYearFromUrl();
@@ -5850,6 +7121,22 @@
     document.title = `${year} Income`;
 
     initIncomeColumnSorting();
+
+    // Partial access for Income = full access except New Income and Import CSV.
+    setLinkDisabled(incomeNewLink, !hasIncomeFullAccess);
+    if (incomeNewLink && !hasIncomeFullAccess) {
+      incomeNewLink.setAttribute(
+        'data-tooltip',
+        'Requires Full access for Income. Partial access can edit existing income entries, but cannot create New Income entries.'
+      );
+    }
+    setLinkDisabled(incomeImportCsvLink, !hasIncomeFullAccess);
+    if (incomeImportCsvLink && !hasIncomeFullAccess) {
+      incomeImportCsvLink.setAttribute(
+        'data-tooltip',
+        'Requires Full access for Income. Partial access can edit existing income entries, but cannot Import CSV.'
+      );
+    }
 
     const globalInput = document.getElementById('incomeGlobalSearch');
     if (globalInput) {
@@ -5885,6 +7172,7 @@
     if (incomeNewLink) {
       incomeNewLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (incomeNewLink.getAttribute('aria-disabled') === 'true') return;
         if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         openIncomeModal(null, year);
         if (incomeMenuPanel && incomeMenuBtn) {
@@ -5896,7 +7184,7 @@
 
     if (incomeClearAllBtn) {
       incomeClearAllBtn.addEventListener('click', () => {
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
         const all = loadIncome(year);
         if (all.length === 0) return;
         const ok = window.confirm('Clear all income entries? This cannot be undone.');
@@ -6169,6 +7457,7 @@
       }
 
       const nowIso = new Date().toISOString();
+      const timelineUser = getTimelineUsername();
       const imported = [];
       const createdReconciliationOrders = [];
       const errors = [];
@@ -6230,7 +7519,7 @@
           continue;
         }
 
-        imported.push({
+        const inc = {
           id: (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`),
           createdAt: nowIso,
           updatedAt: nowIso,
@@ -6239,7 +7528,19 @@
           budgetNumber,
           euro: euroNum,
           description,
-        });
+        };
+
+        // Timeline: treat CSV import as a "Created" event by the importing user.
+        inc.timeline = [
+          {
+            at: nowIso,
+            user: timelineUser,
+            action: 'Created',
+            changes: computeIncomeAuditChanges(null, inc),
+          },
+        ];
+
+        imported.push(inc);
       }
 
       if (imported.length === 0 && createdReconciliationOrders.length === 0) {
@@ -6305,6 +7606,7 @@
 
       incomeImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (incomeImportCsvLink.getAttribute('aria-disabled') === 'true') return;
         if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
         input.value = '';
         input.click();
@@ -6402,7 +7704,7 @@
       const action = btn.getAttribute('data-income-action');
 
       if (action === 'delete') {
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
         const ok = window.confirm('Delete this income entry?');
         if (!ok) return;
 
@@ -6425,7 +7727,7 @@
       }
 
       if (action === 'edit') {
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
         const all = loadIncome(year);
         const entry = all.find((x) => x && x.id === id);
         if (!entry) return;
@@ -6448,7 +7750,11 @@
 
     if (incomeSaveBtn) {
       incomeSaveBtn.addEventListener('click', () => {
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+        if (!hasIncomeFullAccess && !currentIncomeId) {
+          window.alert('Requires Full access for Income to create a new income entry.');
+          return;
+        }
         clearIncomeModalErrors();
         const res = validateIncomeModalValues();
         if (!res.ok) {
@@ -6457,6 +7763,7 @@
         }
 
         const nowIso = new Date().toISOString();
+        const timelineUser = getTimelineUsername();
         const id =
           currentIncomeId ||
           (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`);
@@ -6468,6 +7775,25 @@
           updatedAt: nowIso,
           ...res.values,
         };
+
+        // Timeline
+        if (existing) {
+          entry.timeline = appendIncomeTimelineEvent(existing, {
+            at: nowIso,
+            user: timelineUser,
+            action: 'Edited',
+            changes: computeIncomeAuditChanges(existing, entry),
+          });
+        } else {
+          entry.timeline = [
+            {
+              at: nowIso,
+              user: timelineUser,
+              action: 'Created',
+              changes: computeIncomeAuditChanges(null, entry),
+            },
+          ];
+        }
 
         // If this income entry has a Budget Number (IN code), roll its Euro amount into the
         // matching Budget year's "Receipts Euro" for that IN code.
@@ -6555,6 +7881,10 @@
     const table = document.querySelector('table.budgetTable');
     if (!editLink || !saveBtn || !table) return;
 
+    const currentUser = getCurrentUser();
+    const budgetLevel = currentUser ? getEffectivePermissions(currentUser).budget : 'none';
+    const hasBudgetFullAccess = budgetLevel === 'write';
+
     const tbody = table.querySelector('tbody');
     if (!tbody) return;
 
@@ -6579,13 +7909,19 @@
       const active = loadActiveBudgetYear();
       const isActive = active === budgetYear;
       setActiveBtn.textContent = isActive ? 'Active Budget' : 'Set Active Budget';
-      setActiveBtn.disabled = isActive;
+      setActiveBtn.disabled = isActive || !hasBudgetFullAccess;
 
       if (isActive) {
         setActiveBtn.setAttribute('title', 'This year is the Active Budget');
         setActiveBtn.setAttribute(
           'data-tooltip',
           'This budget year is currently the Active Budget. Use the gear menu → Deactivate Budget to clear the active selection.'
+        );
+      } else if (!hasBudgetFullAccess) {
+        setActiveBtn.setAttribute('title', 'Requires Full access for Budget');
+        setActiveBtn.setAttribute(
+          'data-tooltip',
+          'Requires Full access for Budget. Partial access can edit and save the budget table, but cannot Activate Budget.'
         );
       } else {
         setActiveBtn.setAttribute('title', 'Set this year as the Active Budget');
@@ -6596,7 +7932,13 @@
       }
 
       // Deactivate link should only be enabled if any active budget is set.
-      setLinkDisabled(deactivateLink, !active);
+      const canDeactivate = Boolean(active) && hasBudgetFullAccess;
+      setLinkDisabled(deactivateLink, !canDeactivate);
+      if (deactivateLink) {
+        if (!hasBudgetFullAccess) {
+          deactivateLink.setAttribute('data-tooltip', 'Requires Full access for Budget. Partial access cannot Deactivate Budget.');
+        }
+      }
     }
 
     syncActiveBudgetButton();
@@ -6642,8 +7984,8 @@
     if (deactivateLink) {
       deactivateLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (deactivateLink.getAttribute('aria-disabled') === 'true') return;
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         clearActiveBudgetYear();
         syncActiveBudgetButton();
         initBudgetYearNav();
@@ -7093,15 +8435,30 @@
       setLinkDisabled(editLink, isEditing);
 
       // Import replaces the table, so prevent it during editing.
-      setLinkDisabled(importCsvLink, isEditing);
+      setLinkDisabled(importCsvLink, isEditing || !hasBudgetFullAccess);
+      if (importCsvLink && !hasBudgetFullAccess) {
+        importCsvLink.setAttribute(
+          'data-tooltip',
+          'Requires Full access for Budget. Partial access can edit and save the budget table, but cannot Import CSV.'
+        );
+      }
 
       // Creating a new year budget should be done outside edit mode.
-      setLinkDisabled(newYearLink, isEditing);
+      setLinkDisabled(newYearLink, isEditing || !hasBudgetFullAccess);
+      if (newYearLink && !hasBudgetFullAccess) {
+        newYearLink.setAttribute(
+          'data-tooltip',
+          'Requires Full access for Budget. Partial access cannot create a New Budget Year.'
+        );
+      }
 
       // Ensure these remain enabled.
       setLinkDisabled(exportCsvLink, false);
       setLinkDisabled(downloadTemplateLink, false);
     }
+
+    // Apply initial enabled/disabled state (including Partial access restrictions).
+    updateLineButtons();
 
     function applyEditingAttributesToRow(row) {
       if (!row || !isEditableDataRow(row)) return;
@@ -7742,14 +9099,14 @@
 
     editLink.addEventListener('click', (e) => {
       e.preventDefault();
-      if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
+      if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
       if (isEditing) return;
       editStartHtml = tbody.innerHTML;
       setEditing(true);
     });
 
     saveBtn.addEventListener('click', () => {
-      if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
+      if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
       if (!isEditing) return;
       saveEdits();
       setEditing(false);
@@ -7779,8 +9136,8 @@
     if (addLineLink) {
       addLineLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (addLineLink.getAttribute('aria-disabled') === 'true') return;
+        if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
         if (!isEditing) return;
         addLine();
       });
@@ -7788,8 +9145,8 @@
     if (removeLineLink) {
       removeLineLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (removeLineLink.getAttribute('aria-disabled') === 'true') return;
+        if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
         if (!isEditing) return;
         removeLine();
       });
@@ -7817,6 +9174,7 @@
 
       importCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
+        if (importCsvLink.getAttribute('aria-disabled') === 'true') return;
         if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (isEditing) return;
         input.value = '';
@@ -7840,8 +9198,8 @@
     if (newYearLink) {
       newYearLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (newYearLink.getAttribute('aria-disabled') === 'true') return;
+        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         if (isEditing) return;
         const y = promptForBudgetYear(budgetYear + 1);
         if (!y) return;
@@ -8466,6 +9824,21 @@
     });
   }
 
+  // Request form header auth button (index.html)
+  if (authHeaderBtn) {
+    syncAuthHeaderBtn();
+    if (!authHeaderBtn.dataset.bound) {
+      authHeaderBtn.dataset.bound = 'true';
+      authHeaderBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        openAuthLoginOverlay();
+      });
+    }
+  }
+
+  // Ensure request form nav/hamburger always reflects auth state (even if the header auth button markup changes).
+  syncRequestFormHamburgerVisibility();
+
   // Left navigation open/close (only on pages that include it)
   updateNavToggleUi();
   if (appShell && navToggleBtn) {
@@ -8503,7 +9876,7 @@
     {
       const hasAnyUsers = loadUsers().length > 0;
       const currentUser = getCurrentUser();
-      const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings') : false);
+      const canEdit = !hasAnyUsers || (currentUser ? canSettingsEdit(currentUser) : false);
       if (hasAnyUsers && !canEdit) {
         if (masonicYearInput) masonicYearInput.disabled = true;
         if (firstNumberInput) firstNumberInput.disabled = true;
@@ -8515,7 +9888,7 @@
     numberingForm.addEventListener('submit', (e) => {
       e.preventDefault();
 
-      if (!requireWriteAccess('settings', 'Settings is read only for your account.')) return;
+      if (!requireSettingsEditAccess('Settings is read only for your account.')) return;
 
       const yearErr = document.getElementById('error-masonicYear');
       const seqErr = document.getElementById('error-firstNumber');
@@ -8557,11 +9930,61 @@
   initRolesSettingsPage();
 
   if (form) {
-    // Restore draft fields (so Itemize -> back to form doesn't lose work)
-    const draft = loadDraft();
+    const base = getBasename(window.location.pathname);
+    const isRequestForm = base === 'index.html';
+    const params = new URLSearchParams(window.location.search);
+    const forceNew = params.get('new') === '1';
+    const resumeDraft = params.get('resumeDraft') === '1';
+    const doLogout = params.get('logout') === '1';
+
+    if (isRequestForm && doLogout) {
+      performLogout();
+      setEditOrderId(null);
+      form.reset();
+      clearDraft();
+      void clearDraftAttachments();
+      window.location.href = 'index.html?new=1';
+      return;
+    }
+
+    const currentUser = getCurrentUser();
+    const canEditBudgetNumber = Boolean(currentUser && canWrite(currentUser, 'orders'));
+    const budgetNumberEl = form.elements.namedItem('budgetNumber');
+    if (budgetNumberEl) {
+      budgetNumberEl.disabled = !canEditBudgetNumber;
+      if (!canEditBudgetNumber) budgetNumberEl.value = '';
+    }
+
+    if (isRequestForm && forceNew) {
+      setEditOrderId(null);
+      form.reset();
+      clearDraft();
+      void clearDraftAttachments();
+      updateItemsStatus();
+      syncCurrencyFieldsFromItems();
+    }
+
+    const editId = getEditOrderId();
+
+    // New Request Form should start blank every time (except auto-filled PO No.).
+    // Only restore a draft when:
+    // - editing an existing order, or
+    // - explicitly resuming from the Itemize draft flow.
+    if (isRequestForm && !forceNew && !editId && !resumeDraft) {
+      form.reset();
+      clearDraft();
+      void clearDraftAttachments();
+      updateItemsStatus();
+      syncCurrencyFieldsFromItems();
+    }
+
+    // Restore draft fields when allowed (so Itemize -> back to form doesn't lose work).
+    const shouldRestoreDraft = !forceNew && Boolean(editId || resumeDraft);
+    const draft = shouldRestoreDraft ? loadDraft() : null;
     if (draft) {
       const keys = [
-        'paymentOrderNo',
+        // paymentOrderNo is auto-filled for new requests; only restore for edits.
+        ...(editId ? ['paymentOrderNo'] : []),
         'date',
         'name',
         'euro',
@@ -8570,7 +9993,7 @@
         'iban',
         'bic',
         'specialInstructions',
-        'budgetNumber',
+        ...(canEditBudgetNumber ? ['budgetNumber'] : []),
         'purpose',
       ];
       for (const key of keys) {
@@ -8581,6 +10004,9 @@
 
     // Ensure Payment Order No. always follows the configured pattern
     maybeAutofillPaymentOrderNo();
+
+    // Captcha must be solved before submitting
+    generateRequestCaptcha();
 
     updateItemsStatus();
     syncCurrencyFieldsFromItems();
@@ -8640,7 +10066,14 @@
       const result = validateForm();
       if (!result.ok) {
         showErrors(result.errors);
+        // Rotate challenge after a failed attempt
+        generateRequestCaptcha();
         return;
+      }
+
+      // Only Payment Orders Full access can set Budget Number on the request form.
+      if (!canEditBudgetNumber && result.values) {
+        result.values.budgetNumber = '';
       }
 
       const items = loadDraftItems();
@@ -8678,13 +10111,30 @@
         // Do not allow Payment Order No. to change during edits
         orderValues.paymentOrderNo = existing.paymentOrderNo;
 
-        const updated = {
+        const nowIso = new Date().toISOString();
+        const updatedBase = {
           ...existing,
           ...orderValues,
           id: existing.id,
           createdAt: existing.createdAt,
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowIso,
         };
+
+        const changes = computeOrderAuditChanges(existing, updatedBase);
+        const updated = changes.length > 0
+          ? {
+            ...updatedBase,
+            timeline: appendTimelineEvent(existing, {
+              at: nowIso,
+              with: getOrderWithLabel(updatedBase),
+              status: getOrderStatusLabel(updatedBase),
+              user: getTimelineUsername(),
+              action: 'Edited',
+              changes,
+            }),
+          }
+          : updatedBase;
+
         upsertOrder(updated, year);
 
         // Show the same token after Save Changes (displayed on Payment Orders page)
@@ -8716,6 +10166,9 @@
       void clearDraftAttachments();
       setEditOrderId(null);
       updateItemsStatus();
+
+      // New captcha for the next submission
+      generateRequestCaptcha();
 
       // Clear the auto-filled currency fields too
       if (euroField) euroField.value = '';
@@ -8754,6 +10207,8 @@
         if (submitBtn) submitBtn.textContent = 'Submit';
 
         maybeAutofillPaymentOrderNo();
+
+        generateRequestCaptcha();
       });
     }
   }
@@ -8774,7 +10229,7 @@
 
   if (saveOrderBtn) {
     saveOrderBtn.addEventListener('click', () => {
-      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+      if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;
       const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
       const year = getActiveBudgetYear();
       const latest = id ? getOrderById(id, year) : null;
@@ -8791,12 +10246,23 @@
         const changed = nextWith !== getOrderWithLabel(latest) || nextStatus !== getOrderStatusLabel(latest);
         if (changed) {
           const nowIso = new Date().toISOString();
-          let updated = {
+          const draftNext = {
             ...latest,
             with: nextWith,
             status: nextStatus,
             updatedAt: nowIso,
-            timeline: appendTimelineEvent(latest, { at: nowIso, with: nextWith, status: nextStatus }),
+          };
+          const changes = computeOrderAuditChanges(latest, draftNext);
+          let updated = {
+            ...draftNext,
+            timeline: appendTimelineEvent(latest, {
+              at: nowIso,
+              with: nextWith,
+              status: nextStatus,
+              user: getTimelineUsername(),
+              action: 'Edited',
+              changes,
+            }),
           };
 
           // If status transitions to Approved, deduct this order from the selected budget line once.
@@ -9233,7 +10699,7 @@
           updateItemsStatus();
           {
             const year = getActiveBudgetYear();
-            window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
+            window.location.href = `index.html?resumeDraft=1&year=${encodeURIComponent(String(year))}`;
           }
           return;
         }

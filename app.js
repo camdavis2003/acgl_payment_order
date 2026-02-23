@@ -23,6 +23,7 @@
   const USERS_KEY = 'payment_order_users_v1';
   const CURRENT_USER_KEY = 'payment_order_current_user_v1';
   const LOGIN_AT_KEY = 'payment_order_login_at_v1';
+  const LAST_ACTIVITY_AT_KEY = 'payment_order_last_activity_at_v1';
   const AUTH_AUDIT_KEY = 'payment_order_auth_audit_v1';
 
   const HARD_CODED_ADMIN_USERNAME = 'admin.pass';
@@ -172,10 +173,13 @@
       if (!u) {
         sessionStorage.removeItem(CURRENT_USER_KEY);
         sessionStorage.removeItem(LOGIN_AT_KEY);
+        sessionStorage.removeItem(LAST_ACTIVITY_AT_KEY);
       } else {
         sessionStorage.setItem(CURRENT_USER_KEY, u);
         // Capture the time of successful sign-in for this session.
-        sessionStorage.setItem(LOGIN_AT_KEY, new Date().toISOString());
+        const nowIso = new Date().toISOString();
+        sessionStorage.setItem(LOGIN_AT_KEY, nowIso);
+        sessionStorage.setItem(LAST_ACTIVITY_AT_KEY, nowIso);
       }
     } catch {
       // ignore
@@ -214,6 +218,75 @@
     if (hours || days) parts.push(`${hours}h`);
     parts.push(`${minutes}m`);
     return parts.join(' ');
+  }
+
+  function getLastActivityMs() {
+    try {
+      const raw = String(sessionStorage.getItem(LAST_ACTIVITY_AT_KEY) || '').trim();
+      const ms = raw ? Date.parse(raw) : NaN;
+      return Number.isFinite(ms) ? ms : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function markUserActivityNow() {
+    const current = getCurrentUser();
+    if (!current) return;
+    try {
+      sessionStorage.setItem(LAST_ACTIVITY_AT_KEY, new Date().toISOString());
+    } catch {
+      // ignore
+    }
+  }
+
+  function performAutoLogout() {
+    const prev = normalizeUsername(getCurrentUsername());
+    if (!prev) return;
+
+    // Record as an auth audit note, excluding hard-coded admin.
+    appendAuthAuditEvent('Auto log out', prev);
+
+    // Clear session (do not also write a normal Logout record).
+    setCurrentUsername('');
+
+    // Bring the user back to the public request page.
+    window.location.href = 'index.html?new=1';
+  }
+
+  let idleLogoutInstalled = false;
+  function installIdleAutoLogout() {
+    if (idleLogoutInstalled) return;
+    idleLogoutInstalled = true;
+
+    const IDLE_LIMIT_MS = 10 * 60 * 1000;
+
+    const onActivity = () => {
+      markUserActivityNow();
+    };
+
+    // Capture common user interactions.
+    ['pointerdown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click', 'focus']
+      .forEach((type) => {
+        window.addEventListener(type, onActivity, { passive: true });
+      });
+
+    // Periodic idle check.
+    window.setInterval(() => {
+      const currentUser = getCurrentUser();
+      if (!currentUser) return;
+
+      // If timestamp is missing (older sessions), initialize it.
+      if (!getLastActivityMs()) markUserActivityNow();
+
+      const lastMs = getLastActivityMs();
+      if (lastMs === null) return;
+
+      const idleMs = Date.now() - lastMs;
+      if (idleMs >= IDLE_LIMIT_MS) {
+        performAutoLogout();
+      }
+    }, 15 * 1000);
   }
 
   function performLogout() {
@@ -5480,8 +5553,18 @@
           ? (formatDurationMs(Math.max(0, logoutMs - loginMs)) || '0m')
           : '—';
 
+        const logoutActionLower = String(logout && logout.action ? logout.action : '').trim().toLowerCase();
+        const isAuto = logoutActionLower === 'auto log out' || logoutActionLower === 'auto logout';
+
         const at = logoutAt || loginAt || new Date().toISOString();
         const ms = (logoutMs != null ? logoutMs : (loginMs != null ? loginMs : (toTimeMs(at) ?? 0)));
+
+        const changeRows = [
+          { field: 'Login', from: '', to: loginText },
+          { field: 'Logout', from: '', to: logoutText },
+        ];
+        if (isAuto) changeRows.push({ field: 'Note', from: '', to: 'Auto log out' });
+        changeRows.push({ field: 'Total time logged in', from: '', to: durText });
 
         return {
           ms,
@@ -5490,11 +5573,7 @@
           record: 'Session',
           user,
           action: 'Session',
-          changes: [
-            { field: 'Login', from: '', to: loginText },
-            { field: 'Logout', from: '', to: logoutText },
-            { field: 'Total time logged in', from: '', to: durText },
-          ],
+          changes: changeRows,
         };
       };
 
@@ -5504,7 +5583,7 @@
           openLoginByUser.set(String(e.user || '—'), e);
           continue;
         }
-        if (actionLower === 'logout') {
+        if (actionLower === 'logout' || actionLower === 'auto log out' || actionLower === 'auto logout') {
           const open = openLoginByUser.get(String(e.user || '—'));
           if (open) {
             events.push(makeSessionEvent(open, e));
@@ -9823,6 +9902,9 @@
       setTheme(next);
     });
   }
+
+  // Auto logout after 10 minutes of inactivity.
+  installIdleAutoLogout();
 
   // Request form header auth button (index.html)
   if (authHeaderBtn) {

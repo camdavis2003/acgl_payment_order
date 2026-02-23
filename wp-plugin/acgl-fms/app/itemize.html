@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Itemize Payment Order</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <div class="header-top">
+          <h1>Itemize Payment Order</h1>
+          <div class="header-actions">
+            <label class="switch" for="themeToggle">
+              <input
+                type="checkbox"
+                id="themeToggle"
+                class="switch__input"
+                role="switch"
+                aria-label="Dark mode"
+              />
+              <span class="switch__track" aria-hidden="true"></span>
+              <span class="switch__text">Dark mode</span>
+            </label>
+          </div>
+        </div>
+
+        <p class="subhead" id="itemizeContext">
+          Add line items for this payment order. Totals are calculated
+          automatically.
+        </p>
+
+        <nav class="menu" aria-label="Pages">
+          <a class="menu__link" href="index.html">Back to Form</a>
+          <a class="menu__link" href="menu.html">Back to Submitted List</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card" aria-labelledby="items-title">
+        <div class="list-header">
+          <h2 id="items-title">Items</h2>
+          <div class="list-actions">
+            <button type="button" id="saveItemsBtn" class="btn btn--primary">
+              Save Items
+            </button>
+          </div>
+        </div>
+
+        <form id="itemForm" class="inline-form" novalidate>
+          <input
+            type="hidden"
+            id="editingItemId"
+            name="editingItemId"
+            value=""
+          />
+
+          <div class="grid grid--items">
+            <div class="field field--span2">
+              <label for="itemTitle"
+                >Title<span class="req" aria-hidden="true">*</span></label
+              >
+              <input
+                id="itemTitle"
+                name="itemTitle"
+                type="text"
+                autocomplete="off"
+                required
+              />
+              <div
+                class="error"
+                id="error-itemTitle"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="itemEuro">Euro (€)</label>
+              <input
+                id="itemEuro"
+                name="itemEuro"
+                type="number"
+                inputmode="decimal"
+                step="0.01"
+                min="0"
+              />
+              <div
+                class="error"
+                id="error-itemEuro"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+
+            <div class="field">
+              <label for="itemUsd">USD ($)</label>
+              <input
+                id="itemUsd"
+                name="itemUsd"
+                type="number"
+                inputmode="decimal"
+                step="0.01"
+                min="0"
+              />
+              <div
+                class="error"
+                id="error-itemUsd"
+                role="alert"
+                aria-live="polite"
+              ></div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button
+              type="submit"
+              class="btn btn--primary"
+              id="addOrUpdateItemBtn"
+            >
+              Add Item
+            </button>
+            <button
+              type="button"
+              class="btn btn--ghost"
+              id="cancelEditItemBtn"
+              hidden
+            >
+              Cancel Edit
+            </button>
+          </div>
+        </form>
+
+        <div
+          class="table-wrap"
+          role="region"
+          aria-label="Itemized items table"
+          tabindex="0"
+        >
+          <table class="table" aria-describedby="items-help">
+            <caption id="items-help" class="sr-only">
+              Rows are numbered. Use Actions to edit or delete items. Totals are
+              shown below.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" class="num">#</th>
+                <th scope="col">Title</th>
+                <th scope="col" class="num">Euro (€)</th>
+                <th scope="col" class="num">USD ($)</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="itemsTbody">
+              <!-- rows inserted by app.js -->
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row" colspan="2" class="num">Totals</th>
+                <td class="num" id="totalEuro">€ 0.00</td>
+                <td class="num" id="totalUsd">$ 0.00</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div id="itemsEmptyState" class="empty" hidden>
+          No items yet. Add at least one item.
+        </div>
+
+        <hr class="divider" />
+
+        <h3 id="attachments-title">Attachments</h3>
+        <p class="subhead">
+          Attachments are stored in your browser for now (no folder/server save
+          yet).
+        </p>
+
+        <div
+          id="attachmentsDropzone"
+          class="dropzone"
+          role="button"
+          tabindex="0"
+          aria-describedby="attachments-help"
+        >
+          <div class="dropzone__title">Drag & drop files here</div>
+          <div class="dropzone__hint">or click to choose files</div>
+          <input
+            id="attachmentsInput"
+            class="dropzone__input"
+            type="file"
+            multiple
+          />
+        </div>
+        <div id="attachments-help" class="sr-only">
+          Use this area to add attachments. Files are saved locally in your
+          browser.
+        </div>
+
+        <div
+          id="attachmentsError"
+          class="error"
+          role="alert"
+          aria-live="polite"
+        ></div>
+
+        <div
+          class="table-wrap"
+          role="region"
+          aria-label="Attachments table"
+          tabindex="0"
+        >
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col" class="num">#</th>
+                <th scope="col">File</th>
+                <th scope="col" class="num">Size</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="attachmentsTbody">
+              <!-- rows inserted by app.js -->
+            </tbody>
+          </table>
+        </div>
+
+        <div id="attachmentsEmptyState" class="empty" hidden>
+          No attachments yet.
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Budget Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <h1 data-budget-dashboard-title>Budget Dashboard</h1>
+              </div>
+              <div class="header-actions">
+                <label class="switch" for="themeToggle">
+                  <input
+                    type="checkbox"
+                    id="themeToggle"
+                    class="switch__input"
+                    role="switch"
+                    aria-label="Dark mode"
+                  />
+                  <span class="switch__track" aria-hidden="true"></span>
+                  <span class="switch__text">Dark mode</span>
+                </label>
+              </div>
+            </div>
+            <p class="subhead" data-budget-dashboard-subhead>
+              Charts show Expenditures vs Balance for each OUT account.
+            </p>
+          </div>
+        </header>
+
+        <main class="container container--wide">
+          <section
+            class="card"
+            aria-label="Budget dashboard"
+            data-budget-dashboard
+          >
+            <div class="budgetDash__topbar">
+              <div class="budgetDash__search">
+                <label class="sr-only" for="budgetDashboardSearch"
+                  >Search dashboard</label
+                >
+                <input
+                  id="budgetDashboardSearch"
+                  type="search"
+                  placeholder="Search (code or description)"
+                  autocomplete="off"
+                />
+              </div>
+              <a
+                href="budget.html"
+                id="budgetDashboardBackLink"
+                class="btn btn--ghost"
+                aria-label="Back"
+                >Back</a
+              >
+            </div>
+            <section
+              class="budgetDash__section"
+              aria-label="Anticipated Values"
+            >
+              <h2 class="budgetDash__sectionTitle">Anticipated Values</h2>
+              <div
+                class="budgetDash__grid"
+                data-budget-dashboard-grid-anticipated
+              ></div>
+              <p
+                class="budgetDash__empty"
+                data-budget-dashboard-empty-anticipated
+                hidden
+              >
+                No anticipated items found for this year.
+              </p>
+            </section>
+
+            <section
+              class="budgetDash__section"
+              aria-label="Budget, Receipts, Expenditures"
+            >
+              <h2 class="budgetDash__sectionTitle">
+                Budget / Receipts / Expenditures
+              </h2>
+              <div
+                class="budgetDash__grid"
+                data-budget-dashboard-grid-budget
+              ></div>
+              <p
+                class="budgetDash__empty"
+                data-budget-dashboard-empty-budget
+                hidden
+              >
+                No budget items found for this year.
+              </p>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

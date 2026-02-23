@@ -1,0 +1,35 @@
+<?php
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+function acgl_fms_register_shortcodes() {
+    add_shortcode('acgl_fms', 'acgl_fms_shortcode');
+}
+
+function acgl_fms_shortcode($atts = []) {
+    // We embed the existing static app as an iframe, and pass the REST base + nonce
+    // as query parameters so the app can use WP shared storage.
+    $app_url = plugins_url('app/index.html', ACGL_FMS_PLUGIN_FILE);
+
+    $rest_url = rest_url(); // usually https://example.com/wp-json/
+    $nonce = wp_create_nonce('wp_rest');
+
+    $src = add_query_arg([
+        'restUrl' => $rest_url,
+        'restNonce' => $nonce,
+        'wp' => '1',
+    ], $app_url);
+
+    $height = isset($atts['height']) ? preg_replace('/[^0-9]/', '', (string)$atts['height']) : '';
+    if ($height === '') $height = '950';
+
+    $html = sprintf(
+        '<iframe src="%s" style="width:100%%;height:%spx;border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>',
+        esc_url($src),
+        esc_attr($height)
+    );
+
+    return $html;
+}

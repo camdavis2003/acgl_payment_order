@@ -5,6 +5,11 @@
   "description": "Plain HTML/CSS/JS Payment Order Request (no backend).",
   "scripts": {
     "dev": "node dev-server.js",
-    "start": "node dev-server.js"
+    "start": "node dev-server.js",
+    "build:wp": "node build-wp-plugin.js",
+    "package:wp": "node package-wp-plugin.js --slug acgl-fms-wp --out acgl-fms-wp.zip"
+  },
+  "devDependencies": {
+    "archiver": "^7.0.1"
   }
 }

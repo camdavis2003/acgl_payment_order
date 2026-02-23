@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reconciliation</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <h1 data-reconciliation-title>Reconciliation</h1>
+              </div>
+              <div class="header-actions">
+                <label class="switch" for="themeToggle">
+                  <input
+                    type="checkbox"
+                    id="themeToggle"
+                    class="switch__input"
+                    role="switch"
+                    aria-label="Dark mode"
+                  />
+                  <span class="switch__track" aria-hidden="true"></span>
+                  <span class="switch__text">Dark mode</span>
+                </label>
+              </div>
+            </div>
+            <p class="subhead">
+              This page lists Payment Order entries awaiting reconciliation.
+              Reconciled entries are moved into the main Payment Orders list.
+            </p>
+          </div>
+        </header>
+
+        <main class="container container--wide">
+          <section
+            id="reconciliation-list"
+            class="card"
+            aria-labelledby="reconcile-list-title"
+          >
+            <div
+              id="flashToken"
+              class="token"
+              role="status"
+              aria-live="polite"
+              hidden
+            ></div>
+
+            <div class="list-header">
+              <h2 id="reconcile-list-title" data-reconciliation-list-title>
+                Reconciliation
+              </h2>
+              <div class="list-actions">
+                <a
+                  class="btn btn--ghost"
+                  id="reconcileToPaymentOrdersBtn"
+                  href="menu.html"
+                >
+                  Payment Orders
+                </a>
+                <div class="list-search">
+                  <label class="sr-only" for="reconcileOrdersGlobalSearch"
+                    >Search all columns</label
+                  >
+                  <input
+                    id="reconcileOrdersGlobalSearch"
+                    type="text"
+                    inputmode="search"
+                    placeholder="Search all columns…"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    id="reconcileClearSearchBtn"
+                    class="searchClearBtn"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    hidden
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="table-wrap ordersTableWrap"
+              role="region"
+              aria-label="Reconciliation table"
+              tabindex="0"
+            >
+              <table id="reconcileOrdersTable" class="table">
+                <caption class="sr-only">
+                  Entries awaiting reconciliation. Use the Actions column to
+                  reconcile and move an entry to Payment Orders.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" class="col-delete">
+                      <span class="sr-only">Delete</span>
+                    </th>
+                    <th scope="col">Payment Order No.</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Name</th>
+                    <th scope="col" class="num">Euro (€)</th>
+                    <th scope="col" class="num">USD ($)</th>
+                    <th scope="col">Budget Number</th>
+                    <th scope="col">Purpose</th>
+                    <th scope="col">With</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="reconcileOrdersTbody">
+                  <!-- rows inserted by app.js -->
+                </tbody>
+                <tfoot>
+                  <tr class="ordersTotalsRow">
+                    <td class="col-delete"></td>
+                    <td colspan="3" class="ordersTotalsRow__label">Total</td>
+                    <td class="num" id="reconcileTotalEuro"></td>
+                    <td class="num" id="reconcileTotalUsd"></td>
+                    <td colspan="5"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div id="reconcileEmptyState" class="empty" hidden>
+              No entries awaiting reconciliation.
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

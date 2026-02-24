@@ -3858,6 +3858,22 @@ void (async () => {
     return payload.item && typeof payload.item === 'object' ? payload.item : null;
   }
 
+  async function wpUploadBacklogAttachment(itemId, file) {
+    const id = String(itemId || '').trim();
+    if (!id) throw new Error('missing_item_id');
+    const url = getWpAttachmentsUrl('backlog-attachments/upload');
+    const fd = new FormData();
+    fd.append('itemId', id);
+    fd.append('file', file, file && file.name ? file.name : 'attachment');
+
+    const res = await wpFetchJson(url, { method: 'POST', body: fd });
+    if (res.status === 401 || res.status === 403) throw new Error('not_authorized');
+    if (!res.ok) throw new Error(`upload_failed_${res.status}`);
+    const payload = await res.json();
+    if (!payload || payload.ok !== true) throw new Error('upload_failed');
+    return payload.item && typeof payload.item === 'object' ? payload.item : null;
+  }
+
   async function wpDeleteAttachmentById(id) {
     const numericId = Number.parseInt(String(id || ''), 10);
     if (!Number.isFinite(numericId) || numericId <= 0) return;
@@ -6785,6 +6801,116 @@ void (async () => {
     localStorage.setItem(BACKLOG_KEY, JSON.stringify(safe));
   }
 
+  function normalizeBacklogPriority(valueRaw) {
+    const n = Number.parseInt(String(valueRaw ?? ''), 10);
+    if (!Number.isFinite(n)) return 3;
+    if (n < 1) return 1;
+    if (n > 5) return 5;
+    return n;
+  }
+
+  function isFiveDigitNumber(valueRaw) {
+    const s = String(valueRaw || '').trim();
+    return /^\d{5}$/.test(s);
+  }
+
+  function generateUniqueBacklogNumber(used) {
+    const usedSet = used instanceof Set ? used : new Set();
+    for (let i = 0; i < 80; i += 1) {
+      const n = 10000 + Math.floor(Math.random() * 90000);
+      const s = String(n);
+      if (!usedSet.has(s)) return s;
+    }
+    // Fallback: last 5 digits of epoch seconds.
+    const s = String(Math.floor(Date.now() / 1000) % 100000).padStart(5, '0');
+    if (!usedSet.has(s)) return s;
+    // Final fallback: brute force.
+    for (let n = 10000; n <= 99999; n += 1) {
+      const v = String(n);
+      if (!usedSet.has(v)) return v;
+    }
+    return String(10000);
+  }
+
+  function getBacklogQueryTokens() {
+    const searchInput = document.getElementById('backlogSearch');
+    const raw = searchInput ? String(searchInput.value || '') : '';
+    return raw
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+  }
+
+  function backlogItemHaystack(it) {
+    const parts = [
+      it && it.refNo ? String(it.refNo) : '',
+      it && it.priority !== undefined ? String(it.priority) : '',
+      it && it.subject ? String(it.subject) : '',
+      it && it.description ? String(it.description) : '',
+      it && it.createdBy ? String(it.createdBy) : '',
+      it && it.completedBy ? String(it.completedBy) : '',
+      it && it.archivedBy ? String(it.archivedBy) : '',
+      it && it.attachmentName ? String(it.attachmentName) : '',
+    ];
+    const comments = Array.isArray(it && it.comments) ? it.comments : [];
+    for (const c of comments) {
+      if (!c || typeof c !== 'object') continue;
+      parts.push(String(c.by || ''));
+      parts.push(String(c.text || ''));
+    }
+    return parts.join(' ').toLowerCase();
+  }
+
+  function backlogMatchesTokens(it, tokens) {
+    if (!tokens || tokens.length === 0) return true;
+    const hay = backlogItemHaystack(it);
+    for (const t of tokens) {
+      if (!hay.includes(t)) return false;
+    }
+    return true;
+  }
+
+  function applyMaxVisibleBacklogItems(listEl, maxVisible) {
+    if (!listEl) return;
+    const items = Array.from(listEl.querySelectorAll('.backlog__item'));
+
+    listEl.style.overflowY = 'auto';
+    if (items.length <= maxVisible) {
+      listEl.style.maxHeight = '';
+      return;
+    }
+
+    const first = items[0];
+    const last = items[Math.min(maxVisible, items.length) - 1];
+    const prevScrollTop = listEl.scrollTop;
+    if (prevScrollTop) listEl.scrollTop = 0;
+    let total = 0;
+    try {
+      const listRect = listEl.getBoundingClientRect ? listEl.getBoundingClientRect() : null;
+      const firstRect = first && first.getBoundingClientRect ? first.getBoundingClientRect() : null;
+      const lastRect = last && last.getBoundingClientRect ? last.getBoundingClientRect() : null;
+      if (listRect && firstRect && lastRect) {
+        total = (lastRect.bottom - listRect.top);
+      }
+    } finally {
+      if (prevScrollTop) listEl.scrollTop = prevScrollTop;
+    }
+
+    if (!Number.isFinite(total) || total <= 0) {
+      const cs = window.getComputedStyle ? window.getComputedStyle(listEl) : null;
+      const gapRaw = cs ? (cs.rowGap || cs.gap || '0px') : '0px';
+      const gap = Number.parseFloat(String(gapRaw)) || 0;
+      total = 0;
+      for (let i = 0; i < Math.min(maxVisible, items.length); i += 1) {
+        total += items[i].offsetHeight;
+      }
+      total += gap * (maxVisible - 1);
+    }
+
+    listEl.style.maxHeight = `${Math.max(80, Math.ceil(total))}px`;
+  }
+
   function getBacklogDisplayUser() {
     const u = normalizeUsername(getCurrentUsername());
     return u || '—';
@@ -6823,9 +6949,22 @@ void (async () => {
     const formEl = document.getElementById('backlogItemForm');
     if (formEl) {
       formEl.removeAttribute('data-edit-id');
+      formEl.removeAttribute('data-existing-attachment-id');
+      formEl.removeAttribute('data-remove-attachment');
       clearBacklogFormErrors(formEl);
       formEl.reset();
     }
+
+    const currentEl = document.getElementById('backlogAttachmentCurrent');
+    const viewBtn = document.getElementById('backlogAttachmentViewBtn');
+    const removeBtn = document.getElementById('backlogAttachmentRemoveBtn');
+    if (currentEl) {
+      currentEl.textContent = '';
+      currentEl.hidden = true;
+    }
+    if (viewBtn) viewBtn.hidden = true;
+    if (removeBtn) removeBtn.hidden = true;
+
     closeSimpleModal(modalEl);
   }
 
@@ -6834,8 +6973,14 @@ void (async () => {
     const formEl = document.getElementById('backlogCommentForm');
     if (formEl) {
       formEl.removeAttribute('data-item-id');
+      formEl.removeAttribute('data-edit-comment-idx');
       clearBacklogFormErrors(formEl);
       formEl.reset();
+    }
+    const deleteBtn = document.getElementById('backlogCommentDeleteBtn');
+    if (deleteBtn) {
+      deleteBtn.hidden = true;
+      deleteBtn.disabled = false;
     }
     closeSimpleModal(modalEl);
   }
@@ -6844,19 +6989,88 @@ void (async () => {
     const listEl = document.getElementById('backlogList');
     const emptyEl = document.getElementById('backlogEmptyState');
     const metaEl = document.getElementById('backlogMeta');
+    const searchInput = document.getElementById('backlogSearch');
+    const clearBtn = document.getElementById('backlogClearSearchBtn');
     const archiveToggleEl = document.getElementById('backlogArchiveToggle');
     const archiveWrapEl = document.getElementById('backlogArchiveWrap');
     const archiveEmptyEl = document.getElementById('backlogArchiveEmptyState');
     const archiveListEl = document.getElementById('backlogArchiveList');
     if (!listEl || !emptyEl) return;
 
+    // Bind search UI once.
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', () => {
+        renderBacklogList(canEdit);
+      });
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          searchInput.value = '';
+          renderBacklogList(canEdit);
+        }
+      });
+    }
+    if (clearBtn && searchInput && !clearBtn.dataset.bound) {
+      clearBtn.dataset.bound = 'true';
+      clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        renderBacklogList(canEdit);
+      });
+    }
+    if (clearBtn && searchInput) {
+      const has = Boolean(String(searchInput.value || '').trim());
+      clearBtn.hidden = !has;
+    }
+
     const hasArchiveUi = Boolean(archiveToggleEl && archiveWrapEl && archiveEmptyEl && archiveListEl);
     const archiveOpen = hasArchiveUi && archiveWrapEl.dataset.open === '1';
 
+    const tokens = getBacklogQueryTokens();
+
     const items = loadBacklogItems();
-    const normalized = items
+
+    // Normalize + migrate: ensure each item has a stable id, unique 5-digit refNo, and priority.
+    const usedRefNos = new Set();
+    let needsSave = false;
+    const patched = items.map((it) => {
+      if (!it || typeof it !== 'object') return it;
+
+      const out = { ...it };
+
+      const id = String(out.id || '').trim();
+      if (!id) {
+        out.id = (crypto?.randomUUID ? crypto.randomUUID() : `bl_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+        needsSave = true;
+      }
+
+      const p = normalizeBacklogPriority(out.priority);
+      if (p !== out.priority) {
+        out.priority = p;
+        needsSave = true;
+      }
+
+      let refNo = String(out.refNo || out.backlogNo || out.number || out.ticketNo || '').trim();
+      if (!isFiveDigitNumber(refNo) || usedRefNos.has(refNo)) {
+        refNo = generateUniqueBacklogNumber(usedRefNos);
+        out.refNo = refNo;
+        needsSave = true;
+      } else {
+        out.refNo = refNo;
+        if (!out.refNo || String(out.refNo) !== refNo) needsSave = true;
+      }
+      usedRefNos.add(refNo);
+
+      return out;
+    });
+
+    if (needsSave) saveBacklogItems(patched);
+
+    const normalized = patched
       .map((it) => {
-        const id = String(it.id || '').trim() || (crypto?.randomUUID ? crypto.randomUUID() : `bl_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+        if (!it || typeof it !== 'object') return null;
+        const id = String(it.id || '').trim();
+        const refNo = String(it.refNo || '').trim();
+        const priority = normalizeBacklogPriority(it.priority);
         const subject = String(it.subject || '').trim();
         const description = String(it.description || '').trim();
         const createdAt = it.createdAt ? String(it.createdAt) : new Date().toISOString();
@@ -6868,8 +7082,12 @@ void (async () => {
         const completedAt = it.completedAt ? String(it.completedAt) : (archivedAt ? String(archivedAt) : '');
         const completedBy = it.completedBy !== undefined ? String(it.completedBy || '—') : (archivedBy ? String(archivedBy || '—') : '—');
         const comments = Array.isArray(it.comments) ? it.comments.filter((c) => c && typeof c === 'object') : [];
+        const attachmentId = it.attachmentId !== undefined && it.attachmentId !== null ? String(it.attachmentId) : '';
+        const attachmentName = String(it.attachmentName || '').trim();
         return {
           id,
+          refNo,
+          priority,
           subject,
           description,
           createdAt,
@@ -6881,20 +7099,29 @@ void (async () => {
           completedAt,
           completedBy,
           comments,
+          attachmentId,
+          attachmentName,
         };
       })
-      .filter((it) => it.subject && it.description);
+      .filter((it) => it && it.subject && it.description)
+      .filter((it) => backlogMatchesTokens(it, tokens));
 
     const activeItems = normalized.filter((x) => !x.archived);
     const archivedItems = normalized.filter((x) => x.archived);
 
     activeItems.sort((a, b) => {
+      const ap = normalizeBacklogPriority(a.priority);
+      const bp = normalizeBacklogPriority(b.priority);
+      if (ap !== bp) return ap - bp;
       const am = toTimeMs(a.createdAt) ?? 0;
       const bm = toTimeMs(b.createdAt) ?? 0;
       return bm - am;
     });
 
     archivedItems.sort((a, b) => {
+      const ap = normalizeBacklogPriority(a.priority);
+      const bp = normalizeBacklogPriority(b.priority);
+      if (ap !== bp) return ap - bp;
       const am = toTimeMs(a.archivedAt || a.completedAt || a.createdAt) ?? 0;
       const bm = toTimeMs(b.archivedAt || b.completedAt || b.createdAt) ?? 0;
       if (bm !== am) return bm - am;
@@ -6903,13 +7130,23 @@ void (async () => {
       return bc - ac;
     });
 
-    if (metaEl) metaEl.textContent = `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} total`;
+    if (metaEl) {
+      const label = tokens.length > 0 ? `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} match` : `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} total`;
+      metaEl.textContent = label;
+    }
+
+    if (tokens.length > 0) {
+      emptyEl.textContent = 'No matching backlog items.';
+    } else {
+      emptyEl.textContent = 'No backlog items yet.';
+    }
 
     emptyEl.hidden = normalized.length > 0;
     if (normalized.length === 0) {
       listEl.innerHTML = '';
       if (hasArchiveUi) {
         archiveListEl.innerHTML = '';
+        archiveEmptyEl.textContent = tokens.length > 0 ? 'No matching archived items.' : 'No archived items.';
         archiveEmptyEl.hidden = false;
       }
       return;
@@ -6924,14 +7161,14 @@ void (async () => {
         const completedLabel = it.completedAt ? formatIsoDateTimeShort(it.completedAt) : '—';
 
         const comments = (Array.isArray(it.comments) ? it.comments : [])
-          .map((c) => {
+          .map((c, commentIdx) => {
             const at = c.at ? String(c.at) : '';
             const by = c.by !== undefined ? String(c.by || '—') : '—';
             const text = String(c.text || '').trim();
             if (!text) return '';
             const time = at ? formatIsoDateTimeShort(at) : '—';
             return `
-              <div class="backlog__comment">
+              <div class="backlog__comment" data-comment-idx="${escapeHtml(commentIdx)}">
                 <div class="backlog__commentHead">
                   <span><strong>${escapeHtml(by)}</strong></span>
                   <span class="timelinegraph__eventSep">•</span>
@@ -6948,6 +7185,10 @@ void (async () => {
         const itemClass = it.completed ? 'backlog__item backlog__item--completed' : 'backlog__item';
         const completeText = it.completed ? 'Reopen' : 'Complete';
 
+        const attachmentBtn = it.attachmentId
+          ? `<button type="button" class="btn btn--ghost" data-backlog-action="attachment">Attachment</button>`
+          : '';
+
         const completedMeta = it.completed
           ? ` <span class="timelinegraph__eventSep">•</span> <span>Completed: <strong>${escapeHtml(completedLabel)}</strong></span> <span class="timelinegraph__eventSep">•</span> <span>By: <strong>${escapeHtml(it.completedBy || '—')}</strong></span>`
           : '';
@@ -6955,7 +7196,7 @@ void (async () => {
         return `
           <div class="${itemClass}" data-id="${escapeHtml(it.id)}">
             <div class="backlog__header">
-              <div class="${subjectClass}">${escapeHtml(it.subject)}</div>
+              <div class="${subjectClass}">#${escapeHtml(it.refNo)} • P${escapeHtml(it.priority)} • ${escapeHtml(it.subject)}</div>
               <div class="backlog__meta">
                 <span>Created: <strong>${escapeHtml(createdLabel)}</strong></span>
                 <span class="timelinegraph__eventSep">•</span>
@@ -6965,7 +7206,8 @@ void (async () => {
             </div>
             <div class="backlog__desc">${escapeHtml(it.description)}</div>
             <div class="backlog__actions">
-              <button type="button" class="btn btn--ghost" data-backlog-action="comment" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Comment</button>
+              ${attachmentBtn}
+              <button type="button" class="btn btn--viewGrey" data-backlog-action="comment" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Comment</button>
               <button type="button" class="btn btn--editBlue" data-backlog-action="edit" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Edit</button>
               <button type="button" class="btn" data-backlog-action="complete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>${escapeHtml(completeText)}</button>
               <button type="button" class="btn btn--danger" data-backlog-action="delete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Delete</button>
@@ -6979,11 +7221,25 @@ void (async () => {
 
     listEl.innerHTML = activeItems.length > 0 ? renderItems(activeItems) : '';
 
+    // Cap list height to ~3 items, then scroll.
+    requestAnimationFrame(() => {
+      applyMaxVisibleBacklogItems(listEl, 3);
+      requestAnimationFrame(() => applyMaxVisibleBacklogItems(listEl, 3));
+    });
+
     if (hasArchiveUi) {
       archiveWrapEl.hidden = !archiveOpen;
       archiveToggleEl.setAttribute('aria-expanded', archiveOpen ? 'true' : 'false');
+      archiveEmptyEl.textContent = tokens.length > 0 ? 'No matching archived items.' : 'No archived items.';
       archiveEmptyEl.hidden = archivedItems.length > 0;
       archiveListEl.innerHTML = archivedItems.length > 0 ? renderItems(archivedItems) : '';
+
+      requestAnimationFrame(() => {
+        if (!archiveWrapEl.hidden) {
+          applyMaxVisibleBacklogItems(archiveListEl, 3);
+          requestAnimationFrame(() => applyMaxVisibleBacklogItems(archiveListEl, 3));
+        }
+      });
     }
   }
 
@@ -6997,6 +7253,7 @@ void (async () => {
     const itemForm = document.getElementById('backlogItemForm');
     const commentModal = document.getElementById('backlogCommentModal');
     const commentForm = document.getElementById('backlogCommentForm');
+    const commentDeleteBtn = document.getElementById('backlogCommentDeleteBtn');
     if (!addBtn || !listEl || !itemModal || !itemForm || !commentModal || !commentForm) return;
 
     addBtn.disabled = !canEdit;
@@ -7022,6 +7279,9 @@ void (async () => {
         archiveWrapEl.dataset.open = isOpen ? '0' : '1';
         archiveWrapEl.hidden = isOpen;
         archiveToggleEl.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+
+        // Re-apply scroll cap after toggling.
+        renderBacklogList(canEdit);
       });
     }
 
@@ -7044,7 +7304,7 @@ void (async () => {
     function bindBacklogListActions(targetListEl) {
       if (!targetListEl || targetListEl.dataset.bound) return;
       targetListEl.dataset.bound = 'true';
-      targetListEl.addEventListener('click', (e) => {
+      targetListEl.addEventListener('click', async (e) => {
         const btn = e.target.closest('button[data-backlog-action]');
         if (!btn) return;
         const row = btn.closest('.backlog__item');
@@ -7052,22 +7312,58 @@ void (async () => {
         const id = row.getAttribute('data-id');
         const action = btn.getAttribute('data-backlog-action');
         if (!id || !action) return;
-        if (!canEdit) return;
+
+        const isViewAction = action === 'attachment';
+        if (!isViewAction && !canEdit) return;
 
         const items = loadBacklogItems();
         const idx = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(id));
         if (idx === -1) return;
         const current = items[idx];
 
+        if (action === 'attachment') {
+          const attId = current && current.attachmentId !== undefined && current.attachmentId !== null ? String(current.attachmentId).trim() : '';
+          if (!attId) return;
+          try {
+            const att = await getAttachmentById(attId);
+            if (att) openAttachmentInNewTab(att);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(err);
+          }
+          return;
+        }
+
         if (action === 'edit') {
           const titleEl = document.getElementById('backlogItemModalTitle');
           if (titleEl) titleEl.textContent = 'Edit Backlog Item';
           itemForm.setAttribute('data-edit-id', String(id));
+          itemForm.removeAttribute('data-remove-attachment');
           clearBacklogFormErrors(itemForm);
           const subj = document.getElementById('backlogSubject');
+          const pri = document.getElementById('backlogPriority');
           const desc = document.getElementById('backlogDescription');
+          const fileEl = document.getElementById('backlogAttachment');
+          const currentEl = document.getElementById('backlogAttachmentCurrent');
+          const viewBtn = document.getElementById('backlogAttachmentViewBtn');
+          const removeBtn = document.getElementById('backlogAttachmentRemoveBtn');
           if (subj) subj.value = String(current.subject || '');
+          if (pri) pri.value = String(normalizeBacklogPriority(current.priority));
           if (desc) desc.value = String(current.description || '');
+          if (fileEl) fileEl.value = '';
+
+          const attId = current && current.attachmentId !== undefined && current.attachmentId !== null ? String(current.attachmentId).trim() : '';
+          const attName = String(current.attachmentName || '').trim();
+          if (attId) itemForm.setAttribute('data-existing-attachment-id', attId);
+          else itemForm.removeAttribute('data-existing-attachment-id');
+
+          if (currentEl) {
+            currentEl.textContent = attName ? `Current: ${attName}` : 'Current attachment set.';
+            currentEl.hidden = !attId;
+          }
+          if (viewBtn) viewBtn.hidden = !attId;
+          if (removeBtn) removeBtn.hidden = !attId;
+
           openSimpleModal(itemModal, '#backlogSubject');
           return;
         }
@@ -7075,6 +7371,16 @@ void (async () => {
         if (action === 'delete') {
           const ok = window.confirm('Delete this backlog item?');
           if (!ok) return;
+
+          const attId = current && current.attachmentId !== undefined && current.attachmentId !== null ? String(current.attachmentId).trim() : '';
+          if (attId) {
+            try {
+              await deleteAttachmentById(attId);
+            } catch {
+              // Ignore attachment deletion errors; item deletion should proceed.
+            }
+          }
+
           const next = items.filter((x) => x && typeof x === 'object' && String(x.id || '') !== String(id));
           saveBacklogItems(next);
           renderBacklogList(canEdit);
@@ -7115,6 +7421,11 @@ void (async () => {
           const titleEl = document.getElementById('backlogCommentModalTitle');
           if (titleEl) titleEl.textContent = 'Add Comment';
           commentForm.setAttribute('data-item-id', String(id));
+          commentForm.removeAttribute('data-edit-comment-idx');
+          if (commentDeleteBtn) {
+            commentDeleteBtn.hidden = true;
+            commentDeleteBtn.disabled = !canEdit;
+          }
           clearBacklogFormErrors(commentForm);
           commentForm.reset();
           openSimpleModal(commentModal, '#backlogComment');
@@ -7122,20 +7433,64 @@ void (async () => {
       });
     }
 
+    function bindBacklogCommentDblClick(targetListEl) {
+      if (!targetListEl || targetListEl.dataset.commentDblBound) return;
+      targetListEl.dataset.commentDblBound = '1';
+      targetListEl.addEventListener('dblclick', (e) => {
+        if (!canEdit) return;
+        const commentEl = e.target.closest('.backlog__comment');
+        if (!commentEl) return;
+        const row = commentEl.closest('.backlog__item');
+        if (!row) return;
+        const itemId = row.getAttribute('data-id');
+        const idxRaw = commentEl.getAttribute('data-comment-idx');
+        const commentIdx = Number.parseInt(String(idxRaw || ''), 10);
+        if (!itemId || !Number.isFinite(commentIdx) || commentIdx < 0) return;
+
+        const items = loadBacklogItems();
+        const itemIndex = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(itemId));
+        if (itemIndex === -1) return;
+        const current = items[itemIndex];
+        const comments = Array.isArray(current.comments) ? current.comments : [];
+        if (commentIdx >= comments.length) return;
+        const existing = comments[commentIdx] && typeof comments[commentIdx] === 'object' ? comments[commentIdx] : null;
+        const text = existing ? String(existing.text || '').trim() : '';
+
+        const titleEl = document.getElementById('backlogCommentModalTitle');
+        if (titleEl) titleEl.textContent = 'Edit Comment';
+        commentForm.setAttribute('data-item-id', String(itemId));
+        commentForm.setAttribute('data-edit-comment-idx', String(commentIdx));
+        if (commentDeleteBtn) {
+          commentDeleteBtn.hidden = false;
+          commentDeleteBtn.disabled = !canEdit;
+        }
+        clearBacklogFormErrors(commentForm);
+        commentForm.reset();
+        const textEl = document.getElementById('backlogComment');
+        if (textEl) textEl.value = text;
+        openSimpleModal(commentModal, '#backlogComment');
+      });
+    }
+
     bindBacklogListActions(listEl);
     bindBacklogListActions(archiveListEl);
+    bindBacklogCommentDblClick(listEl);
+    bindBacklogCommentDblClick(archiveListEl);
 
     if (!itemForm.dataset.bound) {
       itemForm.dataset.bound = 'true';
-      itemForm.addEventListener('submit', (e) => {
+      itemForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         if (!canEdit) return;
         clearBacklogFormErrors(itemForm);
 
         const subjectEl = document.getElementById('backlogSubject');
         const descEl = document.getElementById('backlogDescription');
+        const priEl = document.getElementById('backlogPriority');
+        const fileEl = document.getElementById('backlogAttachment');
         const subject = subjectEl ? String(subjectEl.value || '').trim() : '';
         const description = descEl ? String(descEl.value || '').trim() : '';
+        const priority = normalizeBacklogPriority(priEl ? priEl.value : 3);
 
         let ok = true;
         if (!subject) {
@@ -7146,27 +7501,95 @@ void (async () => {
           setBacklogFieldError(itemForm, 'backlogDescription', 'Description is required.');
           ok = false;
         }
+        if (!Number.isFinite(priority) || priority < 1 || priority > 5) {
+          setBacklogFieldError(itemForm, 'backlogPriority', 'Priority must be 1–5.');
+          ok = false;
+        }
         if (!ok) return;
 
         const editId = itemForm.getAttribute('data-edit-id');
         const items = loadBacklogItems();
 
+        // Attachment handling: create or update attachment if a file is chosen.
+        const existingAttachmentId = String(itemForm.getAttribute('data-existing-attachment-id') || '').trim();
+        const removeExisting = itemForm.getAttribute('data-remove-attachment') === '1';
+        const selectedFile = fileEl && fileEl.files && fileEl.files.length > 0 ? fileEl.files[0] : null;
+
+        async function removeExistingAttachmentIfAny() {
+          if (!existingAttachmentId) return;
+          try {
+            await deleteAttachmentById(existingAttachmentId);
+          } catch {
+            // Ignore deletion errors.
+          }
+        }
+
+        async function uploadNewAttachmentForItem(itemId) {
+          if (!selectedFile) return null;
+
+          if (IS_WP_SHARED_MODE) {
+            if (!getCurrentUser()) throw new Error('not_authorized');
+            if (!requireWriteAccess('settings', 'Settings is read only for your account.')) throw new Error('not_authorized');
+            return wpUploadBacklogAttachment(itemId, selectedFile);
+          }
+
+          // Standalone: store in IndexedDB and reference by id.
+          return addAttachment(`backlog:${itemId}`, selectedFile, null);
+        }
+
         if (editId) {
           const idx = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(editId));
           if (idx === -1) return;
+
+          let nextAttachment = null;
+          if (selectedFile) {
+            await removeExistingAttachmentIfAny();
+            try {
+              nextAttachment = await uploadNewAttachmentForItem(editId);
+            } catch (err) {
+              const code = String(err && err.message ? err.message : '');
+              if (code === 'not_authorized') setBacklogFieldError(itemForm, 'backlogAttachment', 'Sign in to upload attachments.');
+              else setBacklogFieldError(itemForm, 'backlogAttachment', 'Attachment could not be saved.');
+              return;
+            }
+          } else if (removeExisting) {
+            await removeExistingAttachmentIfAny();
+          }
+
           const next = items.slice();
-          next[idx] = {
-            ...next[idx],
-            subject,
-            description,
-          };
+          const base = { ...next[idx], subject, description, priority };
+
+          if (nextAttachment) {
+            base.attachmentId = nextAttachment.id;
+            base.attachmentName = nextAttachment.name;
+          } else if (removeExisting) {
+            base.attachmentId = '';
+            base.attachmentName = '';
+          }
+
+          next[idx] = base;
           saveBacklogItems(next);
         } else {
           const id = (crypto?.randomUUID ? crypto.randomUUID() : `bl_${Date.now()}_${Math.random().toString(16).slice(2)}`);
           const now = new Date().toISOString();
           const by = getBacklogDisplayUser();
+
+          let nextAttachment = null;
+          if (selectedFile) {
+            try {
+              nextAttachment = await uploadNewAttachmentForItem(id);
+            } catch (err) {
+              const code = String(err && err.message ? err.message : '');
+              if (code === 'not_authorized') setBacklogFieldError(itemForm, 'backlogAttachment', 'Sign in to upload attachments.');
+              else setBacklogFieldError(itemForm, 'backlogAttachment', 'Attachment could not be saved.');
+              return;
+            }
+          }
+
           const nextItem = {
             id,
+            refNo: generateUniqueBacklogNumber(new Set(loadBacklogItems().map((x) => (x && typeof x === 'object' ? String(x.refNo || '') : '')).filter((x) => isFiveDigitNumber(x)))),
+            priority,
             subject,
             description,
             createdAt: now,
@@ -7179,12 +7602,57 @@ void (async () => {
             completedBy: '',
             comments: [],
           };
+
+          if (nextAttachment) {
+            nextItem.attachmentId = nextAttachment.id;
+            nextItem.attachmentName = nextAttachment.name;
+          }
+
           saveBacklogItems([nextItem, ...items]);
         }
 
         closeBacklogItemModal();
         renderBacklogList(canEdit);
       });
+    }
+
+    // Attachment controls inside the modal.
+    if (!itemForm.dataset.attachmentControlsBound) {
+      itemForm.dataset.attachmentControlsBound = '1';
+      const viewBtn = document.getElementById('backlogAttachmentViewBtn');
+      const removeBtn = document.getElementById('backlogAttachmentRemoveBtn');
+      const currentEl = document.getElementById('backlogAttachmentCurrent');
+      const fileEl = document.getElementById('backlogAttachment');
+
+      if (viewBtn && !viewBtn.dataset.bound) {
+        viewBtn.dataset.bound = '1';
+        viewBtn.addEventListener('click', async () => {
+          const attId = String(itemForm.getAttribute('data-existing-attachment-id') || '').trim();
+          if (!attId) return;
+          try {
+            const att = await getAttachmentById(attId);
+            if (att) openAttachmentInNewTab(att);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(err);
+          }
+        });
+      }
+
+      if (removeBtn && !removeBtn.dataset.bound) {
+        removeBtn.dataset.bound = '1';
+        removeBtn.addEventListener('click', () => {
+          itemForm.setAttribute('data-remove-attachment', '1');
+          itemForm.removeAttribute('data-existing-attachment-id');
+          if (currentEl) {
+            currentEl.textContent = 'Attachment will be removed when you Save.';
+            currentEl.hidden = false;
+          }
+          if (viewBtn) viewBtn.hidden = true;
+          if (removeBtn) removeBtn.hidden = true;
+          if (fileEl) fileEl.value = '';
+        });
+      }
     }
 
     if (!commentForm.dataset.bound) {
@@ -7195,6 +7663,8 @@ void (async () => {
         clearBacklogFormErrors(commentForm);
 
         const itemId = commentForm.getAttribute('data-item-id');
+        const editIdxRaw = commentForm.getAttribute('data-edit-comment-idx');
+        const editIdx = editIdxRaw !== null ? Number.parseInt(String(editIdxRaw || ''), 10) : Number.NaN;
         const textEl = document.getElementById('backlogComment');
         const text = textEl ? String(textEl.value || '').trim() : '';
         if (!itemId) return;
@@ -7208,12 +7678,58 @@ void (async () => {
         if (idx === -1) return;
         const current = items[idx];
         const comments = Array.isArray(current.comments) ? current.comments.slice() : [];
-        comments.push({
-          id: (crypto?.randomUUID ? crypto.randomUUID() : `c_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-          at: new Date().toISOString(),
-          by: getBacklogDisplayUser(),
-          text,
-        });
+
+        const now = new Date().toISOString();
+        const by = getBacklogDisplayUser();
+
+        if (Number.isFinite(editIdx) && editIdx >= 0 && editIdx < comments.length) {
+          const existing = comments[editIdx] && typeof comments[editIdx] === 'object' ? comments[editIdx] : {};
+          const id = String(existing.id || '').trim() || (crypto?.randomUUID ? crypto.randomUUID() : `c_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+          comments[editIdx] = {
+            ...existing,
+            id,
+            at: now,
+            by,
+            text,
+          };
+        } else {
+          comments.push({
+            id: (crypto?.randomUUID ? crypto.randomUUID() : `c_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+            at: now,
+            by,
+            text,
+          });
+        }
+
+        const next = items.slice();
+        next[idx] = { ...current, comments };
+        saveBacklogItems(next);
+
+        closeBacklogCommentModal();
+        renderBacklogList(canEdit);
+      });
+    }
+
+    if (commentDeleteBtn && !commentDeleteBtn.dataset.bound) {
+      commentDeleteBtn.dataset.bound = 'true';
+      commentDeleteBtn.addEventListener('click', () => {
+        if (!canEdit) return;
+        const itemId = commentForm.getAttribute('data-item-id');
+        const editIdxRaw = commentForm.getAttribute('data-edit-comment-idx');
+        const editIdx = editIdxRaw !== null ? Number.parseInt(String(editIdxRaw || ''), 10) : Number.NaN;
+        if (!itemId || !Number.isFinite(editIdx) || editIdx < 0) return;
+
+        const ok = window.confirm('Delete this comment?');
+        if (!ok) return;
+
+        const items = loadBacklogItems();
+        const idx = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(itemId));
+        if (idx === -1) return;
+        const current = items[idx];
+        const comments = Array.isArray(current.comments) ? current.comments.slice() : [];
+        if (editIdx >= comments.length) return;
+        comments.splice(editIdx, 1);
+
         const next = items.slice();
         next[idx] = { ...current, comments };
         saveBacklogItems(next);

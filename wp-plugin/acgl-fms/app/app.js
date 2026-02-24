@@ -1441,17 +1441,23 @@ void (async () => {
 
       if (!res.ok) {
         let serverError = '';
+        let wpCode = '';
         try {
           const text = await res.text();
           if (text) {
             const parsed = JSON.parse(text);
             if (parsed && typeof parsed.error === 'string') serverError = parsed.error;
+            if (parsed && typeof parsed.code === 'string') wpCode = parsed.code;
+            if (!serverError && parsed && typeof parsed.message === 'string') serverError = parsed.message;
           }
         } catch {
           // ignore
         }
 
         if (res.status === 429) return { ok: false, error: 'rate_limited', status: 429 };
+        // Common WordPress REST failure modes should not be shown as "invalid password".
+        if (res.status === 404 || wpCode === 'rest_no_route') return { ok: false, error: 'service_unavailable', status: res.status };
+        if (res.status === 403) return { ok: false, error: 'forbidden', status: res.status };
         if (serverError) return { ok: false, error: serverError, status: res.status };
         return { ok: false, error: res.status >= 500 ? 'server_error' : 'invalid', status: res.status };
       }
@@ -1545,6 +1551,10 @@ void (async () => {
                   ? 'Too many attempts. Please wait and try again.'
                   : result.error === 'missing' || result.error === 'missing_credentials'
                     ? 'Enter a username and password.'
+                    : result.error === 'service_unavailable'
+                      ? 'Sign-in service is unavailable. Please reload from the WordPress page or contact the site administrator.'
+                      : result.error === 'forbidden'
+                        ? 'Sign-in is blocked by the site. Please contact the site administrator.'
                     : result.error === 'server_error'
                       ? 'Sign-in service error. Please try again.'
                       : result.error === 'network'
@@ -1735,6 +1745,10 @@ void (async () => {
                 ? 'Too many attempts. Please wait and try again.'
                 : result.error === 'missing' || result.error === 'missing_credentials'
                   ? 'Enter a username and password.'
+                  : result.error === 'service_unavailable'
+                    ? 'Sign-in service is unavailable. Please reload from the WordPress page or contact the site administrator.'
+                    : result.error === 'forbidden'
+                      ? 'Sign-in is blocked by the site. Please contact the site administrator.'
                   : result.error === 'server_error'
                     ? 'Sign-in service error. Please try again.'
                     : result.error === 'network'
@@ -2280,6 +2294,61 @@ void (async () => {
 
   // ---- Budget impact from Approved payment orders ----
 
+  function anticipatedReceiptsAreAddedByDescription(desc) {
+    const d = String(desc ?? '').trim().toLowerCase();
+    if (!d) return false;
+    // Based on provided calculation sheet (Anticipated Values only):
+    // - New Lodge Petitions & Charter fees -> Approved + Receipts - Expenditures
+    // - Grand Lodge - Charity - Specified   -> Approved + Receipts - Expenditures
+    // - Grand Master's Charity              -> Approved + Receipts - Expenditures
+    // All other Anticipated lines use: Approved - Receipts - Expenditures
+    const plusMatchers = [
+      /new\s+lodge\s+petitions/, 
+      /charter\s+fees?/, 
+      /grand\s+lodge\s*-\s*charity\s*-\s*specified/, 
+      /grand\s+master'?s\s+charity/, 
+    ];
+    return plusMatchers.some((re) => re.test(d));
+  }
+
+  function normalizeBudgetCalcToken(raw) {
+    const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim().toLowerCase();
+    if (!s) return '';
+
+    // Accept common variants from CSV templates
+    if (s === '+' || s.includes('add') || s.includes('(+')) return 'add';
+    if (s === '-' || s.includes('subtract') || s.includes('(-')) return 'subtract';
+    if (s === '=' || s.includes('equals') || s.includes('(=') || s.includes(' = ')) return 'equals';
+
+    // Fallback: operator anywhere in the token
+    if (s.includes('+')) return 'add';
+    if (s.includes('-')) return 'subtract';
+    if (s.includes('=')) return 'equals';
+
+    return '';
+  }
+
+  function getBudgetCalcOpsForRow(kind, rowEl, descText) {
+    const receiptsOpFromRow = normalizeBudgetCalcToken(rowEl && rowEl.dataset ? rowEl.dataset.calcReceipts : '');
+    const expendituresOpFromRow = normalizeBudgetCalcToken(rowEl && rowEl.dataset ? rowEl.dataset.calcExpenditures : '');
+
+    const receiptsOp = receiptsOpFromRow === 'add' || receiptsOpFromRow === 'subtract'
+      ? receiptsOpFromRow
+      : (kind === 'budget' ? 'add' : (anticipatedReceiptsAreAddedByDescription(descText) ? 'add' : 'subtract'));
+
+    const expendituresOp = expendituresOpFromRow === 'add' || expendituresOpFromRow === 'subtract'
+      ? expendituresOpFromRow
+      : 'subtract';
+
+    return { receiptsOp, expendituresOp };
+  }
+
+  function computeBudgetBalance(approved, receipts, expenditures, ops) {
+    const r = ops && ops.receiptsOp === 'add' ? receipts : -receipts;
+    const e = ops && ops.expendituresOp === 'add' ? expenditures : -expenditures;
+    return approved + r + e;
+  }
+
   function parseBudgetMoney(text) {
     const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
     if (!raw || raw === '-' || raw === '—') return 0;
@@ -2497,7 +2566,9 @@ void (async () => {
         const approved = parseBudgetMoney(tds[3]?.textContent);
         const receipts = parseBudgetMoney(tds[4]?.textContent);
         const expenditures = parseBudgetMoney(tds[5]?.textContent);
-        const balance = approved + receipts - expenditures;
+        const desc = tds[2]?.textContent ?? '';
+        const ops = getBudgetCalcOpsForRow(kind, row, desc);
+        const balance = computeBudgetBalance(approved, receipts, expenditures, ops);
 
         totals.approved += approved;
         totals.receipts += receipts;
@@ -2597,7 +2668,8 @@ void (async () => {
     if (!targetRow) return { ok: false, reason: 'rowNotFound' };
 
     // Detect which section the row belongs to so Balance Euro uses the right formula.
-    // Balance Euro is: approved + receipts - expenditures
+    // Balance Euro for budget section is: approved + receipts - expenditures
+    // Balance Euro for anticipated section is: approved - receipts - expenditures
     let sectionKind = 'budget';
     const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
     if (totalRows.length >= 2) {
@@ -2619,7 +2691,9 @@ void (async () => {
 
       const approved = parseBudgetMoney(tds[3]?.textContent);
       const receipts = parseBudgetMoney(tds[4]?.textContent);
-      const balance = approved + receipts - nextExp;
+      const desc = tds[2]?.textContent ?? '';
+      const ops = getBudgetCalcOpsForRow(sectionKind, targetRow, desc);
+      const balance = computeBudgetBalance(approved, receipts, nextExp, ops);
       if (tds[6]) tds[6].textContent = formatBudgetEuro(balance);
     }
 
@@ -2669,6 +2743,19 @@ void (async () => {
     const targetRow = findBudgetRowForOutCode(rows, out, true);
     if (!targetRow) return { ok: false, reason: 'rowNotFound', outCode: out };
 
+    // Detect which section the row belongs to so Balance Euro uses the right formula.
+    let sectionKind = 'budget';
+    const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
+    if (totalRows.length >= 2) {
+      const firstTotalIndex = rows.indexOf(totalRows[0]);
+      const secondTotalIndex = rows.indexOf(totalRows[1]);
+      const rowIndex = rows.indexOf(targetRow);
+      if (rowIndex >= 0 && firstTotalIndex >= 0 && secondTotalIndex > firstTotalIndex) {
+        if (rowIndex < firstTotalIndex) sectionKind = 'anticipated';
+        else if (rowIndex > firstTotalIndex && rowIndex < secondTotalIndex) sectionKind = 'budget';
+      }
+    }
+
     const tds = targetRow.querySelectorAll('td');
     if (tds.length < 11) return { ok: false, reason: 'invalidRow', outCode: out };
 
@@ -2679,7 +2766,9 @@ void (async () => {
 
       const approved = parseBudgetMoney(tds[3]?.textContent);
       const receipts = parseBudgetMoney(tds[4]?.textContent);
-      const balance = approved + receipts - nextExp;
+      const desc = tds[2]?.textContent ?? '';
+      const ops = getBudgetCalcOpsForRow(sectionKind, targetRow, desc);
+      const balance = computeBudgetBalance(approved, receipts, nextExp, ops);
       if (tds[6]) tds[6].textContent = formatBudgetEuro(balance);
     }
 
@@ -4077,7 +4166,8 @@ void (async () => {
 
     function lineRowHtml(line, kind) {
       const l = normalizeLine(line);
-      const balance = l.approved + l.receipts - l.expenditures;
+      const ops = getBudgetCalcOpsForRow(kind, null, l.desc);
+      const balance = computeBudgetBalance(l.approved, l.receipts, l.expenditures, ops);
 
       const approvedText = `EUR ${formatEuroValue(l.approved)}`;
       const receiptsText = `${formatEuroValue(l.receipts)} €`;
@@ -4085,7 +4175,7 @@ void (async () => {
       const balText = `${formatEuroValue(balance)} €`;
 
       return `
-        <tr>
+        <tr data-calc-receipts="${escapeHtml(ops.receiptsOp)}" data-calc-expenditures="${escapeHtml(ops.expendituresOp)}">
           <td class="num">${escapeHtml(l.inCode)}</td>
           <td class="num">${escapeHtml(l.outCode)}</td>
           <td>${escapeHtml(l.desc)}</td>
@@ -4108,7 +4198,9 @@ void (async () => {
         totals.approved += l.approved;
         totals.receipts += l.receipts;
         totals.expenditures += l.expenditures;
-        totals.balance += (l.approved + l.receipts - l.expenditures);
+        const ops = getBudgetCalcOpsForRow(kind, null, l.desc);
+        const balance = computeBudgetBalance(l.approved, l.receipts, l.expenditures, ops);
+        totals.balance += balance;
       }
       return totals;
     }
@@ -9336,7 +9428,7 @@ void (async () => {
       return tds.length >= 7;
     }
 
-    function sumSection(rows) {
+    function sumSection(rows, kind) {
       const totals = {
         approved: 0,
         receipts: 0,
@@ -9352,7 +9444,9 @@ void (async () => {
         const approved = parseMoney(tds[3]?.textContent);
         const receipts = parseMoney(tds[4]?.textContent);
         const expenditures = parseMoney(tds[5]?.textContent);
-        const balance = approved + receipts - expenditures;
+        const desc = tds[2]?.textContent ?? '';
+        const ops = getBudgetCalcOpsForRow(kind, row, desc);
+        const balance = computeBudgetBalance(approved, receipts, expenditures, ops);
 
         totals.approved += approved;
         totals.receipts += receipts;
@@ -9566,8 +9660,8 @@ void (async () => {
       const section1Rows = rows.slice(0, firstTotalIndex);
       const section2Rows = rows.slice(firstTotalIndex + 1, secondTotalIndex);
 
-      const s1 = sumSection(section1Rows);
-      const s2 = sumSection(section2Rows);
+      const s1 = sumSection(section1Rows, 'anticipated');
+      const s2 = sumSection(section2Rows, 'budget');
 
       updateTotalRow(totalRows[0], s1);
       updateTotalRow(totalRows[1], s2);
@@ -9939,8 +10033,11 @@ void (async () => {
         'OUT',
         'Description',
         'Amount Approved Euro',
+        'Calculation',
         'Receipts Euro',
+        'Calculation',
         'Expenditures Euro',
+        'Calculation',
         'Balance Euro',
         'Receipts USD',
         'Expenditures USD',
@@ -9948,8 +10045,8 @@ void (async () => {
 
       const exampleRows = [
         // Use values that match the importer's expectations and the UI's formatting.
-        ['Anticipated', '1020', '2020', 'Example anticipated line', '0.00 €', '0.00 €', '0.00 €', '0.00 €', '-', '-'],
-        ['Budget', '1998', '2998', 'Example budget line', '0.00 €', '0.00 €', '0.00 €', '0.00 €', '-', '-'],
+        ['Anticipated', '1020', '2020', 'Example anticipated line', '0.00 €', 'subtract (-)', '0.00 €', 'add (+)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
+        ['Budget', '1998', '2998', 'Example budget line', '0.00 €', 'add (+)', '0.00 €', 'subtract (-)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
       ];
 
       const lines = [];
@@ -10049,6 +10146,10 @@ void (async () => {
       const expendituresUsd = String(rec.expendituresUsd ?? '').replace(/\u00A0/g, ' ').trim();
 
       const tr = document.createElement('tr');
+      const receiptsOp = normalizeBudgetCalcToken(rec && (rec.calcReceiptsOp ?? rec.calcReceipts));
+      const expendituresOp = normalizeBudgetCalcToken(rec && (rec.calcExpendituresOp ?? rec.calcExpenditures));
+      if (receiptsOp === 'add' || receiptsOp === 'subtract') tr.dataset.calcReceipts = receiptsOp;
+      if (expendituresOp === 'add' || expendituresOp === 'subtract') tr.dataset.calcExpenditures = expendituresOp;
       tr.innerHTML = `
         <td class="num">${escapeHtml(inVal)}</td>
         <td class="num">${escapeHtml(outVal)}</td>
@@ -10175,6 +10276,8 @@ void (async () => {
             balanceEuro: tds[6]?.textContent ?? '',
             receiptsUsd: tds[8]?.textContent ?? '',
             expendituresUsd: tds[10]?.textContent ?? '',
+            calcReceiptsOp: tr.dataset && tr.dataset.calcReceipts ? tr.dataset.calcReceipts : '',
+            calcExpendituresOp: tr.dataset && tr.dataset.calcExpenditures ? tr.dataset.calcExpenditures : '',
           };
 
           if (isSection1) section1.push(rec);
@@ -10207,6 +10310,37 @@ void (async () => {
         receiptsUsd: header.indexOf('receipts usd'),
         expendituresUsd: header.indexOf('expenditures usd'),
       };
+
+      // New template: three "Calculation" columns (operators) after each EUR amount column.
+      // Layout: Amount Approved Euro, Calculation, Receipts Euro, Calculation, Expenditures Euro, Calculation, Balance Euro
+      const calcIdx = {
+        receiptsOp: idx.approvedEuro !== -1 && header[idx.approvedEuro + 1] === 'calculation' ? idx.approvedEuro + 1 : -1,
+        expendituresOp: idx.receiptsEuro !== -1 && header[idx.receiptsEuro + 1] === 'calculation' ? idx.receiptsEuro + 1 : -1,
+        equals: idx.expendituresEuro !== -1 && header[idx.expendituresEuro + 1] === 'calculation' ? idx.expendituresEuro + 1 : -1,
+      };
+
+      const isCalcTemplate =
+        idx.section !== -1 &&
+        idx.in !== -1 &&
+        idx.out !== -1 &&
+        idx.description !== -1 &&
+        idx.approvedEuro !== -1 &&
+        idx.receiptsEuro !== -1 &&
+        idx.expendituresEuro !== -1 &&
+        idx.balanceEuro !== -1 &&
+        idx.receiptsUsd !== -1 &&
+        idx.expendituresUsd !== -1 &&
+        calcIdx.receiptsOp !== -1 &&
+        calcIdx.expendituresOp !== -1 &&
+        calcIdx.equals !== -1;
+
+      const hasAnyCalculationColumn = header.includes('calculation');
+      if (hasAnyCalculationColumn && !isCalcTemplate) {
+        window.alert(
+          'Import failed: CSV includes Calculation column(s) but is missing one or more required columns from the Budget template.'
+        );
+        return;
+      }
 
       const hasSectionColumn = idx.section !== -1;
       const hasTemplateHeaders = idx.in !== -1 && idx.out !== -1 && idx.description !== -1;
@@ -10293,6 +10427,59 @@ void (async () => {
           receiptsUsd: idx.receiptsUsd !== -1 ? get(idx.receiptsUsd) : (r[7 + offset] ?? ''),
           expendituresUsd: idx.expendituresUsd !== -1 ? get(idx.expendituresUsd) : (r[8 + offset] ?? ''),
         };
+
+        // New template behavior: require Calculation columns + required values and compute Balance Euro from them.
+        if (isCalcTemplate) {
+          const rawReceiptsOp = get(calcIdx.receiptsOp);
+          const rawExpendituresOp = get(calcIdx.expendituresOp);
+          const rawEquals = get(calcIdx.equals);
+
+          const receiptsOp = normalizeBudgetCalcToken(rawReceiptsOp);
+          const expendituresOp = normalizeBudgetCalcToken(rawExpendituresOp);
+          const eq = normalizeBudgetCalcToken(rawEquals);
+
+          const requiredValues = [
+            rawSection,
+            inVal,
+            outVal,
+            desc,
+            record.approvedEuro,
+            rawReceiptsOp,
+            record.receiptsEuro,
+            rawExpendituresOp,
+            record.expendituresEuro,
+            rawEquals,
+            record.balanceEuro,
+            record.receiptsUsd,
+            record.expendituresUsd,
+          ];
+
+          const missing = requiredValues.some((v) => String(v ?? '').trim() === '');
+          if (missing) {
+            window.alert(
+              `Import failed: missing required value (including Calculation columns) for a row.\n\nFile: ${fileName || 'CSV'}`
+            );
+            return;
+          }
+
+          if ((receiptsOp !== 'add' && receiptsOp !== 'subtract') || (expendituresOp !== 'add' && expendituresOp !== 'subtract') || eq !== 'equals') {
+            window.alert(
+              `Import failed: invalid Calculation value(s).\n` +
+              `Expected add (+) or subtract (-) for the first two Calculation columns, and equals (=) for the third.\n\n` +
+              `File: ${fileName || 'CSV'}`
+            );
+            return;
+          }
+
+          const approvedN = parseMoney(record.approvedEuro);
+          const receiptsN = parseMoney(record.receiptsEuro);
+          const expendituresN = parseMoney(record.expendituresEuro);
+          const computedBalance = computeBudgetBalance(approvedN, receiptsN, expendituresN, { receiptsOp, expendituresOp });
+
+          record.calcReceiptsOp = receiptsOp;
+          record.calcExpendituresOp = expendituresOp;
+          record.balanceEuro = formatEuro(computedBalance);
+        }
 
         const sectionName = String(rawSection ?? '').trim().toLowerCase();
         const targetSection = sectionName.startsWith('a') ? 1 : sectionName.startsWith('b') ? 2 : inferredSection;

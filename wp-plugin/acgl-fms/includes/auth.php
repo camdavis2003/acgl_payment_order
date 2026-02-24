@@ -4,6 +4,18 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// ---- PHP compatibility ----
+// WordPress sites may still run PHP < 8.0 where str_starts_with() is undefined.
+// We keep this plugin compatible by polyfilling the function when missing.
+if (!function_exists('str_starts_with')) {
+    function str_starts_with($haystack, $needle) {
+        $haystack = (string) $haystack;
+        $needle = (string) $needle;
+        if ($needle === '') return true;
+        return strpos($haystack, $needle) === 0;
+    }
+}
+
 // ---- Token format ----
 // token = base64url(json_payload) + '.' + base64url(hmac_sha256(payload_b64, wp_salt('auth')))
 

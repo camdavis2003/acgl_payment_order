@@ -29,6 +29,32 @@ require_once ACGL_FMS_PLUGIN_DIR . 'includes/auth.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/rest.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/shortcode.php';
 
+// Some sites install security plugins that disable the WP REST API for logged-out users,
+// returning 403 before route permission callbacks run. Our app relies on public REST access
+// for its own namespace (auth/login issues a bearer token; all other endpoints enforce it).
+function acgl_fms_is_plugin_rest_request() {
+    $restRoute = isset($_GET['rest_route']) ? (string) $_GET['rest_route'] : '';
+    if ($restRoute !== '') {
+        $r = trim($restRoute);
+        // Some installs omit the leading slash.
+        if (strpos($r, 'acgl-fms/v1/') === 0) return true;
+        if (strpos($r, '/acgl-fms/v1/') === 0) return true;
+        if (strpos($r, 'acgl-fms/') === 0) return true;
+        if (strpos($r, '/acgl-fms/') === 0) return true;
+    }
+
+    $uri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+    $path = $uri ? (string) parse_url($uri, PHP_URL_PATH) : '';
+    if ($path === '') return false;
+    return (strpos($path, '/wp-json/acgl-fms/v1/') !== false) || (strpos($path, '/wp-json/acgl-fms/') !== false);
+}
+
+add_filter('rest_authentication_errors', function ($result) {
+    if (!acgl_fms_is_plugin_rest_request()) return $result;
+    // Let our routes decide via permission_callback + bearer-token checks.
+    return null;
+}, 0);
+
 function acgl_fms_register_fullpage_route() {
     $slug = trim((string) ACGL_FMS_FULLPAGE_SLUG);
     if ($slug === '') {

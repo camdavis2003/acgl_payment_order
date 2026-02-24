@@ -3066,11 +3066,20 @@ void (async () => {
   /** @param {'light'|'dark'} theme */
   function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
-    if (!themeToggle) return;
     const isDark = theme === 'dark';
-    if (typeof themeToggle.checked === 'boolean') {
-      themeToggle.checked = isDark;
-      themeToggle.setAttribute('aria-checked', String(isDark));
+
+    if (themeToggle) {
+      if (typeof themeToggle.checked === 'boolean') {
+        themeToggle.checked = isDark;
+        themeToggle.setAttribute('aria-checked', String(isDark));
+      }
+
+      // Show what the user can switch to.
+      const switchToText = isDark ? 'Light mode' : 'Dark mode';
+      const labelEl = typeof themeToggle.closest === 'function' ? themeToggle.closest('label') : null;
+      const textEl = labelEl ? labelEl.querySelector('.switch__text') : null;
+      if (textEl) textEl.textContent = switchToText;
+      themeToggle.setAttribute('aria-label', switchToText);
     }
   }
 
@@ -3492,9 +3501,145 @@ void (async () => {
     setPaymentOrderNoField(getNextPaymentOrderNo());
   }
 
+  function getIbanUtils() {
+    const u = window.IbanUtils;
+    if (!u || typeof u !== 'object') return null;
+    if (typeof u.validateIban !== 'function') return null;
+    if (typeof u.formatIban !== 'function') return null;
+    return u;
+  }
+
+  function getBicUtils() {
+    const u = window.BicUtils;
+    if (!u || typeof u !== 'object') return null;
+    if (typeof u.validateBic !== 'function') return null;
+    if (typeof u.formatBic !== 'function') return null;
+    return u;
+  }
+
+  function normalizeUsBankText(raw) {
+    const trimmed = String(raw ?? '').trim();
+    if (!trimmed) return '';
+    return trimmed.replace(/[\s-]+/g, '');
+  }
+
+  function getUsAccountTypeFromForm() {
+    if (!form) return '';
+    const checkingEl = form.elements.namedItem('usAccountTypeChecking');
+    const savingsEl = form.elements.namedItem('usAccountTypeSavings');
+    const checking = Boolean(checkingEl && typeof checkingEl.checked === 'boolean' && checkingEl.checked);
+    const savings = Boolean(savingsEl && typeof savingsEl.checked === 'boolean' && savingsEl.checked);
+    if (checking && !savings) return 'Checking';
+    if (savings && !checking) return 'Savings';
+    return '';
+  }
+
+  function setUsAccountTypeOnForm(value) {
+    if (!form) return;
+    const checkingEl = form.elements.namedItem('usAccountTypeChecking');
+    const savingsEl = form.elements.namedItem('usAccountTypeSavings');
+    const v = String(value || '').trim();
+    if (checkingEl && typeof checkingEl.checked === 'boolean') checkingEl.checked = v === 'Checking';
+    if (savingsEl && typeof savingsEl.checked === 'boolean') savingsEl.checked = v === 'Savings';
+  }
+
+  function getBankDetailsModeFromForm() {
+    if (!form) return 'INTL';
+    const toggle = form.elements.namedItem('bankDetailsToggle');
+    const checked = toggle && typeof toggle.checked === 'boolean' ? toggle.checked : false;
+    return checked ? 'US' : 'INTL';
+  }
+
+  function setBankDetailsModeOnForm(mode) {
+    if (!form) return;
+    const m = mode === 'US' ? 'US' : 'INTL';
+    const toggle = form.elements.namedItem('bankDetailsToggle');
+    if (toggle && typeof toggle.checked === 'boolean') toggle.checked = m === 'US';
+  }
+
+  function applyBankDetailsModeToUi(mode) {
+    const m = mode === 'US' ? 'US' : 'INTL';
+    const labelA = document.getElementById('bankFieldLabelA');
+    const labelB = document.getElementById('bankFieldLabelB');
+    const ibanEl = form ? form.elements.namedItem('iban') : null;
+    const bicEl = form ? form.elements.namedItem('bic') : null;
+    const bankDetailsToggleField = document.getElementById('bankDetailsToggleField');
+    const usAccountTypeField = document.getElementById('usAccountTypeField');
+    const usAccountTypeStar = document.getElementById('usAccountTypeReqStar');
+    const specialEl = form ? form.elements.namedItem('specialInstructions') : null;
+    const usToken = document.getElementById('usBankRequirementsToken');
+    const specialStar = document.getElementById('specialInstructionsReqStar');
+    const modeText = document.getElementById('bankDetailsModeText');
+    const toggle = form ? form.elements.namedItem('bankDetailsToggle') : null;
+
+    // Keep the switch UI in sync with the active mode.
+    if (toggle && typeof toggle.checked === 'boolean') toggle.checked = m === 'US';
+    // Show what the user can switch to (not the currently-active mode).
+    const switchToText = m === 'US' ? 'International (IBAN)' : 'US Bank Details';
+    if (modeText) modeText.textContent = switchToText;
+    if (toggle) toggle.setAttribute('aria-label', switchToText);
+
+    if (labelA) labelA.textContent = m === 'US' ? 'Account' : 'IBAN';
+    if (labelB) labelB.textContent = m === 'US' ? 'Routing' : 'BIC';
+
+    if (ibanEl) {
+      ibanEl.placeholder = m === 'US' ? 'Account number' : 'DE00 0000 0000 0000 00';
+      ibanEl.autocomplete = 'off';
+      ibanEl.type = 'text';
+      if (m === 'US') ibanEl.setAttribute('inputmode', 'numeric');
+      else ibanEl.removeAttribute('inputmode');
+    }
+
+    if (bicEl) {
+      bicEl.placeholder = m === 'US' ? 'Routing number' : 'DEUTDEFF';
+      bicEl.autocomplete = 'off';
+      bicEl.type = 'text';
+      if (m === 'US') bicEl.setAttribute('inputmode', 'numeric');
+      else bicEl.removeAttribute('inputmode');
+    }
+
+    if (specialEl) {
+      if (m === 'US') {
+        specialEl.required = true;
+        specialEl.setAttribute('aria-required', 'true');
+      } else {
+        specialEl.required = false;
+        specialEl.removeAttribute('aria-required');
+      }
+    }
+
+    if (specialStar) specialStar.hidden = m !== 'US';
+
+    if (usAccountTypeField) usAccountTypeField.hidden = m !== 'US';
+    if (usAccountTypeStar) usAccountTypeStar.hidden = m !== 'US';
+
+    // Layout: in US mode, show Account Type to the right of Bank Details.
+    if (bankDetailsToggleField && bankDetailsToggleField.classList) {
+      if (m === 'US') bankDetailsToggleField.classList.remove('field--span2');
+      else bankDetailsToggleField.classList.add('field--span2');
+    }
+
+    if (usToken) usToken.hidden = m !== 'US';
+  }
+
   function saveFormToDraft() {
     if (!form) return;
     const budgetEl = form.elements.namedItem('budgetNumber');
+
+    const bankDetailsMode = getBankDetailsModeFromForm();
+
+    const ibanUtils = getIbanUtils();
+    const ibanRaw = form.iban?.value?.trim?.() || '';
+    const ibanNormalized = bankDetailsMode === 'US'
+      ? normalizeUsBankText(ibanRaw)
+      : (ibanUtils ? ibanUtils.validateIban(ibanRaw).normalized : String(ibanRaw).trim());
+
+    const bicUtils = getBicUtils();
+    const bicRaw = form.bic?.value?.trim?.() || '';
+    const bicNormalized = bankDetailsMode === 'US'
+      ? normalizeUsBankText(bicRaw)
+      : (bicUtils ? bicUtils.validateBic(bicRaw).normalized : String(bicRaw).trim());
+
     const draft = {
       paymentOrderNo: form.paymentOrderNo?.value?.trim?.() || '',
       date: form.date?.value?.trim?.() || '',
@@ -3502,9 +3647,11 @@ void (async () => {
       euro: form.euro?.value?.trim?.() || '',
       usd: form.usd?.value?.trim?.() || '',
       address: form.address?.value?.trim?.() || '',
-      iban: form.iban?.value?.trim?.() || '',
-      bic: form.bic?.value?.trim?.() || '',
+      iban: ibanNormalized,
+      bic: bicNormalized,
+      usAccountType: getUsAccountTypeFromForm(),
       specialInstructions: form.specialInstructions?.value?.trim?.() || '',
+      bankDetailsMode,
       budgetNumber: extractOutCodeFromBudgetNumberText(budgetEl ? String(budgetEl.value || '').trim() : ''),
       purpose: form.purpose?.value?.trim?.() || '',
     };
@@ -3560,7 +3707,9 @@ void (async () => {
       address: form.address.value.trim(),
       iban: form.iban.value.trim(),
       bic: form.bic.value.trim(),
+      usAccountType: getUsAccountTypeFromForm(),
       specialInstructions: form.specialInstructions.value.trim(),
+      bankDetailsMode: getBankDetailsModeFromForm(),
       budgetNumber: extractOutCodeFromBudgetNumberText(budgetNumberRaw),
       purpose: form.purpose.value.trim(),
       captchaAnswer: form.captchaAnswer ? String(form.captchaAnswer.value || '').trim() : '',
@@ -3568,14 +3717,50 @@ void (async () => {
 
     const errors = {};
 
+    if (values.bankDetailsMode === 'US') {
+      values.iban = normalizeUsBankText(values.iban);
+      values.bic = normalizeUsBankText(values.bic);
+      if (!values.iban) errors.iban = 'This field is required.';
+      if (!values.bic) errors.bic = 'This field is required.';
+      if (!values.usAccountType) errors.usAccountType = 'Select Checking or Savings.';
+      if (!values.specialInstructions) errors.specialInstructions = 'This field is required.';
+    } else {
+      // Normalize + validate IBAN independently so we can return the specific messages.
+      {
+        const ibanUtils = getIbanUtils();
+        if (ibanUtils) {
+          const res = ibanUtils.validateIban(values.iban);
+          values.iban = res.normalized;
+          if (!res.isValid) errors.iban = res.error || 'IBAN is required';
+        } else {
+          // Should not happen (iban.js is expected), but keep a safe fallback.
+          const trimmed = String(values.iban || '').trim();
+          values.iban = trimmed;
+          if (!trimmed) errors.iban = 'IBAN is required';
+        }
+      }
+
+      // Normalize + validate BIC independently so we can return the specific messages.
+      {
+        const bicUtils = getBicUtils();
+        if (bicUtils) {
+          const res = bicUtils.validateBic(values.bic);
+          values.bic = res.normalized;
+          if (!res.isValid) errors.bic = res.error || 'BIC is required';
+        } else {
+          const trimmed = String(values.bic || '').trim();
+          values.bic = trimmed;
+          if (!trimmed) errors.bic = 'BIC is required';
+        }
+      }
+    }
+
     // Required checks (all fields except currency; currency is validated as an either/or pair)
     const requiredKeys = [
       'paymentOrderNo',
       'date',
       'name',
       'address',
-      'iban',
-      'bic',
       'purpose',
       'captchaAnswer',
     ];
@@ -4024,8 +4209,8 @@ void (async () => {
           { id: `mock_${now}_1_i3`, title: 'Meals', euro: 45.0, usd: null },
         ],
         address: '123 Example Street\nExample City',
-        iban: 'DE00 0000 0000 0000 0000 00',
-        bic: 'EXAMPLED1XXX',
+        iban: 'DE89 3704 0044 0532 0130 00',
+        bic: 'DEUTDEFFXXX',
         specialInstructions: 'Urgent reimbursement. Please process this week.',
         budgetNumber: '2200',
         purpose: 'Travel reimbursement.',
@@ -4045,8 +4230,8 @@ void (async () => {
           { id: `mock_${now}_2_i3`, title: 'Service fee', euro: null, usd: 12.5 },
         ],
         address: '456 Sample Ave\nSampletown',
-        iban: 'GB00 0000 0000 0000 0000 00',
-        bic: 'SAMPLEGB2L',
+        iban: 'GB82 WEST 1234 5698 7654 32',
+        bic: 'BARCGB22',
         specialInstructions: 'Pay in USD only.',
         budgetNumber: '2100',
         purpose: 'Supplies reimbursement.',
@@ -4064,8 +4249,8 @@ void (async () => {
           { id: `mock_${now}_3_i1`, title: 'Zero-value test entry', euro: 0, usd: null },
         ],
         address: '789 Demo Road\nDemoville',
-        iban: 'FR00 0000 0000 0000 0000 0000 000',
-        bic: 'DEMOFRPPXXX',
+        iban: 'FR14 2004 1010 0505 0001 3M02 606',
+        bic: 'BNPAFRPPXXX',
         specialInstructions: 'N/A',
         budgetNumber: '2280',
         purpose: 'Zero-value test entry.',
@@ -4775,6 +4960,16 @@ void (async () => {
   function showErrors(errors) {
     if (!form) return;
     for (const [key, message] of Object.entries(errors)) {
+      if (key === 'usAccountType') {
+        const checkingEl = form.elements.namedItem('usAccountTypeChecking');
+        const savingsEl = form.elements.namedItem('usAccountTypeSavings');
+        if (checkingEl && checkingEl.classList) checkingEl.classList.add('input-error');
+        if (savingsEl && savingsEl.classList) savingsEl.classList.add('input-error');
+        const errorEl = document.getElementById('error-usAccountType');
+        if (errorEl) errorEl.textContent = message;
+        continue;
+      }
+
       const input = form.elements.namedItem(key);
       if (input && input.classList) input.classList.add('input-error');
 
@@ -4784,8 +4979,13 @@ void (async () => {
 
     // Focus first invalid field
     const firstKey = Object.keys(errors)[0];
-    const firstEl = form.elements.namedItem(firstKey);
-    if (firstEl && firstEl.focus) firstEl.focus();
+    if (firstKey === 'usAccountType') {
+      const firstEl = form.elements.namedItem('usAccountTypeChecking') || form.elements.namedItem('usAccountTypeSavings');
+      if (firstEl && firstEl.focus) firstEl.focus();
+    } else {
+      const firstEl = form.elements.namedItem(firstKey);
+      if (firstEl && firstEl.focus) firstEl.focus();
+    }
   }
 
   function buildPaymentOrder(values) {
@@ -5865,8 +6065,9 @@ void (async () => {
           </select>
         </dd>
         <dt class="kv__gapTop">Address</dt><dd class="kv__pre kv__gapTop">${escapeHtml(orderForView.address)}</dd>
-        <dt>IBAN</dt><dd>${escapeHtml(orderForView.iban)}</dd>
-        <dt>BIC</dt><dd>${escapeHtml(orderForView.bic)}</dd>
+        <dt>${orderForView.bankDetailsMode === 'US' ? 'Account' : 'IBAN'}</dt><dd>${escapeHtml(orderForView.iban)}</dd>
+        <dt>${orderForView.bankDetailsMode === 'US' ? 'Routing' : 'BIC'}</dt><dd>${escapeHtml(orderForView.bic)}</dd>
+        ${orderForView.bankDetailsMode === 'US' ? `<dt>Account Type</dt><dd>${escapeHtml(orderForView.usAccountType || '')}</dd>` : ''}
         <dt>Special Instructions</dt><dd class="kv__pre">${escapeHtml(orderForView.specialInstructions)}</dd>
         <dt>Purpose</dt><dd class="kv__pre">${escapeHtml(orderForView.purpose)}</dd>
         <dt>Attachments</dt>
@@ -6007,6 +6208,7 @@ void (async () => {
       address: order.address || '',
       iban: order.iban || '',
       bic: order.bic || '',
+      usAccountType: order.usAccountType || '',
       specialInstructions: order.specialInstructions || '',
       budgetNumber: order.budgetNumber || '',
       purpose: order.purpose || '',
@@ -11454,6 +11656,16 @@ void (async () => {
     const shouldRestoreDraft = !forceNew && Boolean(editId || resumeDraft);
     const draft = shouldRestoreDraft ? loadDraft() : null;
     if (draft) {
+      if (draft.bankDetailsMode) {
+        setBankDetailsModeOnForm(String(draft.bankDetailsMode || ''));
+      }
+
+      if (draft.usAccountType) {
+        setUsAccountTypeOnForm(String(draft.usAccountType || ''));
+      }
+
+      applyBankDetailsModeToUi(getBankDetailsModeFromForm());
+
       const keys = [
         // paymentOrderNo is auto-filled for new requests; only restore for edits.
         ...(editId ? ['paymentOrderNo'] : []),
@@ -11465,13 +11677,50 @@ void (async () => {
         'iban',
         'bic',
         'specialInstructions',
+        ...(draft.bankDetailsMode ? ['bankDetailsMode'] : []),
         // Always show the existing Budget Number during edits, even if read-only.
         ...(editId || canEditBudgetNumber ? ['budgetNumber'] : []),
         'purpose',
       ];
+
+      const draftMode = String(draft.bankDetailsMode || '').trim() === 'US' ? 'US' : 'INTL';
       for (const key of keys) {
         const el = form.elements.namedItem(key);
-        if (el && draft[key] !== undefined) el.value = draft[key];
+        if (!el || draft[key] === undefined) continue;
+
+        if (key === 'iban') {
+          if (draftMode === 'US') {
+            el.value = String(draft[key] || '');
+          } else {
+            const ibanUtils = getIbanUtils();
+            if (ibanUtils) {
+              const res = ibanUtils.validateIban(String(draft[key] || ''));
+              el.value = res.normalized ? ibanUtils.formatIban(res.normalized) : '';
+            } else {
+              el.value = String(draft[key] || '');
+            }
+          }
+          continue;
+        }
+
+        if (key === 'bic') {
+          if (draftMode === 'US') {
+            el.value = String(draft[key] || '');
+          } else {
+            const bicUtils = getBicUtils();
+            if (bicUtils) {
+              const res = bicUtils.validateBic(String(draft[key] || ''));
+              el.value = res.normalized ? bicUtils.formatBic(res.normalized) : '';
+            } else {
+              el.value = String(draft[key] || '');
+            }
+          }
+          continue;
+        }
+
+        if (key === 'bankDetailsMode') continue;
+
+        el.value = draft[key];
       }
     }
 
@@ -11480,6 +11729,126 @@ void (async () => {
 
     // Captcha must be solved before submitting
     generateRequestCaptcha();
+
+    // Bank details mode toggle
+    {
+      const toggle = form.elements.namedItem('bankDetailsToggle');
+      if (toggle && !toggle.dataset.boundBankMode) {
+        toggle.dataset.boundBankMode = 'true';
+        toggle.addEventListener('change', () => {
+          applyBankDetailsModeToUi(getBankDetailsModeFromForm());
+
+          // Re-normalize the fields to match the current mode
+          const ibanEl = form.elements.namedItem('iban');
+          const bicEl = form.elements.namedItem('bic');
+          if (ibanEl && ibanEl.dispatchEvent) ibanEl.dispatchEvent(new Event('blur'));
+          if (bicEl && bicEl.dispatchEvent) bicEl.dispatchEvent(new Event('blur'));
+        });
+      }
+
+      // Ensure UI reflects the initial selection
+      applyBankDetailsModeToUi(getBankDetailsModeFromForm());
+    }
+
+    // US account type (Checking/Savings) - mutually exclusive checkboxes
+    {
+      const checkingEl = form.elements.namedItem('usAccountTypeChecking');
+      const savingsEl = form.elements.namedItem('usAccountTypeSavings');
+
+      const bind = (el) => {
+        if (!el || el.dataset.boundUsAccountType) return;
+        el.dataset.boundUsAccountType = 'true';
+        el.addEventListener('change', () => {
+          if (el === checkingEl && checkingEl && checkingEl.checked && savingsEl) savingsEl.checked = false;
+          if (el === savingsEl && savingsEl && savingsEl.checked && checkingEl) checkingEl.checked = false;
+
+          const errEl = document.getElementById('error-usAccountType');
+          if (errEl && getUsAccountTypeFromForm()) errEl.textContent = '';
+          if (checkingEl && checkingEl.classList) checkingEl.classList.remove('input-error');
+          if (savingsEl && savingsEl.classList) savingsEl.classList.remove('input-error');
+
+          saveFormToDraft();
+        });
+      };
+
+      bind(checkingEl);
+      bind(savingsEl);
+    }
+
+    // IBAN normalization/formatting on blur (keeps validation logic separate in iban.js)
+    {
+      const ibanEl = form.elements.namedItem('iban');
+      const ibanUtils = getIbanUtils();
+      if (ibanEl && ibanUtils) {
+        // Normalize any pre-filled value (e.g., when editing)
+        if (getBankDetailsModeFromForm() !== 'US') {
+          const initial = ibanUtils.validateIban(String(ibanEl.value || ''));
+          if (initial.normalized) ibanEl.value = ibanUtils.formatIban(initial.normalized);
+        }
+
+        if (!ibanEl.dataset.boundIban) {
+          ibanEl.dataset.boundIban = 'true';
+          ibanEl.addEventListener('blur', () => {
+            const mode = getBankDetailsModeFromForm();
+            if (mode === 'US') {
+              const normalized = normalizeUsBankText(String(ibanEl.value || ''));
+              ibanEl.value = normalized;
+              const errEl = document.getElementById('error-iban');
+              if (errEl) errEl.textContent = '';
+              if (ibanEl.classList) ibanEl.classList.remove('input-error');
+              return;
+            }
+
+            const res = ibanUtils.validateIban(String(ibanEl.value || ''));
+            ibanEl.value = res.normalized ? ibanUtils.formatIban(res.normalized) : '';
+
+            const errEl = document.getElementById('error-iban');
+            if (errEl) errEl.textContent = res.isValid ? '' : String(res.error || '');
+            if (ibanEl.classList) {
+              if (res.isValid) ibanEl.classList.remove('input-error');
+              else ibanEl.classList.add('input-error');
+            }
+          });
+        }
+      }
+    }
+
+    // BIC normalization/formatting on blur (keeps validation logic separate in bic.js)
+    {
+      const bicEl = form.elements.namedItem('bic');
+      const bicUtils = getBicUtils();
+      if (bicEl && bicUtils) {
+        if (getBankDetailsModeFromForm() !== 'US') {
+          const initial = bicUtils.validateBic(String(bicEl.value || ''));
+          if (initial.normalized) bicEl.value = bicUtils.formatBic(initial.normalized);
+        }
+
+        if (!bicEl.dataset.boundBic) {
+          bicEl.dataset.boundBic = 'true';
+          bicEl.addEventListener('blur', () => {
+            const mode = getBankDetailsModeFromForm();
+            if (mode === 'US') {
+              const normalized = normalizeUsBankText(String(bicEl.value || ''));
+              bicEl.value = normalized;
+              const errEl = document.getElementById('error-bic');
+              if (errEl) errEl.textContent = '';
+              if (bicEl.classList) bicEl.classList.remove('input-error');
+              return;
+            }
+
+            const res = bicUtils.validateBic(String(bicEl.value || ''));
+            bicEl.value = res.normalized ? bicUtils.formatBic(res.normalized) : '';
+
+            const errEl = document.getElementById('error-bic');
+            if (errEl) errEl.textContent = res.isValid ? '' : String(res.error || '');
+            if (bicEl.classList) {
+              if (res.isValid) bicEl.classList.remove('input-error');
+              else bicEl.classList.add('input-error');
+            }
+          });
+        }
+      }
+    }
 
     updateItemsStatus();
     syncCurrencyFieldsFromItems();

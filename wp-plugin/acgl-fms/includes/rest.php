@@ -43,6 +43,27 @@ function acgl_fms_authorize_attachments($isWrite) {
     return true;
 }
 
+function acgl_fms_authorize_backlog_attachments($isWrite) {
+    // Allow WordPress users with caps.
+    if ($isWrite) {
+        if (acgl_fms_require_write()) return true;
+    } else {
+        if (acgl_fms_require_access()) return true;
+    }
+
+    // Token mode: use Settings permission.
+    $token = acgl_fms_get_bearer_token();
+    if (!$token) return false;
+    $payload = acgl_fms_verify_token($token);
+    if (!$payload) return false;
+
+    $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
+    $lvl = $perms['settings'] ?? 'none';
+    if ($lvl === 'none') return false;
+    if ($isWrite) return $lvl === 'write' || $lvl === 'partial';
+    return true;
+}
+
 function acgl_fms_sanitize_target_key($targetKey) {
     $t = is_string($targetKey) ? trim($targetKey) : '';
     if ($t === '') return null;
@@ -768,6 +789,100 @@ function acgl_fms_register_rest_routes() {
             }
 
             // Ensure the URL is included even if title differs.
+            if ($payload['url'] === '' && $fileUrl !== '') $payload['url'] = $fileUrl;
+
+            return [ 'ok' => true, 'item' => $payload ];
+        },
+    ]);
+
+    register_rest_route('acgl-fms/v1', '/backlog-attachments/upload', [
+        'methods' => 'POST',
+        'permission_callback' => function (WP_REST_Request $request) {
+            return acgl_fms_authorize_backlog_attachments(true);
+        },
+        'callback' => function (WP_REST_Request $request) {
+            $itemId = (string) $request->get_param('itemId');
+            $itemId = trim($itemId);
+            if ($itemId !== '') {
+                $itemId = preg_replace('/[^A-Za-z0-9\-_.]/', '', $itemId);
+            }
+            if ($itemId === '') {
+                return new WP_REST_Response([ 'error' => 'missing_item_id' ], 400);
+            }
+
+            $fileParams = $request->get_file_params();
+            $file = is_array($fileParams) && isset($fileParams['file']) ? $fileParams['file'] : null;
+            if (!is_array($file) || !isset($file['tmp_name'])) {
+                return new WP_REST_Response([ 'error' => 'missing_file' ], 400);
+            }
+
+            // Upload subdir: /acgl-fms/backlog/<itemId>
+            $subdir = '/acgl-fms/backlog/' . $itemId;
+
+            // Ensure WP upload helpers are available.
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+
+            $filter = function ($dirs) use ($subdir) {
+                $dirs['subdir'] = $subdir;
+                $dirs['path'] = $dirs['basedir'] . $dirs['subdir'];
+                $dirs['url'] = $dirs['baseurl'] . $dirs['subdir'];
+                return $dirs;
+            };
+
+            add_filter('upload_dir', $filter, 999);
+            try {
+                $dirs = wp_upload_dir(null, false, true);
+                if (is_array($dirs)) {
+                    $p = (string) ($dirs['path'] ?? '');
+                    if ($p !== '') {
+                        wp_mkdir_p($p);
+                    }
+                }
+                $overrides = [ 'test_form' => false ];
+                $upload = wp_handle_upload($file, $overrides);
+            } finally {
+                remove_filter('upload_dir', $filter, 999);
+            }
+
+            if (!is_array($upload) || isset($upload['error'])) {
+                $msg = is_array($upload) && isset($upload['error']) ? (string) $upload['error'] : 'upload_failed';
+                return new WP_REST_Response([ 'error' => 'upload_failed', 'message' => $msg ], 500);
+            }
+
+            $filePath = (string) ($upload['file'] ?? '');
+            $fileUrl = (string) ($upload['url'] ?? '');
+            $type = (string) ($upload['type'] ?? 'application/octet-stream');
+            $name = isset($file['name']) ? (string) $file['name'] : '';
+            $title = $name !== '' ? preg_replace('/\.[^.]+$/', '', $name) : basename($filePath);
+
+            $attachment = [
+                'post_mime_type' => $type,
+                'post_title' => sanitize_text_field($title),
+                'post_content' => '',
+                'post_status' => 'inherit',
+            ];
+
+            $attachId = wp_insert_attachment($attachment, $filePath);
+            if (!$attachId || is_wp_error($attachId)) {
+                return new WP_REST_Response([ 'error' => 'insert_failed' ], 500);
+            }
+
+            $meta = wp_generate_attachment_metadata($attachId, $filePath);
+            if (is_array($meta)) {
+                wp_update_attachment_metadata($attachId, $meta);
+            }
+
+            $targetKey = 'backlog:' . $itemId;
+            update_post_meta($attachId, 'acgl_fms_target_key', $targetKey);
+            update_post_meta($attachId, 'acgl_fms_backlog_id', $itemId);
+
+            $payload = acgl_fms_attachment_to_payload($attachId);
+            if (!$payload) {
+                return new WP_REST_Response([ 'error' => 'insert_failed' ], 500);
+            }
+
             if ($payload['url'] === '' && $fileUrl !== '') $payload['url'] = $fileUrl;
 
             return [ 'ok' => true, 'item' => $payload ];

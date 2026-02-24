@@ -25,11 +25,19 @@ function acgl_fms_shortcode($atts = []) {
     $height = isset($atts['height']) ? preg_replace('/[^0-9]/', '', (string)$atts['height']) : '';
     if ($height === '') $height = '950';
 
+    // Prefer showing the app name in the browser tab even when embedded inside
+    // a WordPress/portal page.
+    $tab_title = 'ACGL - FMS';
+    $title_script = sprintf(
+        '<script>(function(){try{document.title=%s;}catch(e){}})();</script>',
+        wp_json_encode($tab_title)
+    );
+
     $html = sprintf(
         '<iframe src="%s" style="width:100%%;height:%spx;border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>',
         esc_url($src),
         esc_attr($height)
     );
 
-    return $html;
+    return $title_script . $html;
 }

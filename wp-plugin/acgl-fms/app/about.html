@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <div class="headerTitleBlock">
+                  <h1>About</h1>
+                  <p class="subhead">
+                    Application overview and version information.
+                  </p>
+                </div>
+              </div>
+              <div class="header-actions">
+                <div class="headerThemeBlock">
+                  <img
+                    class="headerThemeBlock__seal"
+                    src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+                    alt="ACGL"
+                    loading="lazy"
+                  />
+                  <label class="switch" for="themeToggle">
+                    <input
+                      type="checkbox"
+                      id="themeToggle"
+                      class="switch__input"
+                      role="switch"
+                      aria-label="Dark mode"
+                    />
+                    <span class="switch__track" aria-hidden="true"></span>
+                    <span class="switch__text">Dark mode</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main class="container">
+          <section class="card" aria-labelledby="aboutAppTitle">
+            <div class="authGate__brand">
+              <div class="acglLoader" aria-label="ACGL logo">
+                <img
+                  class="acglLoader__ring"
+                  src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+                  alt=""
+                />
+                <div class="acglLoader__stage" aria-hidden="true">
+                  <div class="acglLoader__coin">
+                    <img
+                      class="acglLoader__face acglLoader__front"
+                      src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+                      alt=""
+                    />
+                    <img
+                      class="acglLoader__face acglLoader__back"
+                      src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+                      alt=""
+                    />
+                  </div>
+                </div>
+              </div>
+              <h2 class="authGate__brandTitle" id="aboutAppTitle">
+                Financial Management System (FMS)
+              </h2>
+            </div>
+
+            <p>
+              This application is a lightweight, browser-based financial
+              workflow tool for managing Payment Order requests and year-based
+              budget activity. It supports a complete request-to-record process
+              with shared storage, role-based access, and consistent navigation
+              across modules.
+            </p>
+
+            <p>
+              Modules include: New Request Form, Budget (with Dashboard),
+              Income, Payment Orders (including Reconciliation), Ledger, and
+              Settings. Data can run in standalone mode or in WordPress shared
+              mode.
+            </p>
+
+            <p><strong>Version:</strong> <span data-app-version></span></p>
+            <p><strong>Developer:</strong> Cameron Davis</p>
+            <p><strong>Date created:</strong> February 19, 2026</p>
+            <p><strong>Latest version date:</strong> February 24, 2026</p>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

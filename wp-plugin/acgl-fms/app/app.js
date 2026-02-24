@@ -9,6 +9,52 @@
 void (async () => {
   'use strict';
 
+  const APP_TAB_TITLE = 'ACGL - FMS';
+  const APP_VERSION = '0.1.0';
+
+  function setBrowserTabTitle(title) {
+    const next = String(title || '').trim();
+    if (!next) return;
+
+    try {
+      document.title = next;
+    } catch {
+      // ignore
+    }
+
+    // When embedded in a same-origin iframe (e.g., WP portal), also try to
+    // set the top-level tab title.
+    try {
+      if (window.top && window.top !== window) window.top.document.title = next;
+    } catch {
+      // ignore (likely cross-origin)
+    }
+
+    try {
+      if (window.parent && window.parent !== window) window.parent.document.title = next;
+    } catch {
+      // ignore (likely cross-origin)
+    }
+  }
+
+  function applyAppTabTitle() {
+    setBrowserTabTitle(APP_TAB_TITLE);
+  }
+
+  function applyAppVersion() {
+    try {
+      const els = document.querySelectorAll('[data-app-version]');
+      for (const el of els) {
+        el.textContent = APP_VERSION;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  applyAppTabTitle();
+  applyAppVersion();
+
   // ---- WordPress shared-storage bridge (optional) ----
   // When the app is embedded via the WP plugin, the iframe src includes:
   //   ?restUrl=https://example.com/wp-json/&restNonce=...&wp=1
@@ -16,6 +62,34 @@ void (async () => {
   // - load shared key/value data from WP
   // - store shared keys in-memory (not in browser storage)
   // - sync writes back to WP via REST
+  const WP_CTX_KEY = 'acgl_fms_wp_ctx_v1';
+  const FULLPAGE_LAST_SRC_KEY = 'acgl_fms_fullpage_last_src_v1';
+
+  function loadWpCtxFromSession() {
+    try {
+      const raw = String(sessionStorage.getItem(WP_CTX_KEY) || '').trim();
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      const restUrl = String(parsed.restUrl || '').trim();
+      const restNonce = String(parsed.restNonce || '').trim();
+      if (!restUrl) return null;
+      return { restUrl, restNonce };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveWpCtxToSession(restUrl, restNonce) {
+    const url = String(restUrl || '').trim();
+    if (!url) return;
+    try {
+      sessionStorage.setItem(WP_CTX_KEY, JSON.stringify({ restUrl: url, restNonce: String(restNonce || '').trim() }));
+    } catch {
+      // ignore
+    }
+  }
+
   const wpParams = (() => {
     try {
       return new URLSearchParams(window.location.search);
@@ -24,11 +98,90 @@ void (async () => {
     }
   })();
 
-  const WP_REST_URL = String(wpParams.get('restUrl') || '').trim();
-  const WP_REST_NONCE = String(wpParams.get('restNonce') || '').trim();
+  const urlRestUrl = String(wpParams.get('restUrl') || '').trim();
+  const urlRestNonce = String(wpParams.get('restNonce') || '').trim();
+  if (urlRestUrl) saveWpCtxToSession(urlRestUrl, urlRestNonce);
+
+  const remembered = loadWpCtxFromSession();
+  const WP_REST_URL = urlRestUrl || (remembered ? remembered.restUrl : '');
+  const WP_REST_NONCE = urlRestNonce || (remembered ? remembered.restNonce : '');
   // Shared storage is enabled when a REST base is provided.
   // WP nonce may be present when the viewer is logged into WordPress, but it is not required.
   const IS_WP_SHARED_MODE = Boolean(WP_REST_URL);
+
+  function ensureWpParamsOnThisUrl() {
+    if (!IS_WP_SHARED_MODE) return;
+    try {
+      const url = new URL(window.location.href);
+      if (!String(url.searchParams.get('restUrl') || '').trim()) {
+        url.searchParams.set('restUrl', WP_REST_URL);
+      }
+      if (WP_REST_NONCE && !String(url.searchParams.get('restNonce') || '').trim()) {
+        url.searchParams.set('restNonce', WP_REST_NONCE);
+      }
+      if (!String(url.searchParams.get('wp') || '').trim()) {
+        url.searchParams.set('wp', '1');
+      }
+      window.history.replaceState(null, '', url.toString());
+    } catch {
+      // ignore
+    }
+  }
+
+  function withWpEmbedParams(href) {
+    if (!IS_WP_SHARED_MODE) return href;
+    const raw = String(href || '').trim();
+    if (!raw) return href;
+    try {
+      const u = new URL(raw, window.location.href);
+      if (u.origin !== window.location.origin) return href;
+      if (!u.pathname.endsWith('.html')) return href;
+
+      if (!String(u.searchParams.get('restUrl') || '').trim()) u.searchParams.set('restUrl', WP_REST_URL);
+      if (WP_REST_NONCE && !String(u.searchParams.get('restNonce') || '').trim()) u.searchParams.set('restNonce', WP_REST_NONCE);
+      if (!String(u.searchParams.get('wp') || '').trim()) u.searchParams.set('wp', '1');
+
+      const base = getBasename(u.pathname);
+      const qs = u.searchParams.toString();
+      return qs ? `${base}?${qs}` : base;
+    } catch {
+      return href;
+    }
+  }
+
+  function patchInternalAnchorsForWp() {
+    if (!IS_WP_SHARED_MODE) return;
+    try {
+      const anchors = document.querySelectorAll('a[href]');
+      for (const a of anchors) {
+        const href = String(a.getAttribute('href') || '').trim();
+        if (!href) continue;
+        if (href.startsWith('#')) continue;
+        if (href.startsWith('//')) continue;
+        if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) continue; // has scheme
+        if (!/\.html([?#]|$)/i.test(href)) continue;
+
+        const wrapped = withWpEmbedParams(href);
+        if (wrapped && wrapped !== href) a.setAttribute('href', wrapped);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  function rememberFullpageLastSrcNow() {
+    // In WP full-page mode, the top-level page recreates the iframe on refresh.
+    // Store the current in-app URL in the *top window* sessionStorage so the wrapper
+    // can restore the last visited page.
+    try {
+      const href = String(window.location.href || '').trim();
+      if (!href) return;
+      if (!window.top || !window.top.sessionStorage) return;
+      window.top.sessionStorage.setItem(FULLPAGE_LAST_SRC_KEY, href);
+    } catch {
+      // ignore (cross-origin or storage blocked)
+    }
+  }
 
   const WP_TOKEN_KEY = 'acgl_fms_wp_token_v1';
   const WP_PERMS_KEY = 'acgl_fms_wp_perms_v1';
@@ -237,6 +390,47 @@ void (async () => {
       }, 350);
     }
 
+    async function flushNow() {
+      if (flushTimer) {
+        window.clearTimeout(flushTimer);
+        flushTimer = 0;
+      }
+      if (flushing) return;
+      flushing = true;
+      try {
+        // Deletes first.
+        for (const key of Array.from(pendingDeletes)) {
+          pendingDeletes.delete(key);
+          pendingUpserts.delete(key);
+          try {
+            await wpFetchJson(itemUrl(key), { method: 'DELETE' });
+          } catch {
+            // ignore
+          }
+        }
+
+        // Upserts.
+        for (const [key, value] of Array.from(pendingUpserts.entries())) {
+          pendingUpserts.delete(key);
+          try {
+            await wpFetchJson(itemUrl(key), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ value: String(value) }),
+            });
+          } catch {
+            // ignore
+          }
+        }
+      } finally {
+        flushing = false;
+      }
+    }
+
+    // Expose a safe way to force persistence before navigation.
+    // Used when the UI redirects immediately after writing shared keys.
+    window.acglFmsWpFlushNow = flushNow;
+
     // 2) Override localStorage for shared keys only.
     window.localStorage.getItem = (key) => {
       const k = String(key || '');
@@ -277,6 +471,17 @@ void (async () => {
   }
 
   await initWpSharedStorageBridge();
+
+  // If we arrived on a page without WP params (e.g., user clicked a bare "settings.html" link),
+  // restore the remembered embed params so shared mode stays consistent across pages.
+  ensureWpParamsOnThisUrl();
+  patchInternalAnchorsForWp();
+  rememberFullpageLastSrcNow();
+  try {
+    window.addEventListener('beforeunload', rememberFullpageLastSrcNow);
+  } catch {
+    // ignore
+  }
 
   const STORAGE_KEY = 'payment_orders';
   const PAYMENT_ORDERS_LEGACY_MIGRATED_KEY = 'payment_orders_legacy_migrated_v1';
@@ -490,7 +695,7 @@ void (async () => {
     try {
       const d = new Date(raw);
       if (Number.isNaN(d.getTime())) return '';
-      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', hour12: false }).format(d);
     } catch {
       return '';
     }
@@ -589,15 +794,30 @@ void (async () => {
     if (IS_WP_SHARED_MODE) clearWpToken();
   }
 
+  async function persistAuthAuditToWpNow(keepalive = false) {
+    if (!IS_WP_SHARED_MODE) return { ok: true, skipped: true };
+    try {
+      const raw = String(localStorage.getItem(AUTH_AUDIT_KEY) || '').trim();
+      const value = raw ? raw : '[]';
+      const url = wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(AUTH_AUDIT_KEY))}`);
+      const res = await wpFetchJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+        keepalive: Boolean(keepalive),
+      });
+      if (!res.ok) return { ok: false, status: res.status };
+      return { ok: true };
+    } catch {
+      return { ok: false, status: 0 };
+    }
+  }
+
   function loadAuthAuditEvents() {
     try {
       const raw = localStorage.getItem(AUTH_AUDIT_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      const arr = Array.isArray(parsed) ? parsed : [];
-      const filtered = arr.filter((e) => !isHardcodedAdminUsername(e && e.user));
-      // If we removed any admin records, persist the cleanup.
-      if (filtered.length !== arr.length) saveAuthAuditEvents(filtered);
-      return filtered;
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
@@ -615,7 +835,6 @@ void (async () => {
   function appendAuthAuditEvent(actionRaw, usernameRaw) {
     const action = String(actionRaw || '').trim() || 'Event';
     const user = normalizeUsername(usernameRaw) || '—';
-    if (isHardcodedAdminUsername(user)) return;
     const at = new Date().toISOString();
 
     const existing = loadAuthAuditEvents();
@@ -625,6 +844,13 @@ void (async () => {
     const MAX = 500;
     const trimmed = next.length > MAX ? next.slice(next.length - MAX) : next;
     saveAuthAuditEvents(trimmed);
+
+    // In WP mode, localStorage writes are debounced for performance; ensure auth events
+    // are persisted immediately so logout/navigation doesn't drop them.
+    if (IS_WP_SHARED_MODE) {
+      const shouldKeepalive = action === 'Logout' || action === 'Auto log out';
+      void persistAuthAuditToWpNow(shouldKeepalive);
+    }
   }
 
   async function hashPassword(password, salt) {
@@ -846,14 +1072,6 @@ void (async () => {
   }
 
   function requireWriteAccess(permKey, message) {
-    if (IS_WP_SHARED_MODE) {
-      const u = getCurrentUser();
-      if (!u) {
-        window.alert('Please sign in.');
-        return false;
-      }
-    }
-
     // Public New Request Form flow: allow creating a new request without login.
     // If editing an existing order, keep normal permission checks.
     if (permKey === 'orders' && isPublicRequestPage(window.location.pathname) && !getEditOrderId()) {
@@ -866,6 +1084,14 @@ void (async () => {
         return false;
       }
       return true;
+    }
+
+    if (IS_WP_SHARED_MODE) {
+      const u = getCurrentUser();
+      if (!u) {
+        window.alert('Please sign in.');
+        return false;
+      }
     }
 
     const user = getCurrentUser();
@@ -920,9 +1146,9 @@ void (async () => {
       { key: 'settings', href: 'settings.html' },
     ];
     for (const it of order) {
-      if (hasPermission(user, it.key)) return it.href;
+      if (hasPermission(user, it.key)) return withWpEmbedParams(it.href);
     }
-    return 'settings.html';
+    return withWpEmbedParams('settings.html');
   }
 
   function getPaymentOrdersKeyForYear(year) {
@@ -1118,17 +1344,39 @@ void (async () => {
       if (navYears.includes(candidate)) return candidate;
       return navYears.length ? navYears[0] : candidate;
     })();
-    const config = [
+    const maybeWrapNavForWp = (items) => {
+      if (!IS_WP_SHARED_MODE) return items;
+      return items.map((it) => {
+        const out = { ...it };
+        if (out.href) out.href = withWpEmbedParams(out.href);
+        if (Array.isArray(out.children)) {
+          out.children = out.children.map((child) => {
+            const childOut = { ...child };
+            if (childOut.href) childOut.href = withWpEmbedParams(childOut.href);
+            return childOut;
+          });
+        }
+        return out;
+      });
+    };
+
+    const config = maybeWrapNavForWp([
       { key: null, label: 'New Request Form', href: 'index.html?new=1' },
       {
         key: 'budget',
         label: 'Budget',
-        href: `budget_dashboard.html?year=${encodeURIComponent(String(resolvedYear))}`,
-        children: navYears.map((year) => ({
-          label: String(year),
-          href: `budget.html?year=${encodeURIComponent(String(year))}`,
-          isActiveBudgetYear: activeYear === year,
-        })),
+        // Parent should open the current budget year.
+        href: `budget.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: [
+          // Child #1: Dashboard for the current year.
+          { label: 'Dashboard', href: `budget_dashboard.html?year=${encodeURIComponent(String(resolvedYear))}` },
+          // Child #2+: Current year link first, then remaining budget years.
+          ...[resolvedYear, ...navYears.filter((y) => y !== resolvedYear)].map((year) => ({
+            label: String(year),
+            href: `budget.html?year=${encodeURIComponent(String(year))}`,
+            isActiveBudgetYear: resolvedYear === year || activeYear === year,
+          })),
+        ],
       },
       {
         key: 'income',
@@ -1158,14 +1406,15 @@ void (async () => {
         })),
       },
       { key: 'settings', label: 'Settings', href: 'settings.html' },
+      { key: null, label: 'About', href: 'about.html' },
       { key: null, label: 'Log out', href: 'index.html?logout=1' },
-    ];
+    ]);
 
     // If no user is logged in, keep nav minimal.
     if (!currentUser) {
-      return [
+      return maybeWrapNavForWp([
         { key: null, label: 'New Request Form', href: 'index.html?new=1' },
-      ];
+      ]);
     }
 
     // Filter nav by role permissions.
@@ -1175,7 +1424,7 @@ void (async () => {
   async function wpAuthLogin(usernameRaw, passwordRaw) {
     if (!IS_WP_SHARED_MODE) return { ok: false, error: 'not_wp_mode' };
     const username = normalizeUsername(usernameRaw);
-    const password = String(passwordRaw || '');
+    const password = String(passwordRaw || '').trim();
     if (!username || !password) return { ok: false, error: 'missing' };
 
     const url = wpJoin('acgl-fms/v1/auth/login');
@@ -1218,6 +1467,23 @@ void (async () => {
       return { ok: false, error: 'network' };
     }
   }
+  const ACGL_LOGO_URL = 'https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png';
+  function authBrandHtml() {
+    return `
+      <div class="authGate__brand">
+        <div class="acglLoader" aria-label="Loading">
+          <img class="acglLoader__ring" src="${ACGL_LOGO_URL}" alt="" />
+          <div class="acglLoader__stage" aria-hidden="true">
+            <div class="acglLoader__coin">
+              <img class="acglLoader__face acglLoader__front" src="${ACGL_LOGO_URL}" alt="" />
+              <img class="acglLoader__face acglLoader__back" src="${ACGL_LOGO_URL}" alt="" />
+            </div>
+          </div>
+        </div>
+        <h1 class="authGate__brandTitle">Financial Management System (FMS)</h1>
+      </div>
+    `.trim();
+  }
 
   function renderAuthGate() {
     const users = loadUsers();
@@ -1240,7 +1506,7 @@ void (async () => {
         overlay.className = 'authGate';
         overlay.innerHTML = `
           <div class="authGate__card card">
-            <h2 class="authGate__title">Sign in</h2>
+            ${authBrandHtml()}
             <form id="authLoginForm" class="authGate__form" novalidate>
               <div class="field">
                 <label for="authUsername">Username</label>
@@ -1270,7 +1536,7 @@ void (async () => {
             e.preventDefault();
             if (!userEl || !passEl) return;
             const u = normalizeUsername(userEl.value);
-            const p = String(passEl.value || '');
+            const p = String(passEl.value || '').trim();
 
             const result = await wpAuthLogin(u, p);
             if (!result.ok) {
@@ -1291,7 +1557,7 @@ void (async () => {
             }
 
             setCurrentUsername(u);
-            const user = getUserByUsername(u);
+            const user = getCurrentUser();
             if (!tryRedirectToRememberedPage(user)) {
               window.location.reload();
             }
@@ -1326,7 +1592,7 @@ void (async () => {
       overlay.className = 'authGate';
       overlay.innerHTML = `
         <div class="authGate__card card">
-          <h2 class="authGate__title">Sign in</h2>
+          ${authBrandHtml()}
           <form id="authLoginForm" class="authGate__form" novalidate>
             <div class="field">
               <label for="authUsername">Username</label>
@@ -1429,7 +1695,7 @@ void (async () => {
     overlay.setAttribute('data-manual-auth-gate', '1');
     overlay.innerHTML = `
       <div class="authGate__card card">
-        <h2 class="authGate__title">Sign in</h2>
+        ${authBrandHtml()}
         <form id="authLoginForm" class="authGate__form" novalidate>
           <div class="field">
             <label for="authUsername">Username</label>
@@ -1459,7 +1725,7 @@ void (async () => {
         e.preventDefault();
         if (!userEl || !passEl) return;
         const u = normalizeUsername(userEl.value);
-        const p = String(passEl.value || '');
+        const p = String(passEl.value || '').trim();
 
         if (IS_WP_SHARED_MODE) {
           const result = await wpAuthLogin(u, p);
@@ -1481,7 +1747,7 @@ void (async () => {
           }
 
           setCurrentUsername(u);
-          const user = getUserByUsername(u);
+          const user = getCurrentUser();
           if (!tryRedirectToRememberedPage(user)) {
             window.location.reload();
           }
@@ -1709,16 +1975,27 @@ void (async () => {
         footer.className = 'appNavSession';
         footer.setAttribute('data-nav-session-footer', '1');
 
+        const seal = document.createElement('img');
+        seal.className = 'appNavSession__seal';
+        seal.src = ACGL_LOGO_URL;
+        seal.alt = 'ACGL';
+        seal.loading = 'lazy';
+
         const row1 = document.createElement('div');
         row1.className = 'appNavSession__row';
         row1.appendChild(document.createTextNode(`User: ${username}`));
 
         const row2 = document.createElement('div');
         row2.className = 'appNavSession__row';
-        row2.appendChild(document.createTextNode(`Accessed: ${loginAtText}`));
+        row2.appendChild(document.createTextNode(`Last: ${loginAtText}`));
 
-        footer.appendChild(row1);
-        footer.appendChild(row2);
+        const meta = document.createElement('div');
+        meta.className = 'appNavSession__meta';
+        meta.appendChild(row1);
+        meta.appendChild(row2);
+
+        footer.appendChild(seal);
+        footer.appendChild(meta);
         mount.appendChild(footer);
       }
     }
@@ -1780,6 +2057,84 @@ void (async () => {
   ];
 
   const BUDGET_DESC_BY_CODE = new Map(BUDGET_ITEMS.map(([code, desc]) => [code, desc]));
+
+  const budgetDescCache = {
+    outYear: null,
+    outMap: null,
+    inYear: null,
+    inMap: null,
+  };
+
+  function getOutDescMapForYear(year) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    if (budgetDescCache.outYear === y && budgetDescCache.outMap) return budgetDescCache.outMap;
+    const map = new Map();
+    for (const row of readOutAccountsFromBudgetYear(y)) {
+      const code = String(row && row.outCode ? row.outCode : '').trim();
+      const desc = String(row && row.desc ? row.desc : '').trim();
+      if (/^\d{4}$/.test(code) && desc) map.set(code, desc);
+    }
+    budgetDescCache.outYear = y;
+    budgetDescCache.outMap = map;
+    return map;
+  }
+
+  function getInDescMapForYear(year) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    if (budgetDescCache.inYear === y && budgetDescCache.inMap) return budgetDescCache.inMap;
+    const map = new Map();
+    for (const row of readInAccountsFromBudgetYear(y)) {
+      const code = String(row && row.inCode ? row.inCode : '').trim();
+      const desc = String(row && row.desc ? row.desc : '').trim();
+      if (/^\d{4}$/.test(code) && desc) map.set(code, desc);
+    }
+    budgetDescCache.inYear = y;
+    budgetDescCache.inMap = map;
+    return map;
+  }
+
+  function inferDescFromBudgetNumberText(text) {
+    const raw = String(text ?? '').trim();
+    const m = raw.match(/^\d{4}\s*-\s*(.+)$/);
+    return m ? String(m[1]).trim() : '';
+  }
+
+  function renderBudgetNumberSpanHtml(displayText, desc) {
+    const display = String(displayText ?? '').trim();
+    if (!display) return '';
+    const tooltip = String(desc ?? '').trim();
+    if (!tooltip) return escapeHtml(display);
+    return `<span class="budgetCode" tabindex="0" data-tooltip="${escapeHtml(tooltip)}">${escapeHtml(display)}</span>`;
+  }
+
+  function renderOutBudgetNumberHtml(value, year, displayOverride) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const code = extractOutCodeFromBudgetNumberText(raw);
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+
+    const outMap = getOutDescMapForYear(y);
+    const tableDesc = code && outMap ? outMap.get(code) : '';
+    const lookupDesc = tableDesc || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || '';
+    const inferredDesc = lookupDesc || inferDescFromBudgetNumberText(raw);
+
+    const display = displayOverride !== undefined ? String(displayOverride ?? '').trim() : raw;
+    return renderBudgetNumberSpanHtml(display, inferredDesc);
+  }
+
+  function renderInBudgetNumberHtml(value, year, displayOverride) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const code = extractInCodeFromBudgetNumberText(raw);
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+
+    const inMap = getInDescMapForYear(y);
+    const lookupDesc = code && inMap ? inMap.get(code) : '';
+    const inferredDesc = lookupDesc || inferDescFromBudgetNumberText(raw);
+
+    const display = displayOverride !== undefined ? String(displayOverride ?? '').trim() : code || raw;
+    return renderBudgetNumberSpanHtml(display, inferredDesc);
+  }
 
   function formatBudgetNumberForDisplay(value) {
     const raw = String(value ?? '').trim();
@@ -3050,6 +3405,7 @@ void (async () => {
 
   function saveFormToDraft() {
     if (!form) return;
+    const budgetEl = form.elements.namedItem('budgetNumber');
     const draft = {
       paymentOrderNo: form.paymentOrderNo?.value?.trim?.() || '',
       date: form.date?.value?.trim?.() || '',
@@ -3060,7 +3416,7 @@ void (async () => {
       iban: form.iban?.value?.trim?.() || '',
       bic: form.bic?.value?.trim?.() || '',
       specialInstructions: form.specialInstructions?.value?.trim?.() || '',
-      budgetNumber: form.budgetNumber?.value?.trim?.() || '',
+      budgetNumber: extractOutCodeFromBudgetNumberText(budgetEl ? String(budgetEl.value || '').trim() : ''),
       purpose: form.purpose?.value?.trim?.() || '',
     };
     saveDraft(draft);
@@ -3104,6 +3460,10 @@ void (async () => {
     if (!form) {
       return { ok: false, errors: { _form: 'Form not found on this page.' } };
     }
+
+    const budgetEl = form.elements.namedItem('budgetNumber');
+    const budgetNumberRaw = budgetEl ? String(budgetEl.value || '').trim() : '';
+
     const values = {
       paymentOrderNo: form.paymentOrderNo.value.trim(),
       date: form.date.value.trim(),
@@ -3112,7 +3472,7 @@ void (async () => {
       iban: form.iban.value.trim(),
       bic: form.bic.value.trim(),
       specialInstructions: form.specialInstructions.value.trim(),
-      budgetNumber: form.budgetNumber.value.trim(),
+      budgetNumber: extractOutCodeFromBudgetNumberText(budgetNumberRaw),
       purpose: form.purpose.value.trim(),
       captchaAnswer: form.captchaAnswer ? String(form.captchaAnswer.value || '').trim() : '',
     };
@@ -3127,7 +3487,6 @@ void (async () => {
       'address',
       'iban',
       'bic',
-      'specialInstructions',
       'purpose',
       'captchaAnswer',
     ];
@@ -3519,6 +3878,11 @@ void (async () => {
     if (files.length === 0) return;
 
     if (IS_WP_SHARED_MODE) {
+      // In WordPress shared mode, uploading attachments requires sign-in.
+      if (!getCurrentUser()) {
+        showAttachmentsError('Sign in to upload attachments.');
+        return;
+      }
       if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
     }
 
@@ -4691,11 +5055,18 @@ void (async () => {
     if (!tbody || !emptyState) return;
     tbody.innerHTML = '';
 
+    const year = getActiveBudgetYear();
+
     const currentUser = getCurrentUser();
     const canFullWrite = currentUser ? canWrite(currentUser, 'orders') : false;
+    const canViewItems = currentUser ? canOrdersViewEdit(currentUser) : false;
     const writeDisabledAttr = canFullWrite ? '' : ' disabled';
     const writeAriaDisabled = canFullWrite ? 'false' : 'true';
     const writeTooltipAttr = canFullWrite ? '' : ' data-tooltip="Requires Full access for Payment Orders."';
+
+    const itemsDisabledAttr = canViewItems ? '' : ' disabled';
+    const itemsAriaDisabled = canViewItems ? 'false' : 'true';
+    const itemsTooltipAttr = canViewItems ? '' : ' data-tooltip="Requires Payment Orders access."';
 
     if (!orders || orders.length === 0) {
       emptyState.hidden = false;
@@ -4725,12 +5096,12 @@ void (async () => {
             <td>${escapeHtml(o.name)}</td>
             <td class="num">${escapeHtml(formatCurrency(o.euro, 'EUR'))}</td>
             <td class="num">${escapeHtml(formatCurrency(o.usd, 'USD'))}</td>
-            <td>${escapeHtml(o.budgetNumber)}</td>
+            <td>${renderOutBudgetNumberHtml(o.budgetNumber, year)}</td>
             <td>${escapeHtml(o.purpose)}</td>
             <td>${escapeHtml(getOrderWithLabel(o))}</td>
             <td>${escapeHtml(getOrderStatusLabel(o))}</td>
             <td class="actions">
-              <button type="button" class="btn btn--ghost btn--items" data-action="items" title="${canFullWrite ? 'Items' : 'Requires Full access for Payment Orders.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>Items</button>
+              <button type="button" class="btn btn--ghost btn--items" data-action="items" title="${canViewItems ? 'Items' : 'Requires Payment Orders access.'}" aria-disabled="${itemsAriaDisabled}"${itemsDisabledAttr}${itemsTooltipAttr}>Items</button>
               <button type="button" class="btn btn--editBlue" data-action="edit" title="${canFullWrite ? 'Edit' : 'Requires Full access for Payment Orders.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>Edit</button>
               <button type="button" class="btn btn--viewGrey" data-action="view">View</button>
             </td>
@@ -5361,8 +5732,10 @@ void (async () => {
 
     const modalHeaderBudget = modal.querySelector('#modalHeaderBudget');
     if (modalHeaderBudget) {
-      const budget = formatBudgetNumberForDisplay(orderForView.budgetNumber);
-      modalHeaderBudget.textContent = `Budget Number: ${budget || '—'}`;
+      const year = getActiveBudgetYear();
+      const budgetDisplay = formatBudgetNumberForDisplay(orderForView.budgetNumber);
+      const budgetHtml = renderOutBudgetNumberHtml(orderForView.budgetNumber, year, budgetDisplay);
+      modalHeaderBudget.innerHTML = `Budget Number: ${budgetHtml || '—'}`;
     }
 
     const currentStatus = getOrderStatusLabel(orderForView);
@@ -5591,7 +5964,7 @@ void (async () => {
     const listTitleEl = document.querySelector('[data-payment-orders-list-title]');
     if (listTitleEl) listTitleEl.textContent = `${year} Payment Orders`;
 
-    document.title = `${year} Payment Orders`;
+    applyAppTabTitle();
   }
 
   // ---- Payment Orders Reconciliation (year-scoped) ----
@@ -5611,6 +5984,8 @@ void (async () => {
     }
 
     reconcileEmptyState.hidden = true;
+
+    const year = getActiveBudgetYear();
 
     const rowsHtml = orders
       .map((o) => {
@@ -5632,7 +6007,7 @@ void (async () => {
             <td>${escapeHtml(o.name)}</td>
             <td class="num">${escapeHtml(formatCurrency(o.euro, 'EUR'))}</td>
             <td class="num">${escapeHtml(formatCurrency(o.usd, 'USD'))}</td>
-            <td>${escapeHtml(o.budgetNumber || '')}</td>
+            <td>${renderOutBudgetNumberHtml(o.budgetNumber || '', year)}</td>
             <td>${escapeHtml(o.purpose || '')}</td>
             <td>${escapeHtml(getOrderWithLabel(o))}</td>
             <td>${escapeHtml(getOrderStatusLabel(o))}</td>
@@ -5748,7 +6123,7 @@ void (async () => {
     const listTitleEl = document.querySelector('[data-reconciliation-list-title]');
     if (listTitleEl) listTitleEl.textContent = `${year} Reconciliation`;
 
-    document.title = `${year} Reconciliation`;
+    applyAppTabTitle();
 
     if (reconcileToPaymentOrdersBtn) {
       reconcileToPaymentOrdersBtn.textContent = `${year} Payment Orders`;
@@ -5947,7 +6322,7 @@ void (async () => {
 
   async function createUser(usernameRaw, passwordRaw, permissions, emailRaw) {
     const username = normalizeUsername(usernameRaw);
-    const password = String(passwordRaw || '');
+    const password = String(passwordRaw || '').trim();
     const email = normalizeEmail(emailRaw);
     if (!username) return { ok: false, reason: 'username' };
     if (!password || !password.trim()) return { ok: false, reason: 'password' };
@@ -5991,7 +6366,7 @@ void (async () => {
 
   async function updateUser(usernameRaw, nextPermissions, newPasswordRaw, nextEmailRaw) {
     const username = normalizeUsername(usernameRaw);
-    const newPassword = String(newPasswordRaw || '');
+    const newPassword = String(newPasswordRaw || '').trim();
     const nextEmail = normalizeEmail(nextEmailRaw);
     if (nextEmail && !isValidEmail(nextEmail)) return { ok: false, reason: 'email' };
     const users = loadUsers();
@@ -7091,11 +7466,17 @@ void (async () => {
   function renderGsLedgerRows(rows) {
     if (!gsLedgerTbody) return;
     const canVerify = Boolean(gsLedgerViewState.canVerify);
+    const year = getActiveBudgetYear();
     const html = (rows || [])
       .map((r) => {
         const ledgerId = escapeHtml(r.ledgerId);
         const date = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'date'));
-        const budgetNumber = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'budgetNumber'));
+        const budgetCode = getGsLedgerDisplayValueForColumn(r, 'budgetNumber');
+        const code = extractInCodeFromBudgetNumberText(budgetCode);
+        const outMap = getOutDescMapForYear(year);
+        const inMap = getInDescMapForYear(year);
+        const desc = (code && outMap ? outMap.get(code) : '') || (code && inMap ? inMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(budgetCode);
+        const budgetNumber = renderBudgetNumberSpanHtml(code || budgetCode, desc);
         const creditorDebtor = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'creditorDebtor'));
         const poNo = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'paymentOrderNo'));
         const euro = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'euro'));
@@ -7255,7 +7636,7 @@ void (async () => {
     if (listTitleEl) listTitleEl.textContent = `${year} Ledger`;
     const subheadEl = document.querySelector('[data-gs-ledger-subhead]');
     if (subheadEl) subheadEl.textContent = `Consolidated ledger for ${year} (Income + Approved/Paid Payment Orders).`;
-    document.title = `${year} Ledger`;
+    applyAppTabTitle();
 
     initGsLedgerColumnSorting();
 
@@ -7608,7 +7989,8 @@ void (async () => {
         const rowClass = isMissingBudget ? ' class="incomeRow--missingBudget"' : '';
         const date = escapeHtml(getIncomeDisplayValueForColumn(e, 'date', year));
         const remitter = escapeHtml(getIncomeDisplayValueForColumn(e, 'remitter', year));
-        const budget = escapeHtml(getIncomeDisplayValueForColumn(e, 'budgetNumber', year));
+        const budgetCode = getIncomeDisplayValueForColumn(e, 'budgetNumber', year);
+        const budget = renderInBudgetNumberHtml(budgetCode, year);
         const euro = escapeHtml(getIncomeDisplayValueForColumn(e, 'euro', year));
         const desc = escapeHtml(getIncomeDisplayValueForColumn(e, 'description', year));
 
@@ -7955,7 +8337,7 @@ void (async () => {
     if (titleEl) titleEl.textContent = `${year} Income`;
     const listTitleEl = document.querySelector('[data-income-list-title]');
     if (listTitleEl) listTitleEl.textContent = `${year} Income`;
-    document.title = `${year} Income`;
+    applyAppTabTitle();
 
     initIncomeColumnSorting();
 
@@ -8735,7 +9117,7 @@ void (async () => {
 
     const subheadEl = document.querySelector('[data-budget-subhead]');
     if (subheadEl) subheadEl.textContent = `Budget overview table for ${budgetYear}.`;
-    document.title = `${budgetYear} Budget`;
+    applyAppTabTitle();
 
     // Register this year and seed it with the current template (if missing)
     const templateHtml = tbody.innerHTML;
@@ -10215,8 +10597,11 @@ void (async () => {
     const titleEl = document.querySelector('[data-budget-dashboard-title]');
     if (titleEl) titleEl.textContent = `${year} Budget Dashboard`;
     const subheadEl = document.querySelector('[data-budget-dashboard-subhead]');
-    if (subheadEl) subheadEl.textContent = `Charts for ${year}: Expenditures vs Balance (Euro).`;
-    document.title = `${year} Budget Dashboard`;
+    if (subheadEl) {
+      subheadEl.classList.remove('subhead--withSeal');
+      subheadEl.textContent = `Charts for ${year}: Expenditures vs Balance (Euro).`;
+    }
+    applyAppTabTitle();
 
     const backLink = document.getElementById('budgetDashboardBackLink');
     if (backLink) {
@@ -10846,11 +11231,15 @@ void (async () => {
     }
 
     const currentUser = getCurrentUser();
+    const editId = getEditOrderId();
+
+    // Budget Number behavior:
+    // - Only roles with full Payment Orders access may change it.
+    // - In edit mode, we still display the existing value (read-only) for clarity.
     const canEditBudgetNumber = Boolean(currentUser && canWrite(currentUser, 'orders'));
     const budgetNumberEl = form.elements.namedItem('budgetNumber');
     if (budgetNumberEl) {
       budgetNumberEl.disabled = !canEditBudgetNumber;
-      if (!canEditBudgetNumber) budgetNumberEl.value = '';
     }
 
     if (isRequestForm && forceNew) {
@@ -10861,8 +11250,6 @@ void (async () => {
       updateItemsStatus();
       syncCurrencyFieldsFromItems();
     }
-
-    const editId = getEditOrderId();
 
     // New Request Form should start blank every time (except auto-filled PO No.).
     // Only restore a draft when:
@@ -10891,7 +11278,8 @@ void (async () => {
         'iban',
         'bic',
         'specialInstructions',
-        ...(canEditBudgetNumber ? ['budgetNumber'] : []),
+        // Always show the existing Budget Number during edits, even if read-only.
+        ...(editId || canEditBudgetNumber ? ['budgetNumber'] : []),
         'purpose',
       ];
       for (const key of keys) {
@@ -10952,7 +11340,7 @@ void (async () => {
       });
     }
 
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
 
       if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
@@ -10967,11 +11355,6 @@ void (async () => {
         // Rotate challenge after a failed attempt
         generateRequestCaptcha();
         return;
-      }
-
-      // Only Payment Orders Full access can set Budget Number on the request form.
-      if (!canEditBudgetNumber && result.values) {
-        result.values.budgetNumber = '';
       }
 
       const items = loadDraftItems();
@@ -10996,7 +11379,6 @@ void (async () => {
         items,
       };
 
-      const editId = getEditOrderId();
       const year = getActiveBudgetYear();
 
       if (editId) {
@@ -11004,6 +11386,11 @@ void (async () => {
         if (!existing) {
           showItemsError('Could not find the submission to edit.');
           return;
+        }
+
+        // If this user cannot edit Budget Number, preserve the existing value.
+        if (!canEditBudgetNumber) {
+          orderValues.budgetNumber = String(existing.budgetNumber || '').trim();
         }
 
         // Do not allow Payment Order No. to change during edits
@@ -11034,6 +11421,16 @@ void (async () => {
           : updatedBase;
 
         upsertOrder(updated, year);
+
+        // In WP shared mode, writes are debounced; if we immediately redirect back to
+        // the Payment Orders list the debounced flush may be canceled. Force flush now.
+        if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
+          try {
+            await window.acglFmsWpFlushNow();
+          } catch {
+            // ignore
+          }
+        }
 
         // Show the same token after Save Changes (displayed on Payment Orders page)
         setFlashToken('Thank you, your update has been saved.');
@@ -11246,6 +11643,7 @@ void (async () => {
       if (action === 'view') {
         openModalWithOrder(order);
       } else if (action === 'items') {
+        if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;
         window.location.href = `itemize.html?orderId=${encodeURIComponent(id)}&year=${encodeURIComponent(String(year))}`;
       } else if (action === 'edit') {
         if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
@@ -11403,8 +11801,10 @@ void (async () => {
     return { ok: true, value: { title, euro, usd } };
   }
 
-  function renderItems(items) {
+  function renderItems(items, options = {}) {
     if (!itemsTbody || !itemsEmptyState || !totalEuroEl || !totalUsdEl) return;
+
+    const readOnly = Boolean(options && options.readOnly);
 
     itemsTbody.innerHTML = '';
     if (!items || items.length === 0) {
@@ -11420,8 +11820,8 @@ void (async () => {
               <td class="num">${escapeHtml(formatCurrency(it.euro, 'EUR'))}</td>
               <td class="num">${escapeHtml(formatCurrency(it.usd, 'USD'))}</td>
               <td class="actions">
-                <button type="button" class="btn btn--ghost" data-item-action="edit">Edit</button>
-                <button type="button" class="btn btn--danger" data-item-action="delete">Delete</button>
+                ${readOnly ? '' : '<button type="button" class="btn btn--ghost" data-item-action="edit">Edit</button>'}
+                ${readOnly ? '' : '<button type="button" class="btn btn--danger" data-item-action="delete">Delete</button>'}
               </td>
             </tr>
           `.trim();
@@ -11462,6 +11862,11 @@ void (async () => {
     let mode = null;
     let items = [];
     let boundOrderId = null;
+    const currentUser = getCurrentUser();
+    const canEditExistingOrderItems = Boolean(currentUser && canWrite(currentUser, 'orders'));
+    const canViewExistingOrderItems = Boolean(currentUser && canOrdersViewEdit(currentUser));
+    const isExistingOrderView = Boolean(!target.isDraft && target.orderId);
+    const itemizeReadOnly = Boolean(isExistingOrderView && !canEditExistingOrderItems);
 
     if (target.isDraft) {
       const draft = loadDraft();
@@ -11472,6 +11877,13 @@ void (async () => {
         itemizeContext.textContent = `${label}. Add line items below.`;
       }
     } else if (target.orderId) {
+      if (!canViewExistingOrderItems) {
+        window.alert('Read only access.');
+        const year = getActiveBudgetYear();
+        window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
+        return;
+      }
+
       const year = getActiveBudgetYear();
       const order = getOrderById(target.orderId, year);
       boundOrderId = target.orderId;
@@ -11479,12 +11891,17 @@ void (async () => {
       items = Array.isArray(order?.items) ? order.items : [];
       if (itemizeContext) {
         const label = order?.paymentOrderNo ? `Payment Order: ${order.paymentOrderNo}` : 'Payment Order';
-        itemizeContext.textContent = `${label}. Edit items below.`;
+        itemizeContext.textContent = itemizeReadOnly ? `${label}. View items below.` : `${label}. Edit items below.`;
       }
     }
 
-    renderItems(items);
-    resetItemEditor();
+    renderItems(items, { readOnly: itemizeReadOnly });
+    if (itemizeReadOnly) {
+      if (itemForm) itemForm.hidden = true;
+      if (saveItemsBtn) saveItemsBtn.hidden = true;
+    } else {
+      resetItemEditor();
+    }
 
     // Attachments init (itemize page)
     if (attachmentsDropzone && attachmentsInput && attachmentTargetKey) {
@@ -11512,33 +11929,38 @@ void (async () => {
         return { year, paymentOrderNo: '', orderId: '' };
       })();
 
-      const openFilePicker = () => attachmentsInput.click();
+      if (!itemizeReadOnly) {
+        const openFilePicker = () => attachmentsInput.click();
 
-      attachmentsDropzone.addEventListener('click', openFilePicker);
-      attachmentsDropzone.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        attachmentsDropzone.addEventListener('click', openFilePicker);
+        attachmentsDropzone.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openFilePicker();
+          }
+        });
+
+        attachmentsDropzone.addEventListener('dragover', (e) => {
           e.preventDefault();
-          openFilePicker();
-        }
-      });
+          attachmentsDropzone.classList.add('dropzone--over');
+        });
+        attachmentsDropzone.addEventListener('dragleave', () => {
+          attachmentsDropzone.classList.remove('dropzone--over');
+        });
+        attachmentsDropzone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          attachmentsDropzone.classList.remove('dropzone--over');
+          handleAddedFiles(attachmentTargetKey, e.dataTransfer?.files, attachmentUploadContext);
+        });
 
-      attachmentsDropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        attachmentsDropzone.classList.add('dropzone--over');
-      });
-      attachmentsDropzone.addEventListener('dragleave', () => {
-        attachmentsDropzone.classList.remove('dropzone--over');
-      });
-      attachmentsDropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        attachmentsDropzone.classList.remove('dropzone--over');
-        handleAddedFiles(attachmentTargetKey, e.dataTransfer?.files, attachmentUploadContext);
-      });
-
-      attachmentsInput.addEventListener('change', () => {
-        handleAddedFiles(attachmentTargetKey, attachmentsInput.files, attachmentUploadContext);
-        attachmentsInput.value = '';
-      });
+        attachmentsInput.addEventListener('change', () => {
+          handleAddedFiles(attachmentTargetKey, attachmentsInput.files, attachmentUploadContext);
+          attachmentsInput.value = '';
+        });
+      } else {
+        attachmentsInput.disabled = true;
+        attachmentsDropzone.setAttribute('aria-disabled', 'true');
+      }
 
       if (attachmentsTbody) {
         attachmentsTbody.addEventListener('click', async (e) => {
@@ -11610,6 +12032,7 @@ void (async () => {
     }
 
     itemsTbody.addEventListener('click', (e) => {
+      if (itemizeReadOnly) return;
       const btn = e.target.closest('button[data-item-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-item-id]');
@@ -11627,7 +12050,7 @@ void (async () => {
         const ok = window.confirm('Delete this item?');
         if (!ok) return;
         items = items.filter((it) => it.id !== itemId);
-        renderItems(items);
+        renderItems(items, { readOnly: itemizeReadOnly });
         resetItemEditor();
       }
     });

@@ -94,6 +94,215 @@ function acgl_fms_attachment_to_payload($id) {
     ];
 }
 
+function acgl_fms_orders_year_from_kv_key($key) {
+    $k = is_string($key) ? trim($key) : '';
+    if ($k === '') return null;
+    if (preg_match('/^payment_orders_(\d{4})_v1$/', $k, $m)) {
+        return (string) $m[1];
+    }
+    return null;
+}
+
+function acgl_fms_format_payment_order_title($paymentOrderNo, $fallbackId = '') {
+    $raw = is_string($paymentOrderNo) ? trim($paymentOrderNo) : '';
+    if ($raw === '') {
+        $id = is_string($fallbackId) ? trim($fallbackId) : '';
+        return $id !== '' ? $id : 'Payment Order';
+    }
+
+    // Match the app's display normalization: "PO 26-01" etc.
+    if (preg_match('/^PO(?:\s+|-)?(\d{2})-(\d+)$/i', $raw, $m)) {
+        $seq = (int) $m[2];
+        $seqText = $seq < 100 ? str_pad((string) $seq, 2, '0', STR_PAD_LEFT) : (string) $seq;
+        return 'PO ' . $m[1] . '-' . $seqText;
+    }
+
+    // Normalize "PO-" to "PO ".
+    $normalized = preg_replace('/^PO-\s*/i', 'PO ', $raw);
+    $normalized = preg_replace('/^PO\s+/i', 'PO ', $normalized);
+    return trim((string) $normalized);
+}
+
+function acgl_fms_docs_find_existing_attachment_id($kind, $year, $orderId = null) {
+    $kind = is_string($kind) ? trim($kind) : '';
+    $year = is_string($year) ? trim($year) : '';
+    if ($kind === '' || $year === '') return 0;
+
+    $meta = [
+        [ 'key' => 'acgl_fms_doc_kind', 'value' => $kind, 'compare' => '=' ],
+        [ 'key' => 'acgl_fms_year', 'value' => $year, 'compare' => '=' ],
+    ];
+    if ($orderId !== null) {
+        $oid = is_string($orderId) ? trim($orderId) : '';
+        if ($oid !== '') {
+            $meta[] = [ 'key' => 'acgl_fms_order_id', 'value' => $oid, 'compare' => '=' ];
+        }
+    }
+
+    $ids = get_posts([
+        'post_type' => 'attachment',
+        'post_status' => 'inherit',
+        'posts_per_page' => 1,
+        'fields' => 'ids',
+        'meta_query' => $meta,
+    ]);
+
+    if (is_array($ids) && count($ids) > 0) {
+        $id = (int) $ids[0];
+        return $id > 0 ? $id : 0;
+    }
+    return 0;
+}
+
+function acgl_fms_docs_write_json_attachment($kind, $year, $title, $subdir, $filename, $payload, $orderId = null) {
+    $kind = is_string($kind) ? trim($kind) : '';
+    $year = acgl_fms_sanitize_year_folder((string) $year);
+    $title = is_string($title) ? trim($title) : '';
+    $subdir = is_string($subdir) ? trim($subdir) : '';
+    $filename = is_string($filename) ? trim($filename) : '';
+    if ($kind === '' || $year === '' || $title === '' || $subdir === '' || $filename === '') return 0;
+
+    $uploads = wp_upload_dir(null, false);
+    $basedir = is_array($uploads) ? (string) ($uploads['basedir'] ?? '') : '';
+    $baseurl = is_array($uploads) ? (string) ($uploads['baseurl'] ?? '') : '';
+    if ($basedir === '' || $baseurl === '') return 0;
+
+    $sub = '/' . ltrim($subdir, '/');
+    $sub = rtrim($sub, '/');
+    $relative = ltrim($sub, '/') . '/' . $filename;
+    $fullPath = rtrim($basedir, '/\\') . $sub . '/' . $filename;
+    $fullDir = dirname($fullPath);
+    if (!wp_mkdir_p($fullDir)) return 0;
+
+    $json = wp_json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    if (!is_string($json)) $json = '';
+    $written = @file_put_contents($fullPath, $json);
+    if ($written === false) return 0;
+
+    $existingId = acgl_fms_docs_find_existing_attachment_id($kind, $year, $orderId);
+
+    $attachmentPost = [
+        'post_mime_type' => 'application/json',
+        'post_title' => sanitize_text_field($title),
+        'post_content' => '',
+        'post_status' => 'inherit',
+    ];
+
+    $attachId = 0;
+    if ($existingId > 0) {
+        $attachId = $existingId;
+        $attachmentPost['ID'] = $attachId;
+        wp_update_post($attachmentPost);
+        update_attached_file($attachId, $fullPath);
+    } else {
+        $attachId = wp_insert_attachment($attachmentPost, $fullPath);
+        if (!$attachId || is_wp_error($attachId)) return 0;
+    }
+
+    // Ensure the URL and file are stable.
+    $guid = rtrim($baseurl, '/') . $sub . '/' . rawurlencode($filename);
+    wp_update_post([ 'ID' => $attachId, 'guid' => $guid ]);
+
+    update_post_meta($attachId, 'acgl_fms_doc_kind', $kind);
+    update_post_meta($attachId, 'acgl_fms_year', $year);
+    if ($orderId !== null) {
+        $oid = is_string($orderId) ? trim($orderId) : '';
+        if ($oid !== '') update_post_meta($attachId, 'acgl_fms_order_id', $oid);
+    }
+
+    return (int) $attachId;
+}
+
+function acgl_fms_docs_sync_for_orders_year($year, $ordersJson) {
+    $y = acgl_fms_sanitize_year_folder((string) $year);
+    if ($y === '') return;
+    if (!is_string($ordersJson) || trim($ordersJson) === '') return;
+
+    $decoded = json_decode($ordersJson, true);
+    if (!is_array($decoded)) return;
+
+    // Build a stable list of orders.
+    $orders = [];
+    foreach ($decoded as $o) {
+        if (!is_array($o)) continue;
+        $id = isset($o['id']) ? (string) $o['id'] : '';
+        $id = trim($id);
+        if ($id === '') continue;
+        $orders[] = $o;
+    }
+
+    // 1) Budget year file (index)
+    acgl_fms_docs_write_json_attachment(
+        'budget_year',
+        $y,
+        $y . ' Payment Orders',
+        '/acgl-fms/' . $y,
+        'payment-orders-' . $y . '.json',
+        [
+            'generatedAt' => gmdate('c'),
+            'year' => $y,
+            'orders' => $orders,
+        ]
+    );
+
+    // 2) Per-order files
+    $seenIds = [];
+    foreach ($orders as $o) {
+        $id = (string) ($o['id'] ?? '');
+        $id = trim($id);
+        if ($id === '') continue;
+        $seenIds[$id] = true;
+
+        $poNo = isset($o['paymentOrderNo']) ? (string) $o['paymentOrderNo'] : '';
+        $title = acgl_fms_format_payment_order_title($poNo, $id);
+        $fileBase = acgl_fms_sanitize_po_folder($title);
+        if ($fileBase === '') {
+            $fileBase = preg_replace('/[^A-Za-z0-9\-_.]/', '', $id);
+            if ($fileBase === '') $fileBase = 'order';
+        }
+
+        acgl_fms_docs_write_json_attachment(
+            'payment_order',
+            $y,
+            $title,
+            '/acgl-fms/' . $y . '/payment-orders',
+            $fileBase . '.json',
+            [
+                'generatedAt' => gmdate('c'),
+                'year' => $y,
+                'title' => $title,
+                'order' => $o,
+            ],
+            $id
+        );
+    }
+
+    // 3) Cleanup: delete per-order docs that no longer exist.
+    $existingDocIds = get_posts([
+        'post_type' => 'attachment',
+        'post_status' => 'inherit',
+        'posts_per_page' => -1,
+        'fields' => 'ids',
+        'meta_query' => [
+            [ 'key' => 'acgl_fms_doc_kind', 'value' => 'payment_order', 'compare' => '=' ],
+            [ 'key' => 'acgl_fms_year', 'value' => $y, 'compare' => '=' ],
+        ],
+    ]);
+
+    if (is_array($existingDocIds) && count($existingDocIds) > 0) {
+        foreach ($existingDocIds as $aid) {
+            $aid = (int) $aid;
+            if ($aid <= 0) continue;
+            $oid = (string) get_post_meta($aid, 'acgl_fms_order_id', true);
+            $oid = trim($oid);
+            if ($oid !== '' && !isset($seenIds[$oid])) {
+                // Deletes both the attachment and the underlying file.
+                wp_delete_attachment($aid, true);
+            }
+        }
+    }
+}
+
 function acgl_fms_register_rest_routes() {
     register_rest_route('acgl-fms/v1', '/auth/login', [
         'methods' => 'POST',
@@ -261,6 +470,17 @@ function acgl_fms_register_rest_routes() {
                         $now
                     )
                 );
+
+                // Auto-create a Budget Year file and per-Order files in the Media Library.
+                // Triggered when the app saves the per-year Payment Orders dataset.
+                $ordersYear = acgl_fms_orders_year_from_kv_key($key);
+                if ($ordersYear && is_string($value)) {
+                    try {
+                        acgl_fms_docs_sync_for_orders_year($ordersYear, $value);
+                    } catch (Throwable $e) {
+                        // Ignore doc-generation errors so KV save still succeeds.
+                    }
+                }
 
                 return [ 'ok' => true, 'k' => $key ];
             },
@@ -445,12 +665,24 @@ function acgl_fms_register_rest_routes() {
                 return $dirs;
             };
 
-            add_filter('upload_dir', $filter);
+            // NOTE: wp_upload_dir() caches results per request. If anything has called it
+            // earlier in the request (before we add this filter), wp_handle_upload() may
+            // reuse the cached default path and ignore our custom subdir. Force-refresh the
+            // cache while the filter is active.
+            add_filter('upload_dir', $filter, 999);
             try {
+                $dirs = wp_upload_dir(null, false, true);
+                if (is_array($dirs)) {
+                    $p = (string) ($dirs['path'] ?? '');
+                    if ($p !== '') {
+                        // Ensure nested folders like /uploads/acgl-fms/<year>/<bucket>/ exist.
+                        wp_mkdir_p($p);
+                    }
+                }
                 $overrides = [ 'test_form' => false ];
                 $upload = wp_handle_upload($file, $overrides);
             } finally {
-                remove_filter('upload_dir', $filter);
+                remove_filter('upload_dir', $filter, 999);
             }
 
             if (!is_array($upload) || isset($upload['error'])) {

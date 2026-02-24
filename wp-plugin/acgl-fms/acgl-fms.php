@@ -55,6 +55,7 @@ function acgl_fms_maybe_flush_rewrite_rules_on_slug_change() {
 function acgl_fms_render_fullpage() {
     // Start with a lightweight loading page; it will redirect to index.html.
     $app_url = plugins_url('app/loading.html', ACGL_FMS_PLUGIN_FILE);
+    $app_base_url = plugins_url('app/', ACGL_FMS_PLUGIN_FILE);
 
     $rest_url = rest_url();
     $nonce = wp_create_nonce('wp_rest');
@@ -78,7 +79,19 @@ function acgl_fms_render_fullpage() {
     echo '<style>html,body{height:100%;margin:0;padding:0;}iframe{position:fixed;inset:0;width:100%;height:100%;border:0;}</style>';
     echo '</head>';
     echo '<body>';
-    echo '<iframe src="' . esc_url($src) . '" allow="clipboard-read; clipboard-write"></iframe>';
+    echo '<iframe id="acglFmsFrame" src="' . esc_url($src) . '" allow="clipboard-read; clipboard-write"></iframe>';
+    echo '<script>';
+    echo '(function(){';
+    echo 'var KEY=' . wp_json_encode('acgl_fms_fullpage_last_src_v1') . ';';
+    echo 'var APP_BASE=' . wp_json_encode($app_base_url) . ';';
+    echo 'var frame=document.getElementById(' . wp_json_encode('acglFmsFrame') . ');';
+    echo 'if(!frame) return;';
+    echo 'try {';
+    echo 'var last=String(sessionStorage.getItem(KEY)||""||"");';
+    echo 'if(last && last.indexOf(APP_BASE)===0){ frame.src=last; }';
+    echo '} catch(e) {}';
+    echo '})();';
+    echo '</script>';
     echo '</body>';
     echo '</html>';
 

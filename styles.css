@@ -86,6 +86,19 @@ body {
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 0.85rem;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.appNavSession__seal {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.appNavSession__meta {
+  min-width: 0;
 }
 
 .appNavSession__row {
@@ -186,6 +199,13 @@ body {
   gap: 10px;
   min-width: 0;
 }
+
+.headerTitleBlock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 
 /* Hamburger toggle button */
 .navIconBtn {
@@ -628,9 +648,25 @@ body {
   font-size: 1.6rem;
 }
 
+.headerTitleBlock h1 {
+  margin-bottom: 2px;
+}
+
 .subhead {
   margin: 0 0 8px;
   color: var(--muted);
+}
+
+.headerThemeBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.headerThemeBlock__seal {
+  width: 48px;
+  height: auto;
 }
 
 .muted {
@@ -1240,6 +1276,46 @@ input:focus, textarea:focus, select:focus, button:focus {
   z-index: 31;
 }
 
+/* Tooltip popup for displayed Budget Numbers */
+.budgetCode[data-tooltip] {
+  position: relative;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.budgetCode[data-tooltip]:hover::after,
+.budgetCode[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: max-content;
+  max-width: 360px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  white-space: normal;
+  z-index: 40;
+}
+
+.budgetCode[data-tooltip]:hover::before,
+.budgetCode[data-tooltip]:focus-visible::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  bottom: calc(100% + 4px);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--border);
+  z-index: 41;
+}
+
 .btn--primary {
   background: var(--primary-bg);
   color: var(--primary-text);
@@ -1317,6 +1393,127 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .authGate__title {
   margin-top: 0;
+}
+
+.authGate__brand {
+  display: grid;
+  place-items: center;
+  gap: 18px;
+  padding: 6px 0 38px;
+  text-align: center;
+}
+
+.authGate__brandTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.requestFormSeal {
+  display: block;
+  width: 72px;
+  height: auto;
+  margin: 0 auto 10px;
+}
+
+.requestFormSeal--left {
+  margin: 0 0 10px;
+}
+
+.acglLoader {
+  --size: 180px;
+  --spinDuration: 3.2s;
+
+  /* Ring mask (shows ONLY outer ring + text) */
+  --ringInnerCut: 0 44%;
+  --ringOuterCut: 45%;
+
+  /* Center mask (shows ONLY square & compass) */
+  --centerInner: 0 38%;
+  --centerOuter: 39%;
+
+  --centerScale: 1;
+  --perspective: 900px;
+
+  width: var(--size);
+  height: var(--size);
+  position: relative;
+}
+
+.acglLoader__ring {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+
+  -webkit-mask-image: radial-gradient(
+    circle,
+    transparent var(--ringInnerCut),
+    #000 var(--ringOuterCut)
+  );
+  mask-image: radial-gradient(
+    circle,
+    transparent var(--ringInnerCut),
+    #000 var(--ringOuterCut)
+  );
+}
+
+.acglLoader__stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  perspective: var(--perspective);
+  pointer-events: none;
+}
+
+.acglLoader__coin {
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: acglSpinY var(--spinDuration) linear infinite;
+}
+
+.acglLoader__face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+
+  -webkit-mask-image: radial-gradient(
+    circle,
+    #000 var(--centerInner),
+    transparent var(--centerOuter)
+  );
+  mask-image: radial-gradient(
+    circle,
+    #000 var(--centerInner),
+    transparent var(--centerOuter)
+  );
+
+  transform: scale(var(--centerScale));
+  backface-visibility: hidden;
+}
+
+.acglLoader__back {
+  transform: rotateY(180deg) scale(var(--centerScale));
+}
+
+@keyframes acglSpinY {
+  from {
+    transform: rotateY(0deg);
+  }
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .acglLoader__coin {
+    animation: none;
+  }
 }
 
 .rolesGrid {

@@ -720,6 +720,15 @@ body {
   margin: 16px 0;
 }
 
+/* Settings: allow users to reorder cards via drag-and-drop */
+.card[draggable="true"] {
+  cursor: move;
+}
+
+.card.card--dragging {
+  opacity: 0.65;
+}
+
 .card h2 {
   margin: 0 0 12px;
   font-size: 1.15rem;
@@ -2321,8 +2330,15 @@ input[type='checkbox'].cb {
   display: grid;
   gap: 5px;
   margin-top: 3px;
+  /* Keep the Audit Log to ~6 lines, then scroll. */
+  max-height: 66px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
+}
+
+/* Extra specificity so this wins if any other CSS overrides .auditLog. */
+#auditLogList.auditLog {
+  max-height: 66px;
 }
 
 .auditLog__item {
@@ -2343,6 +2359,118 @@ input[type='checkbox'].cb {
 
 .auditLog__header strong {
   color: var(--text);
+}
+
+.backlog {
+  display: grid;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.backlog__item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 8px 10px;
+}
+
+.backlog__item--completed {
+  opacity: 0.75;
+}
+
+.backlog__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.backlog__subject {
+  font-weight: 900;
+  color: var(--text);
+}
+
+.backlog__subject--completed {
+  text-decoration: line-through;
+}
+
+.backlog__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.backlog__desc {
+  margin-top: 6px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.backlog__actions {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.backlog__archiveToggle {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.backlog__archiveToggle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.backlog__archiveWrap {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+
+.backlog__comments {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 6px;
+}
+
+.backlog__comment {
+  padding: 6px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.backlog__commentHead {
+  color: var(--muted);
+  font-size: 0.78rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.backlog__commentBody {
+  margin-top: 3px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .auditLog__changes {

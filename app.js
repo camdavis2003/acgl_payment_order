@@ -263,6 +263,7 @@ void (async () => {
 
     // Shared business data
     if (key === 'payment_order_users_v1') return true;
+    if (key === 'payment_order_backlog_v1') return true;
     if (key === 'payment_order_auth_audit_v1') return true;
     if (key === 'payment_order_numbering') return true;
     if (key === 'payment_order_budget_years_v1') return true;
@@ -496,6 +497,7 @@ void (async () => {
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
   const USERS_KEY = 'payment_order_users_v1';
+  const BACKLOG_KEY = 'payment_order_backlog_v1';
   const CURRENT_USER_KEY = 'payment_order_current_user_v1';
   const LOGIN_AT_KEY = 'payment_order_login_at_v1';
   const LAST_ACTIVITY_AT_KEY = 'payment_order_last_activity_at_v1';
@@ -1405,7 +1407,7 @@ void (async () => {
           href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
-      { key: 'settings', label: 'Settings', href: 'settings.html' },
+      { key: 'settings', label: 'Admin Settings', href: 'settings.html' },
       { key: null, label: 'About', href: 'about.html' },
       { key: null, label: 'Log out', href: 'index.html?logout=1' },
     ]);
@@ -6737,6 +6739,638 @@ void (async () => {
     return { ok: true };
   }
 
+  function loadBacklogItems() {
+    try {
+      const raw = localStorage.getItem(BACKLOG_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((x) => x && typeof x === 'object');
+    } catch {
+      return [];
+    }
+  }
+
+  function saveBacklogItems(items) {
+    const safe = Array.isArray(items) ? items : [];
+    localStorage.setItem(BACKLOG_KEY, JSON.stringify(safe));
+  }
+
+  function getBacklogDisplayUser() {
+    const u = normalizeUsername(getCurrentUsername());
+    return u || '—';
+  }
+
+  function openSimpleModal(modalEl, focusSelector) {
+    if (!modalEl) return;
+    modalEl.classList.add('is-open');
+    modalEl.setAttribute('aria-hidden', 'false');
+    const focusTarget = focusSelector ? modalEl.querySelector(focusSelector) : null;
+    if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+  }
+
+  function closeSimpleModal(modalEl) {
+    if (!modalEl) return;
+    modalEl.classList.remove('is-open');
+    modalEl.setAttribute('aria-hidden', 'true');
+  }
+
+  function clearBacklogFormErrors(formEl) {
+    if (!formEl) return;
+    const errors = Array.from(formEl.querySelectorAll('.error'));
+    errors.forEach((el) => {
+      el.textContent = '';
+    });
+  }
+
+  function setBacklogFieldError(formEl, fieldId, message) {
+    if (!formEl) return;
+    const el = document.getElementById(`error-${String(fieldId || '').trim()}`);
+    if (el) el.textContent = String(message || '');
+  }
+
+  function closeBacklogItemModal() {
+    const modalEl = document.getElementById('backlogItemModal');
+    const formEl = document.getElementById('backlogItemForm');
+    if (formEl) {
+      formEl.removeAttribute('data-edit-id');
+      clearBacklogFormErrors(formEl);
+      formEl.reset();
+    }
+    closeSimpleModal(modalEl);
+  }
+
+  function closeBacklogCommentModal() {
+    const modalEl = document.getElementById('backlogCommentModal');
+    const formEl = document.getElementById('backlogCommentForm');
+    if (formEl) {
+      formEl.removeAttribute('data-item-id');
+      clearBacklogFormErrors(formEl);
+      formEl.reset();
+    }
+    closeSimpleModal(modalEl);
+  }
+
+  function renderBacklogList(canEdit) {
+    const listEl = document.getElementById('backlogList');
+    const emptyEl = document.getElementById('backlogEmptyState');
+    const metaEl = document.getElementById('backlogMeta');
+    const archiveToggleEl = document.getElementById('backlogArchiveToggle');
+    const archiveWrapEl = document.getElementById('backlogArchiveWrap');
+    const archiveEmptyEl = document.getElementById('backlogArchiveEmptyState');
+    const archiveListEl = document.getElementById('backlogArchiveList');
+    if (!listEl || !emptyEl) return;
+
+    const hasArchiveUi = Boolean(archiveToggleEl && archiveWrapEl && archiveEmptyEl && archiveListEl);
+    const archiveOpen = hasArchiveUi && archiveWrapEl.dataset.open === '1';
+
+    const items = loadBacklogItems();
+    const normalized = items
+      .map((it) => {
+        const id = String(it.id || '').trim() || (crypto?.randomUUID ? crypto.randomUUID() : `bl_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+        const subject = String(it.subject || '').trim();
+        const description = String(it.description || '').trim();
+        const createdAt = it.createdAt ? String(it.createdAt) : new Date().toISOString();
+        const createdBy = it.createdBy !== undefined ? String(it.createdBy || '—') : '—';
+        const archived = Boolean(it.archived) || Boolean(it.completed);
+        const archivedAt = it.archivedAt ? String(it.archivedAt) : (it.completedAt ? String(it.completedAt) : '');
+        const archivedBy = it.archivedBy !== undefined ? String(it.archivedBy || '—') : (it.completedBy !== undefined ? String(it.completedBy || '—') : '—');
+        const completed = Boolean(it.completed) || archived;
+        const completedAt = it.completedAt ? String(it.completedAt) : (archivedAt ? String(archivedAt) : '');
+        const completedBy = it.completedBy !== undefined ? String(it.completedBy || '—') : (archivedBy ? String(archivedBy || '—') : '—');
+        const comments = Array.isArray(it.comments) ? it.comments.filter((c) => c && typeof c === 'object') : [];
+        return {
+          id,
+          subject,
+          description,
+          createdAt,
+          createdBy,
+          archived,
+          archivedAt,
+          archivedBy,
+          completed,
+          completedAt,
+          completedBy,
+          comments,
+        };
+      })
+      .filter((it) => it.subject && it.description);
+
+    const activeItems = normalized.filter((x) => !x.archived);
+    const archivedItems = normalized.filter((x) => x.archived);
+
+    activeItems.sort((a, b) => {
+      const am = toTimeMs(a.createdAt) ?? 0;
+      const bm = toTimeMs(b.createdAt) ?? 0;
+      return bm - am;
+    });
+
+    archivedItems.sort((a, b) => {
+      const am = toTimeMs(a.archivedAt || a.completedAt || a.createdAt) ?? 0;
+      const bm = toTimeMs(b.archivedAt || b.completedAt || b.createdAt) ?? 0;
+      if (bm !== am) return bm - am;
+      const ac = toTimeMs(a.createdAt) ?? 0;
+      const bc = toTimeMs(b.createdAt) ?? 0;
+      return bc - ac;
+    });
+
+    if (metaEl) metaEl.textContent = `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} total`;
+
+    emptyEl.hidden = normalized.length > 0;
+    if (normalized.length === 0) {
+      listEl.innerHTML = '';
+      if (hasArchiveUi) {
+        archiveListEl.innerHTML = '';
+        archiveEmptyEl.hidden = false;
+      }
+      return;
+    }
+
+    const actionsDisabled = !canEdit;
+
+    function renderItems(itemsToRender) {
+      return itemsToRender
+        .map((it) => {
+        const createdLabel = it.createdAt ? formatIsoDateTimeShort(it.createdAt) : '—';
+        const completedLabel = it.completedAt ? formatIsoDateTimeShort(it.completedAt) : '—';
+
+        const comments = (Array.isArray(it.comments) ? it.comments : [])
+          .map((c) => {
+            const at = c.at ? String(c.at) : '';
+            const by = c.by !== undefined ? String(c.by || '—') : '—';
+            const text = String(c.text || '').trim();
+            if (!text) return '';
+            const time = at ? formatIsoDateTimeShort(at) : '—';
+            return `
+              <div class="backlog__comment">
+                <div class="backlog__commentHead">
+                  <span><strong>${escapeHtml(by)}</strong></span>
+                  <span class="timelinegraph__eventSep">•</span>
+                  <span>${escapeHtml(time)}</span>
+                </div>
+                <div class="backlog__commentBody">${escapeHtml(text)}</div>
+              </div>
+            `.trim();
+          })
+          .filter(Boolean)
+          .join('');
+
+        const subjectClass = it.completed ? 'backlog__subject backlog__subject--completed' : 'backlog__subject';
+        const itemClass = it.completed ? 'backlog__item backlog__item--completed' : 'backlog__item';
+        const completeText = it.completed ? 'Reopen' : 'Complete';
+
+        const completedMeta = it.completed
+          ? ` <span class="timelinegraph__eventSep">•</span> <span>Completed: <strong>${escapeHtml(completedLabel)}</strong></span> <span class="timelinegraph__eventSep">•</span> <span>By: <strong>${escapeHtml(it.completedBy || '—')}</strong></span>`
+          : '';
+
+        return `
+          <div class="${itemClass}" data-id="${escapeHtml(it.id)}">
+            <div class="backlog__header">
+              <div class="${subjectClass}">${escapeHtml(it.subject)}</div>
+              <div class="backlog__meta">
+                <span>Created: <strong>${escapeHtml(createdLabel)}</strong></span>
+                <span class="timelinegraph__eventSep">•</span>
+                <span>By: <strong>${escapeHtml(it.createdBy || '—')}</strong></span>
+                ${completedMeta}
+              </div>
+            </div>
+            <div class="backlog__desc">${escapeHtml(it.description)}</div>
+            <div class="backlog__actions">
+              <button type="button" class="btn btn--ghost" data-backlog-action="comment" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Comment</button>
+              <button type="button" class="btn btn--editBlue" data-backlog-action="edit" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Edit</button>
+              <button type="button" class="btn" data-backlog-action="complete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>${escapeHtml(completeText)}</button>
+              <button type="button" class="btn btn--danger" data-backlog-action="delete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Delete</button>
+            </div>
+            ${comments ? `<div class="backlog__comments" aria-label="Comments">${comments}</div>` : ''}
+          </div>
+        `.trim();
+        })
+        .join('');
+    }
+
+    listEl.innerHTML = activeItems.length > 0 ? renderItems(activeItems) : '';
+
+    if (hasArchiveUi) {
+      archiveWrapEl.hidden = !archiveOpen;
+      archiveToggleEl.setAttribute('aria-expanded', archiveOpen ? 'true' : 'false');
+      archiveEmptyEl.hidden = archivedItems.length > 0;
+      archiveListEl.innerHTML = archivedItems.length > 0 ? renderItems(archivedItems) : '';
+    }
+  }
+
+  function initBacklogSettingsSection(canEdit) {
+    const addBtn = document.getElementById('backlogAddBtn');
+    const listEl = document.getElementById('backlogList');
+    const archiveToggleEl = document.getElementById('backlogArchiveToggle');
+    const archiveWrapEl = document.getElementById('backlogArchiveWrap');
+    const archiveListEl = document.getElementById('backlogArchiveList');
+    const itemModal = document.getElementById('backlogItemModal');
+    const itemForm = document.getElementById('backlogItemForm');
+    const commentModal = document.getElementById('backlogCommentModal');
+    const commentForm = document.getElementById('backlogCommentForm');
+    if (!addBtn || !listEl || !itemModal || !itemForm || !commentModal || !commentForm) return;
+
+    addBtn.disabled = !canEdit;
+    if (!canEdit) addBtn.setAttribute('data-tooltip', 'Read only access.');
+
+    if (!addBtn.dataset.bound) {
+      addBtn.dataset.bound = 'true';
+      addBtn.addEventListener('click', () => {
+        if (!canEdit) return;
+        const titleEl = document.getElementById('backlogItemModalTitle');
+        if (titleEl) titleEl.textContent = 'Add Backlog Item';
+        itemForm.removeAttribute('data-edit-id');
+        clearBacklogFormErrors(itemForm);
+        itemForm.reset();
+        openSimpleModal(itemModal, '#backlogSubject');
+      });
+    }
+
+    if (archiveToggleEl && archiveWrapEl && !archiveToggleEl.dataset.bound) {
+      archiveToggleEl.dataset.bound = 'true';
+      archiveToggleEl.addEventListener('click', () => {
+        const isOpen = archiveWrapEl.dataset.open === '1';
+        archiveWrapEl.dataset.open = isOpen ? '0' : '1';
+        archiveWrapEl.hidden = isOpen;
+        archiveToggleEl.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+      });
+    }
+
+    // Modal close handlers (backdrop, buttons)
+    if (!itemModal.dataset.bound) {
+      itemModal.dataset.bound = 'true';
+      itemModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeBacklogItemModal();
+      });
+    }
+    if (!commentModal.dataset.bound) {
+      commentModal.dataset.bound = 'true';
+      commentModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeBacklogCommentModal();
+      });
+    }
+
+    function bindBacklogListActions(targetListEl) {
+      if (!targetListEl || targetListEl.dataset.bound) return;
+      targetListEl.dataset.bound = 'true';
+      targetListEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-backlog-action]');
+        if (!btn) return;
+        const row = btn.closest('.backlog__item');
+        if (!row) return;
+        const id = row.getAttribute('data-id');
+        const action = btn.getAttribute('data-backlog-action');
+        if (!id || !action) return;
+        if (!canEdit) return;
+
+        const items = loadBacklogItems();
+        const idx = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(id));
+        if (idx === -1) return;
+        const current = items[idx];
+
+        if (action === 'edit') {
+          const titleEl = document.getElementById('backlogItemModalTitle');
+          if (titleEl) titleEl.textContent = 'Edit Backlog Item';
+          itemForm.setAttribute('data-edit-id', String(id));
+          clearBacklogFormErrors(itemForm);
+          const subj = document.getElementById('backlogSubject');
+          const desc = document.getElementById('backlogDescription');
+          if (subj) subj.value = String(current.subject || '');
+          if (desc) desc.value = String(current.description || '');
+          openSimpleModal(itemModal, '#backlogSubject');
+          return;
+        }
+
+        if (action === 'delete') {
+          const ok = window.confirm('Delete this backlog item?');
+          if (!ok) return;
+          const next = items.filter((x) => x && typeof x === 'object' && String(x.id || '') !== String(id));
+          saveBacklogItems(next);
+          renderBacklogList(canEdit);
+          return;
+        }
+
+        if (action === 'complete') {
+          const wasArchived = Boolean(current.archived) || Boolean(current.completed);
+          const now = new Date().toISOString();
+          const by = getBacklogDisplayUser();
+          const nextItem = wasArchived
+            ? {
+              ...current,
+              archived: false,
+              archivedAt: '',
+              archivedBy: '',
+              completed: false,
+              completedAt: '',
+              completedBy: '',
+            }
+            : {
+              ...current,
+              archived: true,
+              archivedAt: now,
+              archivedBy: by,
+              completed: true,
+              completedAt: now,
+              completedBy: by,
+            };
+          const next = items.slice();
+          next[idx] = nextItem;
+          saveBacklogItems(next);
+          renderBacklogList(canEdit);
+          return;
+        }
+
+        if (action === 'comment') {
+          const titleEl = document.getElementById('backlogCommentModalTitle');
+          if (titleEl) titleEl.textContent = 'Add Comment';
+          commentForm.setAttribute('data-item-id', String(id));
+          clearBacklogFormErrors(commentForm);
+          commentForm.reset();
+          openSimpleModal(commentModal, '#backlogComment');
+        }
+      });
+    }
+
+    bindBacklogListActions(listEl);
+    bindBacklogListActions(archiveListEl);
+
+    if (!itemForm.dataset.bound) {
+      itemForm.dataset.bound = 'true';
+      itemForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!canEdit) return;
+        clearBacklogFormErrors(itemForm);
+
+        const subjectEl = document.getElementById('backlogSubject');
+        const descEl = document.getElementById('backlogDescription');
+        const subject = subjectEl ? String(subjectEl.value || '').trim() : '';
+        const description = descEl ? String(descEl.value || '').trim() : '';
+
+        let ok = true;
+        if (!subject) {
+          setBacklogFieldError(itemForm, 'backlogSubject', 'Subject is required.');
+          ok = false;
+        }
+        if (!description) {
+          setBacklogFieldError(itemForm, 'backlogDescription', 'Description is required.');
+          ok = false;
+        }
+        if (!ok) return;
+
+        const editId = itemForm.getAttribute('data-edit-id');
+        const items = loadBacklogItems();
+
+        if (editId) {
+          const idx = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(editId));
+          if (idx === -1) return;
+          const next = items.slice();
+          next[idx] = {
+            ...next[idx],
+            subject,
+            description,
+          };
+          saveBacklogItems(next);
+        } else {
+          const id = (crypto?.randomUUID ? crypto.randomUUID() : `bl_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+          const now = new Date().toISOString();
+          const by = getBacklogDisplayUser();
+          const nextItem = {
+            id,
+            subject,
+            description,
+            createdAt: now,
+            createdBy: by,
+            archived: false,
+            archivedAt: '',
+            archivedBy: '',
+            completed: false,
+            completedAt: '',
+            completedBy: '',
+            comments: [],
+          };
+          saveBacklogItems([nextItem, ...items]);
+        }
+
+        closeBacklogItemModal();
+        renderBacklogList(canEdit);
+      });
+    }
+
+    if (!commentForm.dataset.bound) {
+      commentForm.dataset.bound = 'true';
+      commentForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!canEdit) return;
+        clearBacklogFormErrors(commentForm);
+
+        const itemId = commentForm.getAttribute('data-item-id');
+        const textEl = document.getElementById('backlogComment');
+        const text = textEl ? String(textEl.value || '').trim() : '';
+        if (!itemId) return;
+        if (!text) {
+          setBacklogFieldError(commentForm, 'backlogComment', 'Comment is required.');
+          return;
+        }
+
+        const items = loadBacklogItems();
+        const idx = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(itemId));
+        if (idx === -1) return;
+        const current = items[idx];
+        const comments = Array.isArray(current.comments) ? current.comments.slice() : [];
+        comments.push({
+          id: (crypto?.randomUUID ? crypto.randomUUID() : `c_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          at: new Date().toISOString(),
+          by: getBacklogDisplayUser(),
+          text,
+        });
+        const next = items.slice();
+        next[idx] = { ...current, comments };
+        saveBacklogItems(next);
+
+        closeBacklogCommentModal();
+        renderBacklogList(canEdit);
+      });
+    }
+
+    renderBacklogList(canEdit);
+  }
+
+  function getCookieValue(nameRaw) {
+    const name = String(nameRaw || '').trim();
+    if (!name) return '';
+    const all = String(document.cookie || '');
+    if (!all) return '';
+    const parts = all.split(';');
+    for (const p of parts) {
+      const idx = p.indexOf('=');
+      if (idx === -1) continue;
+      const k = p.slice(0, idx).trim();
+      if (k !== name) continue;
+      return p.slice(idx + 1).trim();
+    }
+    return '';
+  }
+
+  function setCookieValue(nameRaw, valueRaw, maxAgeDays) {
+    const name = String(nameRaw || '').trim();
+    if (!name) return;
+    const value = String(valueRaw ?? '');
+    const days = Number(maxAgeDays);
+    const maxAge = Number.isFinite(days) && days > 0 ? Math.floor(days * 24 * 60 * 60) : (365 * 24 * 60 * 60);
+    document.cookie = `${name}=${value}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+  }
+
+  function getSettingsCardOrderCookieName() {
+    const username = normalizeUsername(getCurrentUsername());
+    if (!username) return '';
+    return `acgl_settings_card_order_v1_${encodeURIComponent(username)}`;
+  }
+
+  function readSettingsCardOrderFromCookie() {
+    const cookieName = getSettingsCardOrderCookieName();
+    if (!cookieName) return null;
+    const raw = getCookieValue(cookieName);
+    if (!raw) return null;
+    try {
+      const decoded = decodeURIComponent(raw);
+      const parsed = JSON.parse(decoded);
+      if (!Array.isArray(parsed)) return null;
+      return parsed.map((x) => String(x || '').trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSettingsCardOrderToCookie(orderKeys) {
+    const cookieName = getSettingsCardOrderCookieName();
+    if (!cookieName) return;
+    const arr = Array.isArray(orderKeys) ? orderKeys.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    setCookieValue(cookieName, encodeURIComponent(JSON.stringify(arr)), 365);
+  }
+
+  function getSettingsCardsContainer() {
+    const main = document.querySelector('main.container');
+    if (!main) return null;
+    return main;
+  }
+
+  function getSettingsCardEls(containerEl) {
+    if (!containerEl) return [];
+    return Array.from(containerEl.querySelectorAll('section.card[data-settings-card][draggable="true"]'));
+  }
+
+  function applySettingsCardOrder(containerEl) {
+    const order = readSettingsCardOrderFromCookie();
+    if (!order || order.length === 0) return;
+
+    const cards = getSettingsCardEls(containerEl);
+    if (cards.length === 0) return;
+
+    const byKey = new Map();
+    for (const el of cards) {
+      const key = String(el.getAttribute('data-settings-card') || '').trim();
+      if (!key) continue;
+      byKey.set(key, el);
+    }
+
+    const seen = new Set();
+    for (const key of order) {
+      const el = byKey.get(key);
+      if (!el) continue;
+      containerEl.appendChild(el);
+      seen.add(key);
+    }
+
+    // Any cards not in the saved list stay after, in current DOM order.
+    for (const el of cards) {
+      const key = String(el.getAttribute('data-settings-card') || '').trim();
+      if (!key || seen.has(key)) continue;
+      containerEl.appendChild(el);
+    }
+  }
+
+  function saveSettingsCardOrder(containerEl) {
+    const cards = getSettingsCardEls(containerEl);
+    const keys = cards
+      .map((el) => String(el.getAttribute('data-settings-card') || '').trim())
+      .filter(Boolean);
+    writeSettingsCardOrderToCookie(keys);
+  }
+
+  function initSettingsCardsDragAndDrop() {
+    const cookieName = getSettingsCardOrderCookieName();
+    if (!cookieName) return;
+
+    const containerEl = getSettingsCardsContainer();
+    if (!containerEl) return;
+    if (containerEl.dataset.settingsCardDndBound) return;
+    containerEl.dataset.settingsCardDndBound = '1';
+
+    applySettingsCardOrder(containerEl);
+
+    let draggedEl = null;
+
+    function isInteractiveTarget(t) {
+      if (!t || !t.closest) return false;
+      return Boolean(t.closest('input, textarea, select, button, a, label'));
+    }
+
+    function getDragAfterElement(container, y) {
+      const els = getSettingsCardEls(container).filter((el) => el !== draggedEl);
+      let closest = { offset: Number.NEGATIVE_INFINITY, el: null };
+      for (const el of els) {
+        const box = el.getBoundingClientRect();
+        const offset = y - (box.top + box.height / 2);
+        if (offset < 0 && offset > closest.offset) {
+          closest = { offset, el };
+        }
+      }
+      return closest.el;
+    }
+
+    for (const card of getSettingsCardEls(containerEl)) {
+      card.addEventListener('dragstart', (e) => {
+        if (isInteractiveTarget(e.target)) {
+          e.preventDefault();
+          return;
+        }
+        draggedEl = card;
+        card.classList.add('card--dragging');
+        try {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(card.getAttribute('data-settings-card') || ''));
+        } catch {
+          // ignore
+        }
+      });
+      card.addEventListener('dragend', () => {
+        if (draggedEl) draggedEl.classList.remove('card--dragging');
+        draggedEl = null;
+        saveSettingsCardOrder(containerEl);
+      });
+    }
+
+    containerEl.addEventListener('dragover', (e) => {
+      if (!draggedEl) return;
+      e.preventDefault();
+      const afterEl = getDragAfterElement(containerEl, e.clientY);
+      if (!afterEl) {
+        containerEl.appendChild(draggedEl);
+        return;
+      }
+      if (afterEl === draggedEl) return;
+      containerEl.insertBefore(draggedEl, afterEl);
+    });
+
+    containerEl.addEventListener('drop', (e) => {
+      if (!draggedEl) return;
+      e.preventDefault();
+      saveSettingsCardOrder(containerEl);
+    });
+  }
+
   function renderSettingsAuditLog() {
     const listEl = document.getElementById('auditLogList');
     const emptyEl = document.getElementById('auditLogEmptyState');
@@ -7130,7 +7764,13 @@ void (async () => {
     const currentUser = getCurrentUser();
     const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings') : false);
 
+    // Settings page: allow each user to reorder cards (persisted via cookie).
+    initSettingsCardsDragAndDrop();
+
     renderUsersTable();
+
+    // Backlog (CRUD + comments)
+    initBacklogSettingsSection(canEdit);
 
     // Timeline audit log (Payment Orders + Income)
     renderSettingsAuditLog();
@@ -7144,6 +7784,9 @@ void (async () => {
         if (!key) return;
         if (key === AUTH_AUDIT_KEY || key.startsWith('payment_orders_') || key.startsWith('payment_order_income_')) {
           renderSettingsAuditLog();
+        }
+        if (key === BACKLOG_KEY) {
+          renderBacklogList(canEdit);
         }
       });
     }
@@ -12224,9 +12867,20 @@ void (async () => {
 
   // Close modal on Escape (only relevant if a modal exists)
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal && modal.classList.contains('is-open')) {
-      closeModal();
+    if (e.key !== 'Escape') return;
+
+    const backlogCommentModal = document.getElementById('backlogCommentModal');
+    if (backlogCommentModal && backlogCommentModal.classList.contains('is-open')) {
+      closeBacklogCommentModal();
+      return;
     }
+    const backlogItemModal = document.getElementById('backlogItemModal');
+    if (backlogItemModal && backlogItemModal.classList.contains('is-open')) {
+      closeBacklogItemModal();
+      return;
+    }
+
+    if (modal && modal.classList.contains('is-open')) closeModal();
   });
 
   // Initial render for list page

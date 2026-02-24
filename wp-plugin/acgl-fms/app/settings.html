@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ACGL - FMS</title>
+    <title>Admin Settings - ACGL - FMS</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -27,7 +27,7 @@
                 >
                   <span class="navIconBtn__lines" aria-hidden="true"></span>
                 </button>
-                <h1>Settings</h1>
+                <h1>Admin Settings</h1>
               </div>
               <div class="header-actions">
                 <label class="switch" for="themeToggle">
@@ -47,61 +47,12 @@
         </header>
 
         <main class="container">
-          <section class="card" aria-labelledby="settings-title">
-            <h2 id="settings-title">Payment Order Numbering</h2>
-
-            <p class="subhead">
-              Set the masonic year and the first Payment Order number for the
-              year.
-            </p>
-
-            <form id="numberingForm" novalidate>
-              <div class="grid">
-                <div class="field">
-                  <label for="masonicYear">Budget Year (2 digits)</label>
-                  <select id="masonicYear" name="masonicYear" required>
-                    <option value="" selected disabled>Select a budget…</option>
-                  </select>
-                  <div
-                    class="error"
-                    id="error-masonicYear"
-                    role="alert"
-                    aria-live="polite"
-                  ></div>
-                </div>
-
-                <div class="field">
-                  <label for="firstNumber"
-                    >First Payment Order No. of the Year</label
-                  >
-                  <input
-                    id="firstNumber"
-                    name="firstNumber"
-                    type="number"
-                    min="1"
-                    step="1"
-                    inputmode="numeric"
-                    autocomplete="off"
-                    required
-                  />
-                  <div
-                    class="error"
-                    id="error-firstNumber"
-                    role="alert"
-                    aria-live="polite"
-                  ></div>
-                </div>
-              </div>
-
-              <div class="actions actions--right">
-                <button type="submit" class="btn btn--primary">
-                  Save Settings
-                </button>
-              </div>
-            </form>
-          </section>
-
-          <section class="card" aria-labelledby="roles-title">
+          <section
+            class="card"
+            aria-labelledby="roles-title"
+            draggable="true"
+            data-settings-card="roles"
+          >
             <div class="list-header">
               <h2 id="roles-title">User Roles</h2>
             </div>
@@ -324,7 +275,122 @@
             </div>
           </section>
 
-          <section class="card" aria-labelledby="audit-title">
+          <section
+            class="card"
+            aria-labelledby="backlog-title"
+            draggable="true"
+            data-settings-card="backlog"
+          >
+            <div class="list-header">
+              <h2 id="backlog-title">Backlog</h2>
+              <div class="list-actions">
+                <div class="subhead" id="backlogMeta"></div>
+                <button
+                  type="button"
+                  id="backlogArchiveToggle"
+                  class="backlog__archiveToggle"
+                  aria-expanded="false"
+                >
+                  Archive
+                </button>
+                <button
+                  type="button"
+                  id="backlogAddBtn"
+                  class="btn btn--primary"
+                >
+                  Add Item
+                </button>
+              </div>
+            </div>
+
+            <div id="backlogEmptyState" class="empty" hidden>
+              No backlog items yet.
+            </div>
+
+            <div id="backlogList" class="backlog" aria-label="Backlog items">
+              <!-- items inserted by app.js -->
+            </div>
+
+            <div id="backlogArchiveWrap" class="backlog__archiveWrap" hidden>
+              <div class="subhead">Archive</div>
+              <div id="backlogArchiveEmptyState" class="empty" hidden>
+                No archived items.
+              </div>
+              <div
+                id="backlogArchiveList"
+                class="backlog"
+                aria-label="Archived backlog items"
+              >
+                <!-- archived items inserted by app.js -->
+              </div>
+            </div>
+          </section>
+
+          <section
+            class="card"
+            aria-labelledby="settings-title"
+            draggable="true"
+            data-settings-card="numbering"
+          >
+            <h2 id="settings-title">Payment Order Numbering</h2>
+
+            <p class="subhead">
+              Set the masonic year and the first Payment Order number for the
+              year.
+            </p>
+
+            <form id="numberingForm" novalidate>
+              <div class="grid">
+                <div class="field">
+                  <label for="masonicYear">Budget Year (2 digits)</label>
+                  <select id="masonicYear" name="masonicYear" required>
+                    <option value="" selected disabled>Select a budget…</option>
+                  </select>
+                  <div
+                    class="error"
+                    id="error-masonicYear"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+
+                <div class="field">
+                  <label for="firstNumber"
+                    >First Payment Order No. of the Year</label
+                  >
+                  <input
+                    id="firstNumber"
+                    name="firstNumber"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    required
+                  />
+                  <div
+                    class="error"
+                    id="error-firstNumber"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+              </div>
+
+              <div class="actions actions--right">
+                <button type="submit" class="btn btn--primary">
+                  Save Settings
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section
+            class="card"
+            aria-labelledby="audit-title"
+            draggable="true"
+            data-settings-card="audit"
+          >
             <div class="list-header">
               <h2 id="audit-title">Audit Log</h2>
               <div class="list-actions">
@@ -368,6 +434,139 @@
             </div>
           </section>
         </main>
+      </div>
+    </div>
+
+    <div id="backlogItemModal" class="modal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="backlogItemModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <div id="backlogItemModalTitle" class="modal__poHeader">
+              Backlog Item
+            </div>
+          </div>
+          <button
+            type="button"
+            class="modal__close"
+            data-modal-close
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <form id="backlogItemForm" novalidate>
+            <div class="grid">
+              <div class="field field--span2">
+                <label for="backlogSubject"
+                  >Subject<span class="req" aria-hidden="true">*</span></label
+                >
+                <input
+                  id="backlogSubject"
+                  name="backlogSubject"
+                  type="text"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-backlogSubject"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+              <div class="field field--span2">
+                <label for="backlogDescription"
+                  >Description<span class="req" aria-hidden="true"
+                    >*</span
+                  ></label
+                >
+                <textarea
+                  id="backlogDescription"
+                  name="backlogDescription"
+                  rows="4"
+                  required
+                ></textarea>
+                <div
+                  class="error"
+                  id="error-backlogDescription"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal__footer">
+          <button type="submit" form="backlogItemForm" class="btn btn--primary">
+            Save
+          </button>
+          <button type="button" class="btn" data-modal-close>Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="backlogCommentModal" class="modal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="backlogCommentModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <div id="backlogCommentModalTitle" class="modal__poHeader">
+              Add Comment
+            </div>
+          </div>
+          <button
+            type="button"
+            class="modal__close"
+            data-modal-close
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <form id="backlogCommentForm" novalidate>
+            <div class="grid">
+              <div class="field field--span2">
+                <label for="backlogComment"
+                  >Comment<span class="req" aria-hidden="true">*</span></label
+                >
+                <textarea
+                  id="backlogComment"
+                  name="backlogComment"
+                  rows="4"
+                  required
+                ></textarea>
+                <div
+                  class="error"
+                  id="error-backlogComment"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal__footer">
+          <button
+            type="submit"
+            form="backlogCommentForm"
+            class="btn btn--primary"
+          >
+            Save
+          </button>
+          <button type="button" class="btn" data-modal-close>Cancel</button>
+        </div>
       </div>
     </div>
 

@@ -72,6 +72,35 @@ function acgl_fms_sanitize_po_folder($paymentOrderNo) {
     return $s;
 }
 
+function acgl_fms_find_po_folder_for_order($year, $orderId) {
+    $y = acgl_fms_sanitize_year_folder((string) $year);
+    $oid = is_string($orderId) ? trim($orderId) : '';
+    if ($y === '' || $oid === '') return '';
+
+    // Orders are stored under keys like payment_orders_2026_v1.
+    $raw = acgl_fms_kv_get_raw('payment_orders_' . $y . '_v1');
+    if (!is_string($raw) || trim($raw) === '') return '';
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) return '';
+
+    $poRaw = '';
+    foreach ($decoded as $o) {
+        if (!is_array($o)) continue;
+        $id = isset($o['id']) ? (string) $o['id'] : '';
+        $id = trim($id);
+        if ($id === '' || $id !== $oid) continue;
+        $poRaw = isset($o['paymentOrderNo']) ? (string) $o['paymentOrderNo'] : '';
+        break;
+    }
+
+    $poRaw = trim((string) $poRaw);
+    if ($poRaw === '') return '';
+
+    $title = acgl_fms_format_payment_order_title($poRaw, '');
+    return acgl_fms_sanitize_po_folder($title);
+}
+
 function acgl_fms_attachment_to_payload($id) {
     $post = get_post((int) $id);
     if (!$post || $post->post_type !== 'attachment') return null;
@@ -641,14 +670,29 @@ function acgl_fms_register_rest_routes() {
                 $orderId = preg_replace('/[^A-Za-z0-9\-_.]/', '', $orderId);
             }
 
+            // If the client doesn't send paymentOrderNo, try deriving it from the saved orders.
+            // This keeps uploads consistently grouped under the Payment Order folder.
+            if ($po === '' && $orderId !== '' && $year !== '') {
+                $derived = acgl_fms_find_po_folder_for_order($year, $orderId);
+                if ($derived !== '') $po = $derived;
+            }
+
+            // Enforce folder naming by Payment Order No.
+            if ($po === '') {
+                return new WP_REST_Response([
+                    'error' => 'missing_payment_order_no',
+                    'message' => 'Payment Order No. is required before uploading documents.'
+                ], 400);
+            }
+
             $fileParams = $request->get_file_params();
             $file = is_array($fileParams) && isset($fileParams['file']) ? $fileParams['file'] : null;
             if (!is_array($file) || !isset($file['tmp_name'])) {
                 return new WP_REST_Response([ 'error' => 'missing_file' ], 400);
             }
 
-            // Determine upload subdir: /acgl-fms/<year>/<po-or-orderId>
-            $bucket = $po !== '' ? $po : ($orderId !== '' ? $orderId : 'order');
+            // Determine upload subdir: /acgl-fms/<year>/<paymentOrderNo>
+            $bucket = $po;
             $subdir = '/acgl-fms';
             if ($year !== '') $subdir .= '/' . $year;
             $subdir .= '/' . $bucket;

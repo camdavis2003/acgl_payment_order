@@ -948,11 +948,29 @@ void (async () => {
     return normalizePermissions(user && user.permissions);
   }
 
+  function isPublicItemizeDraft() {
+    const base = getBasename(window.location.pathname);
+    if (base !== 'itemize.html') return false;
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const isDraft = params.get('draft') === '1';
+      const orderId = String(params.get('orderId') || '').trim();
+      // Treat Itemize as public only for draft mode (new request flow).
+      return isDraft && !orderId;
+    } catch {
+      return false;
+    }
+  }
+
   function requiredPermissionForPage(pathname) {
     const base = getBasename(pathname);
 
     // Public pages: always accessible without login.
-    if (base === 'index.html' || base === 'itemize.html') return null;
+    if (base === 'index.html') return null;
+    if (base === 'itemize.html' && isPublicItemizeDraft()) return null;
+
+    // Itemize for an existing order requires Orders permission.
+    if (base === 'itemize.html') return 'orders';
 
     if (base === 'budget.html' || base === 'budget_dashboard.html') return 'budget';
     if (base === 'income.html') return 'income';
@@ -964,7 +982,9 @@ void (async () => {
 
   function isPublicRequestPage(pathname) {
     const base = getBasename(pathname);
-    return base === 'index.html' || base === 'itemize.html';
+    if (base === 'index.html') return true;
+    if (base === 'itemize.html') return isPublicItemizeDraft();
+    return false;
   }
 
   function isRememberableAppPage(href) {
@@ -3037,6 +3057,7 @@ void (async () => {
   }
 
   // Itemize page elements
+  const itemModal = document.getElementById('itemModal');
   const itemForm = document.getElementById('itemForm');
   const itemsTbody = document.getElementById('itemsTbody');
   const itemsEmptyState = document.getElementById('itemsEmptyState');
@@ -3045,7 +3066,8 @@ void (async () => {
   const saveItemsBtn = document.getElementById('saveItemsBtn');
   const editingItemIdEl = document.getElementById('editingItemId');
   const addOrUpdateItemBtn = document.getElementById('addOrUpdateItemBtn');
-  const cancelEditItemBtn = document.getElementById('cancelEditItemBtn');
+  const openItemModalBtn = document.getElementById('openItemModalBtn');
+  const addMilageBtn = document.getElementById('addMilageBtn');
   const itemizeContext = document.getElementById('itemizeContext');
 
   // Attachments (itemize page)
@@ -4160,6 +4182,13 @@ void (async () => {
         return;
       }
       if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+
+      const po = context && typeof context.paymentOrderNo === 'string' ? context.paymentOrderNo.trim() : '';
+      const oid = context && typeof context.orderId === 'string' ? context.orderId.trim() : '';
+      if (!po && !oid) {
+        showAttachmentsError('Enter the Payment Order No. before uploading documents.');
+        return;
+      }
     }
 
     showAttachmentsError('');
@@ -12869,6 +12898,23 @@ void (async () => {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
 
+    const milageViewModal = document.getElementById('milageViewModal');
+    if (milageViewModal && milageViewModal.classList.contains('is-open')) {
+      closeMilageViewModal();
+      return;
+    }
+    const milageModal = document.getElementById('milageModal');
+    if (milageModal && milageModal.classList.contains('is-open')) {
+      closeMilageModal();
+      return;
+    }
+
+    const itemModal = document.getElementById('itemModal');
+    if (itemModal && itemModal.classList.contains('is-open')) {
+      closeItemModal();
+      return;
+    }
+
     const backlogCommentModal = document.getElementById('backlogCommentModal');
     if (backlogCommentModal && backlogCommentModal.classList.contains('is-open')) {
       closeBacklogCommentModal();
@@ -12917,6 +12963,97 @@ void (async () => {
   }
 
   // ---- Itemize page logic ----
+
+  function getMilageRate(vehicleTypeRaw) {
+    const v = String(vehicleTypeRaw || '').trim().toLowerCase();
+    if (v === 'car') return 0.3;
+    return 0.2;
+  }
+
+  function roundMoney(n) {
+    const num = Number(n);
+    if (!Number.isFinite(num)) return NaN;
+    return Math.round(num * 100) / 100;
+  }
+
+  function computeMilageTotal(vehicleTypeRaw, kmRaw) {
+    const km = Number(kmRaw);
+    if (!Number.isFinite(km) || km < 0) return NaN;
+    const total = km * getMilageRate(vehicleTypeRaw);
+    return roundMoney(total);
+  }
+
+  function clearMilageErrors() {
+    const keys = [
+      'milageDate',
+      'milageVehicleType',
+      'milageStart',
+      'milageDestination',
+      'milageKilometers',
+      'milageTotalCost',
+      'milageAttachment',
+    ];
+    for (const k of keys) {
+      const errEl = document.getElementById(`error-${k}`);
+      if (errEl) errEl.textContent = '';
+      const input = document.getElementById(k);
+      if (input) input.classList.remove('input-error');
+    }
+    const viewErr = document.getElementById('milageViewError');
+    if (viewErr) viewErr.textContent = '';
+  }
+
+  function showMilageErrors(errors) {
+    for (const [k, msg] of Object.entries(errors || {})) {
+      const errEl = document.getElementById(`error-${k}`);
+      if (errEl) errEl.textContent = String(msg || '');
+      const input = document.getElementById(k);
+      if (input) input.classList.add('input-error');
+    }
+  }
+
+  function updateMilageTotalCostField() {
+    const vehicleEl = document.getElementById('milageVehicleType');
+    const kmEl = document.getElementById('milageKilometers');
+    const totalEl = document.getElementById('milageTotalCost');
+    if (!vehicleEl || !kmEl || !totalEl) return;
+    const total = computeMilageTotal(vehicleEl.value, kmEl.value);
+    if (!Number.isFinite(total)) {
+      totalEl.value = '';
+      return;
+    }
+    totalEl.value = total.toFixed(2);
+  }
+
+  function closeMilageModal() {
+    const modalEl = document.getElementById('milageModal');
+    const formEl = document.getElementById('milageForm');
+    const hintEl = document.getElementById('milageAttachmentHint');
+    if (formEl) {
+      formEl.reset();
+      const editIdEl = document.getElementById('milageEditingId');
+      const attIdEl = document.getElementById('milageAttachmentId');
+      if (editIdEl) editIdEl.value = '';
+      if (attIdEl) attIdEl.value = '';
+      const fileEl = document.getElementById('milageAttachment');
+      if (fileEl) {
+        fileEl.value = '';
+        fileEl.required = true;
+      }
+    }
+    if (hintEl) hintEl.hidden = true;
+    clearMilageErrors();
+    closeSimpleModal(modalEl);
+  }
+
+  function closeMilageViewModal() {
+    const modalEl = document.getElementById('milageViewModal');
+    const bodyEl = document.getElementById('milageViewBody');
+    if (bodyEl) bodyEl.innerHTML = '';
+    if (modalEl) modalEl.removeAttribute('data-item-id');
+    clearMilageErrors();
+    closeSimpleModal(modalEl);
+  }
 
   function readItemizeTarget() {
     const params = new URLSearchParams(window.location.search);
@@ -13023,6 +13160,7 @@ void (async () => {
       itemsEmptyState.hidden = true;
       itemsTbody.innerHTML = items
         .map((it, idx) => {
+          const isMilage = Boolean(it && typeof it === 'object' && it.milage && typeof it.milage === 'object');
           return `
             <tr data-item-id="${escapeHtml(it.id)}">
               <td class="num">${idx + 1}</td>
@@ -13030,6 +13168,7 @@ void (async () => {
               <td class="num">${escapeHtml(formatCurrency(it.euro, 'EUR'))}</td>
               <td class="num">${escapeHtml(formatCurrency(it.usd, 'USD'))}</td>
               <td class="actions">
+                ${isMilage ? '<button type="button" class="btn btn--ghost" data-item-action="viewMilage">View Milage</button>' : ''}
                 ${readOnly ? '' : '<button type="button" class="btn btn--ghost" data-item-action="edit">Edit</button>'}
                 ${readOnly ? '' : '<button type="button" class="btn btn--danger" data-item-action="delete">Delete</button>'}
               </td>
@@ -13051,7 +13190,8 @@ void (async () => {
     document.getElementById('itemEuro').value = '';
     document.getElementById('itemUsd').value = '';
     if (addOrUpdateItemBtn) addOrUpdateItemBtn.textContent = 'Add Item';
-    if (cancelEditItemBtn) cancelEditItemBtn.hidden = true;
+    const modalTitleEl = document.getElementById('itemModalTitle');
+    if (modalTitleEl) modalTitleEl.textContent = 'Add Item';
     clearItemErrors();
   }
 
@@ -13062,8 +13202,16 @@ void (async () => {
     document.getElementById('itemEuro').value = item.euro === null || item.euro === undefined ? '' : String(item.euro);
     document.getElementById('itemUsd').value = item.usd === null || item.usd === undefined ? '' : String(item.usd);
     if (addOrUpdateItemBtn) addOrUpdateItemBtn.textContent = 'Update Item';
-    if (cancelEditItemBtn) cancelEditItemBtn.hidden = false;
+    const modalTitleEl = document.getElementById('itemModalTitle');
+    if (modalTitleEl) modalTitleEl.textContent = 'Edit Item';
     clearItemErrors();
+  }
+
+  function closeItemModal() {
+    if (itemForm) itemForm.reset();
+    resetItemEditor();
+    clearItemErrors();
+    closeSimpleModal(itemModal);
   }
 
   if (itemForm && itemsTbody) {
@@ -13072,8 +13220,11 @@ void (async () => {
     let mode = null;
     let items = [];
     let boundOrderId = null;
+    const milageModal = document.getElementById('milageModal');
+    const milageForm = document.getElementById('milageForm');
+    const milageViewModal = document.getElementById('milageViewModal');
     const currentUser = getCurrentUser();
-    const canEditExistingOrderItems = Boolean(currentUser && canWrite(currentUser, 'orders'));
+    const canEditExistingOrderItems = Boolean(currentUser && canOrdersViewEdit(currentUser));
     const canViewExistingOrderItems = Boolean(currentUser && canOrdersViewEdit(currentUser));
     const isExistingOrderView = Boolean(!target.isDraft && target.orderId);
     const itemizeReadOnly = Boolean(isExistingOrderView && !canEditExistingOrderItems);
@@ -13107,37 +13258,438 @@ void (async () => {
 
     renderItems(items, { readOnly: itemizeReadOnly });
     if (itemizeReadOnly) {
-      if (itemForm) itemForm.hidden = true;
       if (saveItemsBtn) saveItemsBtn.hidden = true;
+      if (openItemModalBtn) openItemModalBtn.hidden = true;
+      if (addMilageBtn) addMilageBtn.hidden = true;
     } else {
       resetItemEditor();
+    }
+
+    function requireItemizeEditAccess(message) {
+      // Existing order itemize requires WP sign-in and at least partial access.
+      if (isExistingOrderView) return requireOrdersViewEditAccess(message);
+
+      // Draft itemize is part of the public request flow:
+      // - anonymous users may draft
+      // - signed-in users need at least partial access
+      const u = getCurrentUser();
+      if (!u) return true;
+      if (!canOrdersViewEdit(u)) {
+        window.alert(message || 'Read only access.');
+        return false;
+      }
+      return true;
+    }
+
+    function openItemModalForAdd() {
+      if (!itemModal || !itemForm) return;
+      resetItemEditor();
+      openSimpleModal(itemModal, '#itemTitle');
+    }
+
+    function openItemModalForEdit(item) {
+      if (!itemModal || !itemForm) return;
+      populateItemEditor(item);
+      openSimpleModal(itemModal, '#itemTitle');
+    }
+
+    if (itemModal && !itemModal.dataset.bound) {
+      itemModal.dataset.bound = '1';
+      itemModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeItemModal();
+      });
+    }
+
+    if (openItemModalBtn && !openItemModalBtn.dataset.bound) {
+      openItemModalBtn.dataset.bound = '1';
+      openItemModalBtn.disabled = itemizeReadOnly;
+      if (itemizeReadOnly) openItemModalBtn.setAttribute('data-tooltip', 'Read only access.');
+      openItemModalBtn.addEventListener('click', () => {
+        if (itemizeReadOnly) return;
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+        openItemModalForAdd();
+      });
+    }
+
+    const attachmentUploadContext = (() => {
+      const year = String(getActiveBudgetYear() || '').trim();
+      if (target.isDraft) {
+        const draft = loadDraft();
+        return {
+          year,
+          paymentOrderNo: String(draft && draft.paymentOrderNo ? draft.paymentOrderNo : '').trim(),
+          orderId: '',
+        };
+      }
+      if (target.orderId) {
+        const y = getActiveBudgetYear();
+        const order = getOrderById(target.orderId, y);
+        return {
+          year,
+          paymentOrderNo: String(order && order.paymentOrderNo ? order.paymentOrderNo : '').trim(),
+          orderId: String(target.orderId || '').trim(),
+        };
+      }
+      return { year, paymentOrderNo: '', orderId: '' };
+    })();
+
+    function openMilageModalForAdd() {
+      if (!milageModal || !milageForm) return;
+      clearMilageErrors();
+      milageForm.reset();
+      const titleEl = document.getElementById('milageModalTitle');
+      if (titleEl) titleEl.textContent = 'Add Milage';
+      const editIdEl = document.getElementById('milageEditingId');
+      const attIdEl = document.getElementById('milageAttachmentId');
+      const fileEl = document.getElementById('milageAttachment');
+      const hintEl = document.getElementById('milageAttachmentHint');
+      if (editIdEl) editIdEl.value = '';
+      if (attIdEl) attIdEl.value = '';
+      if (fileEl) {
+        fileEl.value = '';
+        fileEl.required = true;
+      }
+      if (hintEl) hintEl.hidden = true;
+
+      const dateEl = document.getElementById('milageDate');
+      if (dateEl && !String(dateEl.value || '').trim()) {
+        dateEl.value = new Date().toISOString().slice(0, 10);
+      }
+
+      updateMilageTotalCostField();
+      openSimpleModal(milageModal, '#milageDate');
+    }
+
+    function openMilageModalForEdit(item) {
+      if (!milageModal || !milageForm) return;
+      const m = item && item.milage && typeof item.milage === 'object' ? item.milage : null;
+      if (!m) return;
+      clearMilageErrors();
+      milageForm.reset();
+      const titleEl = document.getElementById('milageModalTitle');
+      if (titleEl) titleEl.textContent = 'Edit Milage';
+      const editIdEl = document.getElementById('milageEditingId');
+      const attIdEl = document.getElementById('milageAttachmentId');
+      const hintEl = document.getElementById('milageAttachmentHint');
+      const fileEl = document.getElementById('milageAttachment');
+      if (editIdEl) editIdEl.value = String(item.id || '');
+      if (attIdEl) attIdEl.value = String(m.attachmentId || '');
+      if (fileEl) {
+        fileEl.value = '';
+        fileEl.required = false;
+      }
+      if (hintEl) hintEl.hidden = !Boolean(m.attachmentId);
+
+      const dateEl = document.getElementById('milageDate');
+      const vehicleEl = document.getElementById('milageVehicleType');
+      const startEl = document.getElementById('milageStart');
+      const destEl = document.getElementById('milageDestination');
+      const kmEl = document.getElementById('milageKilometers');
+      if (dateEl) dateEl.value = String(m.date || '').slice(0, 10);
+      if (vehicleEl) vehicleEl.value = String(m.vehicleType || '');
+      if (startEl) startEl.value = String(m.start || '');
+      if (destEl) destEl.value = String(m.destination || '');
+      if (kmEl) kmEl.value = m.kilometers === null || m.kilometers === undefined ? '' : String(m.kilometers);
+      updateMilageTotalCostField();
+      openSimpleModal(milageModal, '#milageDate');
+    }
+
+    function formatMilageVehicleLabel(vehicleTypeRaw) {
+      const v = String(vehicleTypeRaw || '').trim().toLowerCase();
+      if (v === 'car') return 'Car';
+      if (v === 'motorcycle') return 'Motorcycle';
+      return vehicleTypeRaw ? String(vehicleTypeRaw) : '—';
+    }
+
+    function openMilageView(item) {
+      if (!milageViewModal) return;
+      clearMilageErrors();
+      const m = item && item.milage && typeof item.milage === 'object' ? item.milage : null;
+      if (!m) return;
+      const titleEl = document.getElementById('milageViewModalTitle');
+      if (titleEl) titleEl.textContent = String(item.title || 'Milage');
+      milageViewModal.setAttribute('data-item-id', String(item.id || ''));
+      const bodyEl = document.getElementById('milageViewBody');
+      const currency = item && item.euro !== null && item.euro !== undefined ? 'EUR' : 'USD';
+      const symbol = currency === 'EUR' ? '€' : '$';
+      const rate = getMilageRate(m.vehicleType);
+      const total = computeMilageTotal(m.vehicleType, m.kilometers);
+      if (bodyEl) {
+        const attId = String(m.attachmentId || '').trim();
+        bodyEl.innerHTML = `
+          <div class="grid">
+            <div class="field">
+              <div class="subhead">Date</div>
+              <div><strong>${escapeHtml(formatDate(m.date))}</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Vehicle Type</div>
+              <div><strong>${escapeHtml(formatMilageVehicleLabel(m.vehicleType))}</strong></div>
+            </div>
+            <div class="field field--span2">
+              <div class="subhead">Start (Departure Location)</div>
+              <div><strong>${escapeHtml(String(m.start || ''))}</strong></div>
+            </div>
+            <div class="field field--span2">
+              <div class="subhead">Destination</div>
+              <div><strong>${escapeHtml(String(m.destination || ''))}</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Kilometers</div>
+              <div><strong>${escapeHtml(String(m.kilometers ?? ''))}</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Rate</div>
+              <div><strong>${escapeHtml(symbol)} ${escapeHtml(rate.toFixed(2))} / km</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Total</div>
+              <div><strong>${escapeHtml(formatCurrency(total, currency) || '')}</strong></div>
+            </div>
+
+            <div class="field field--span2">
+              <div class="subhead">ADAC Route Planner Attachment</div>
+              ${attId
+                ? `<div><a href="#" data-milage-attachment-link="1" data-attachment-id="${escapeHtml(attId)}">${escapeHtml(String(m.attachmentName || 'View / download attachment'))}</a></div>`
+                : '<div class="muted">—</div>'}
+            </div>
+          </div>
+        `.trim();
+      }
+
+      const downloadBtn = document.getElementById('milageDownloadBtn');
+      if (downloadBtn) downloadBtn.disabled = !Boolean(m.attachmentId);
+
+      const editBtn = document.getElementById('milageEditBtn');
+      const delBtn = document.getElementById('milageDeleteBtn');
+      if (editBtn) editBtn.disabled = itemizeReadOnly;
+      if (delBtn) delBtn.disabled = itemizeReadOnly;
+
+      openSimpleModal(milageViewModal, '#milageDownloadBtn');
+    }
+
+    async function deleteMilageItem(itemId) {
+      const current = items.find((it) => it.id === itemId);
+      if (!current) return;
+      const m = current && current.milage && typeof current.milage === 'object' ? current.milage : null;
+      const ok = window.confirm('Delete this milage report?');
+      if (!ok) return;
+      items = items.filter((it) => it.id !== itemId);
+      renderItems(items, { readOnly: itemizeReadOnly });
+      resetItemEditor();
+      if (m && m.attachmentId) {
+        try {
+          await deleteAttachmentById(m.attachmentId);
+          if (attachmentTargetKey) await refreshAttachments(attachmentTargetKey);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (addMilageBtn && !addMilageBtn.dataset.bound) {
+      addMilageBtn.dataset.bound = '1';
+      addMilageBtn.disabled = itemizeReadOnly;
+      if (itemizeReadOnly) addMilageBtn.setAttribute('data-tooltip', 'Read only access.');
+      addMilageBtn.addEventListener('click', () => {
+        if (itemizeReadOnly) return;
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+        openMilageModalForAdd();
+      });
+    }
+
+    if (milageModal && !milageModal.dataset.bound) {
+      milageModal.dataset.bound = '1';
+      milageModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeMilageModal();
+      });
+    }
+
+    if (milageViewModal && !milageViewModal.dataset.bound) {
+      milageViewModal.dataset.bound = '1';
+      milageViewModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeMilageViewModal();
+      });
+    }
+
+    {
+      const vehicleEl = document.getElementById('milageVehicleType');
+      const kmEl = document.getElementById('milageKilometers');
+      if (vehicleEl && !vehicleEl.dataset.bound) {
+        vehicleEl.dataset.bound = '1';
+        vehicleEl.addEventListener('change', updateMilageTotalCostField);
+      }
+      if (kmEl && !kmEl.dataset.bound) {
+        kmEl.dataset.bound = '1';
+        kmEl.addEventListener('input', updateMilageTotalCostField);
+      }
+    }
+
+    if (milageForm && !milageForm.dataset.bound) {
+      milageForm.dataset.bound = '1';
+      milageForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (itemizeReadOnly) return;
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+
+        clearMilageErrors();
+
+        const editId = String(document.getElementById('milageEditingId')?.value || '').trim();
+        const existingItem = editId ? items.find((it) => it.id === editId) : null;
+        const existingMilage = existingItem && existingItem.milage && typeof existingItem.milage === 'object' ? existingItem.milage : null;
+        const existingAttachmentId = String(document.getElementById('milageAttachmentId')?.value || '').trim();
+        const existingAttachmentName = existingMilage && existingMilage.attachmentName ? String(existingMilage.attachmentName) : '';
+
+        const date = String(document.getElementById('milageDate')?.value || '').trim();
+        const vehicleType = String(document.getElementById('milageVehicleType')?.value || '').trim();
+        const start = String(document.getElementById('milageStart')?.value || '').trim();
+        const destination = String(document.getElementById('milageDestination')?.value || '').trim();
+        const kmRaw = String(document.getElementById('milageKilometers')?.value || '').trim();
+        const km = Number(kmRaw);
+        const total = computeMilageTotal(vehicleType, km);
+
+        const errors = {};
+        if (!date) errors.milageDate = 'Date is required.';
+        if (!vehicleType) errors.milageVehicleType = 'Vehicle type is required.';
+        if (!start) errors.milageStart = 'Start is required.';
+        if (!destination) errors.milageDestination = 'Destination is required.';
+        if (!kmRaw) errors.milageKilometers = 'Kilometers is required.';
+        if (!Number.isFinite(km) || km <= 0) errors.milageKilometers = 'Enter a valid number greater than 0.';
+        if (!Number.isFinite(total) || total < 0) errors.milageTotalCost = 'Total cost could not be calculated.';
+
+        const fileEl = document.getElementById('milageAttachment');
+        const file = fileEl && fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
+        const mustHaveAttachment = !existingAttachmentId;
+        if (mustHaveAttachment && !file) errors.milageAttachment = 'Attachment is required.';
+        if (!attachmentTargetKey) errors.milageAttachment = 'Attachments are not available for this payment order.';
+
+        if (Object.keys(errors).length > 0) {
+          showMilageErrors(errors);
+          return;
+        }
+
+        let attachmentId = existingAttachmentId;
+        let attachmentName = existingAttachmentName;
+        if (file && attachmentTargetKey) {
+          try {
+            const uploaded = await addAttachment(attachmentTargetKey, file, attachmentUploadContext);
+            attachmentId = uploaded && uploaded.id ? String(uploaded.id) : '';
+            attachmentName = uploaded && uploaded.name ? String(uploaded.name) : (file && file.name ? String(file.name) : '');
+            if (existingAttachmentId) {
+              try {
+                await deleteAttachmentById(existingAttachmentId);
+              } catch {
+                // ignore
+              }
+            }
+            await refreshAttachments(attachmentTargetKey);
+          } catch {
+            showMilageErrors({ milageAttachment: 'Failed to upload attachment.' });
+            return;
+          }
+        }
+
+        const currency = mode || (existingItem && existingItem.euro !== null ? 'EUR' : (existingItem && existingItem.usd !== null ? 'USD' : 'EUR'));
+        const title = `Milage ${formatDate(date)}`;
+
+        const nextItem = {
+          id: editId || (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          title,
+          euro: currency === 'EUR' ? total : null,
+          usd: currency === 'USD' ? total : null,
+          milage: {
+            date,
+            vehicleType,
+            start,
+            destination,
+            kilometers: km,
+            rate: getMilageRate(vehicleType),
+            attachmentId,
+            attachmentName,
+          },
+        };
+
+        if (editId) {
+          items = items.map((it) => (it.id === editId ? nextItem : it));
+        } else {
+          items = [...items, nextItem];
+        }
+
+        if (!mode) mode = currency;
+
+        closeMilageModal();
+        renderItems(items, { readOnly: itemizeReadOnly });
+      });
+    }
+
+    if (milageViewModal && !milageViewModal.dataset.actionsBound) {
+      milageViewModal.dataset.actionsBound = '1';
+      const downloadBtn = document.getElementById('milageDownloadBtn');
+      const editBtn = document.getElementById('milageEditBtn');
+      const delBtn = document.getElementById('milageDeleteBtn');
+
+      milageViewModal.addEventListener('click', async (e) => {
+        const link = e.target && e.target.closest ? e.target.closest('a[data-milage-attachment-link="1"]') : null;
+        if (!link) return;
+        e.preventDefault();
+        const attId = String(link.getAttribute('data-attachment-id') || '').trim();
+        if (!attId) return;
+        try {
+          const att = await getAttachmentById(attId);
+          if (!att) return;
+          openAttachmentInNewTab(att);
+        } catch {
+          const viewErr = document.getElementById('milageViewError');
+          if (viewErr) viewErr.textContent = 'Could not open attachment.';
+        }
+      });
+
+      if (downloadBtn) {
+        downloadBtn.addEventListener('click', async () => {
+          const id = String(milageViewModal.getAttribute('data-item-id') || '').trim();
+          const item = items.find((it) => it.id === id);
+          const m = item && item.milage && typeof item.milage === 'object' ? item.milage : null;
+          if (!m || !m.attachmentId) return;
+          try {
+            const att = await getAttachmentById(m.attachmentId);
+            if (!att) return;
+            downloadAttachment(att);
+          } catch {
+            const viewErr = document.getElementById('milageViewError');
+            if (viewErr) viewErr.textContent = 'Could not download attachment.';
+          }
+        });
+      }
+
+      if (editBtn) {
+        editBtn.addEventListener('click', () => {
+          if (itemizeReadOnly) return;
+          if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+          const id = String(milageViewModal.getAttribute('data-item-id') || '').trim();
+          const item = items.find((it) => it.id === id);
+          if (!item) return;
+          closeMilageViewModal();
+          openMilageModalForEdit(item);
+        });
+      }
+
+      if (delBtn) {
+        delBtn.addEventListener('click', async () => {
+          if (itemizeReadOnly) return;
+          if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+          const id = String(milageViewModal.getAttribute('data-item-id') || '').trim();
+          closeMilageViewModal();
+          await deleteMilageItem(id);
+        });
+      }
     }
 
     // Attachments init (itemize page)
     if (attachmentsDropzone && attachmentsInput && attachmentTargetKey) {
       refreshAttachments(attachmentTargetKey);
-
-      const attachmentUploadContext = (() => {
-        const year = String(getActiveBudgetYear() || '').trim();
-        if (target.isDraft) {
-          const draft = loadDraft();
-          return {
-            year,
-            paymentOrderNo: String(draft && draft.paymentOrderNo ? draft.paymentOrderNo : '').trim(),
-            orderId: '',
-          };
-        }
-        if (target.orderId) {
-          const y = getActiveBudgetYear();
-          const order = getOrderById(target.orderId, y);
-          return {
-            year,
-            paymentOrderNo: String(order && order.paymentOrderNo ? order.paymentOrderNo : '').trim(),
-            orderId: String(target.orderId || '').trim(),
-          };
-        }
-        return { year, paymentOrderNo: '', orderId: '' };
-      })();
 
       if (!itemizeReadOnly) {
         const openFilePicker = () => attachmentsInput.click();
@@ -13182,7 +13734,7 @@ void (async () => {
           const action = btn.getAttribute('data-attachment-action');
 
           if (action === 'delete') {
-            if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+            if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
             const ok = window.confirm('Remove this attachment?');
             if (!ok) return;
             await deleteAttachmentById(id);
@@ -13208,7 +13760,7 @@ void (async () => {
 
     itemForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+      if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
       clearItemErrors();
 
       const result = validateItemInput(mode);
@@ -13233,16 +13785,11 @@ void (async () => {
         mode = result.value.euro !== null ? 'EUR' : 'USD';
       }
 
-      renderItems(items);
-      resetItemEditor();
+      renderItems(items, { readOnly: itemizeReadOnly });
+      closeItemModal();
     });
 
-    if (cancelEditItemBtn) {
-      cancelEditItemBtn.addEventListener('click', resetItemEditor);
-    }
-
-    itemsTbody.addEventListener('click', (e) => {
-      if (itemizeReadOnly) return;
+    itemsTbody.addEventListener('click', async (e) => {
       const btn = e.target.closest('button[data-item-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-item-id]');
@@ -13253,21 +13800,38 @@ void (async () => {
       const current = items.find((it) => it.id === itemId);
       if (!current) return;
 
+      if (action === 'viewMilage') {
+        openMilageView(current);
+        return;
+      }
+
+      if (itemizeReadOnly) return;
+
       if (action === 'edit') {
-        populateItemEditor(current);
+        if (current && current.milage && typeof current.milage === 'object') {
+          openMilageModalForEdit(current);
+          return;
+        }
+        openItemModalForEdit(current);
       } else if (action === 'delete') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
-        const ok = window.confirm('Delete this item?');
-        if (!ok) return;
-        items = items.filter((it) => it.id !== itemId);
-        renderItems(items, { readOnly: itemizeReadOnly });
-        resetItemEditor();
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+        if (current && current.milage && typeof current.milage === 'object') {
+          await deleteMilageItem(itemId);
+          return;
+        }
+        {
+          const ok = window.confirm('Delete this item?');
+          if (!ok) return;
+          items = items.filter((it) => it.id !== itemId);
+          renderItems(items, { readOnly: itemizeReadOnly });
+          resetItemEditor();
+        }
       }
     });
 
     if (saveItemsBtn) {
       saveItemsBtn.addEventListener('click', () => {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
         if (items.length < 1) {
           window.alert('Add at least one item before saving.');
           return;

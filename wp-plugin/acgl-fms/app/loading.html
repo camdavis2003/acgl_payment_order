@@ -172,13 +172,62 @@
 
     <script>
       (function () {
-        const delayMs = 3000;
+        const delayMs = 1200;
         const params = new URLSearchParams(window.location.search);
         const qs = params.toString();
-        const target = `index.html${qs ? `?${qs}` : ""}`;
-        window.setTimeout(() => {
-          window.location.replace(target);
-        }, delayMs);
+        const targetRel = `index.html${qs ? `?${qs}` : ""}`;
+        const target = new URL(targetRel, window.location.href).toString();
+
+        async function preflightOnce() {
+          // Some hosts block/handle HEAD oddly for static plugin files, so try HEAD then GET.
+          try {
+            const head = await fetch(target, {
+              method: 'HEAD',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              redirect: 'follow',
+            });
+            if (head && head.ok) return true;
+          } catch (e) {
+            // ignore
+          }
+
+          try {
+            const res = await fetch(target, {
+              method: 'GET',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              redirect: 'follow',
+            });
+            return Boolean(res && res.ok);
+          } catch (e) {
+            return false;
+          }
+        }
+
+        async function navigateWithRetries() {
+          const maxAttempts = 6;
+          let attempt = 0;
+
+          while (attempt < maxAttempts) {
+            // Small stagger; if the server/CDN is mid-deploy, this avoids surfacing a hard error page.
+            const backoff = 350 * Math.pow(1.5, attempt);
+            await new Promise((r) => window.setTimeout(r, attempt === 0 ? delayMs : backoff));
+
+            const ok = await preflightOnce();
+            if (ok) {
+              window.location.replace(targetRel);
+              return;
+            }
+
+            attempt += 1;
+          }
+
+          // If preflight keeps failing, stay on the loading screen (no browser error page)
+          // and allow the user to retry by refreshing.
+        }
+
+        navigateWithRetries();
       })();
     </script>
   </body>

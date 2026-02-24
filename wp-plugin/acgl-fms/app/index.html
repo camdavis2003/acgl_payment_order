@@ -199,15 +199,91 @@
                   ></div>
                 </div>
 
+                <div class="field field--span2" id="bankDetailsToggleField">
+                  <label for="bankDetailsToggle">Bank Details</label>
+                  <label class="switch" for="bankDetailsToggle">
+                    <input
+                      id="bankDetailsToggle"
+                      name="bankDetailsToggle"
+                      type="checkbox"
+                      class="switch__input"
+                      role="switch"
+                      aria-label="US Bank Details"
+                    />
+                    <span class="switch__track" aria-hidden="true"></span>
+                    <span class="switch__text" id="bankDetailsModeText"
+                      >US Bank Details</span
+                    >
+                  </label>
+                </div>
+
+                <div
+                  class="field usAccountTypeField"
+                  id="usAccountTypeField"
+                  hidden
+                >
+                  <div
+                    class="bankAccountTypeRow"
+                    role="group"
+                    aria-labelledby="usAccountTypeLabel"
+                  >
+                    <div
+                      class="bankAccountTypeRow__label"
+                      id="usAccountTypeLabel"
+                    >
+                      Account Type
+                      <span
+                        id="usAccountTypeReqStar"
+                        class="req"
+                        aria-hidden="true"
+                        hidden
+                        >*</span
+                      >
+                    </div>
+                    <label
+                      class="bankAccountTypeRow__item"
+                      for="usAccountTypeChecking"
+                    >
+                      <input
+                        id="usAccountTypeChecking"
+                        name="usAccountTypeChecking"
+                        type="checkbox"
+                        value="Checking"
+                      />
+                      Checking
+                    </label>
+                    <label
+                      class="bankAccountTypeRow__item"
+                      for="usAccountTypeSavings"
+                    >
+                      <input
+                        id="usAccountTypeSavings"
+                        name="usAccountTypeSavings"
+                        type="checkbox"
+                        value="Savings"
+                      />
+                      Savings
+                    </label>
+                  </div>
+                  <div
+                    class="error"
+                    id="error-usAccountType"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
+
                 <div class="field">
                   <label for="iban"
-                    >IBAN<span class="req" aria-hidden="true">*</span></label
+                    ><span id="bankFieldLabelA">IBAN</span
+                    ><span class="req" aria-hidden="true">*</span></label
                   >
                   <input
                     id="iban"
                     name="iban"
                     type="text"
                     autocomplete="off"
+                    placeholder="DE00 0000 0000 0000 00"
                     required
                   />
                   <div
@@ -220,13 +296,15 @@
 
                 <div class="field">
                   <label for="bic"
-                    >BIC<span class="req" aria-hidden="true">*</span></label
+                    ><span id="bankFieldLabelB">BIC</span
+                    ><span class="req" aria-hidden="true">*</span></label
                   >
                   <input
                     id="bic"
                     name="bic"
                     type="text"
                     autocomplete="off"
+                    placeholder="DEUTDEFF"
                     required
                   />
                   <div
@@ -238,7 +316,30 @@
                 </div>
 
                 <div class="field field--span2">
-                  <label for="specialInstructions">Special Instructions</label>
+                  <div
+                    id="usBankRequirementsToken"
+                    class="token"
+                    role="status"
+                    aria-live="polite"
+                    hidden
+                  >
+                    If the name on the
+                    <strong>U.S. bank account</strong> differs from the name
+                    listed above, please provide the full name as it appears on
+                    the account, along with the
+                    <strong>name of the bank</strong> in Special Instructions
+                    below.
+                  </div>
+                  <label for="specialInstructions"
+                    >Special Instructions
+                    <span
+                      id="specialInstructionsReqStar"
+                      class="req"
+                      aria-hidden="true"
+                      hidden
+                      >*</span
+                    ></label
+                  >
                   <textarea
                     id="specialInstructions"
                     name="specialInstructions"
@@ -344,6 +445,8 @@
       </div>
     </div>
 
+    <script src="iban.js" defer></script>
+    <script src="bic.js" defer></script>
     <script src="app.js" defer></script>
   </body>
 </html>

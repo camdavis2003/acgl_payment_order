@@ -590,6 +590,11 @@ body {
   margin-top: 8px;
 }
 
+/* Reuse the same switch control inside form fields without the header spacing. */
+.field .switch {
+  margin-top: 0;
+}
+
 .switch__input {
   position: absolute;
   width: 1px;
@@ -602,6 +607,8 @@ body {
 }
 
 .switch__track {
+  display: inline-block;
+  flex: 0 0 auto;
   width: 44px;
   height: 24px;
   border-radius: 999px;
@@ -733,7 +740,7 @@ body {
   }
 }
 
-.field label {
+.field label:not(.switch) {
   display: block;
   font-weight: 600;
   margin: 0 0 6px;
@@ -794,6 +801,52 @@ input:focus, textarea:focus, select:focus, button:focus {
   color: var(--danger);
 }
 
+.bankAccountTypeRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.bankAccountTypeRow__label {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.bankAccountTypeRow__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.bankAccountTypeRow__item input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  margin: 0;
+}
+
+/* Don't reserve extra vertical space for this inline control. */
+.usAccountTypeField #error-usAccountType {
+  min-height: 0;
+}
+
+.usAccountTypeField #error-usAccountType:empty {
+  display: none;
+}
+
+@media (min-width: 760px) {
+  /* Align Account Type with the toggle control (below the Bank Details label). */
+  .usAccountTypeField {
+    padding-top: calc(1em + 6px);
+  }
+}
+
 .token {
   position: fixed;
   top: auto;
@@ -813,6 +866,23 @@ input:focus, textarea:focus, select:focus, button:focus {
   display: flex;
   align-items: flex-start;
   gap: 12px;
+}
+
+/* Inline tokens (used for contextual instructions inside a field). */
+.field .token {
+  position: static;
+  inset: auto;
+  right: auto;
+  bottom: auto;
+  max-width: none;
+  z-index: auto;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--danger);
+  box-shadow: none;
+  display: block;
+  font-weight: 400;
+  margin: 0 0 8px;
 }
 
 .token[hidden] {

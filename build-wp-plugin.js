@@ -24,6 +24,8 @@ const FILES = [
   'settings.html',
   'itemize.html',
   'loading.html',
+  'iban.js',
+  'bic.js',
   'app.js',
   'styles.css',
 ];

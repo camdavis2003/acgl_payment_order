@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=a3c12b7-20260224203153" />
   </head>
   <body>
     <header class="site-header">
@@ -48,104 +48,34 @@
         <nav class="menu" aria-label="Pages">
           <a class="menu__link" href="index.html">Back to Form</a>
           <a class="menu__link" href="menu.html">Back to Submitted List</a>
+          <button
+            type="button"
+            id="saveItemsBtn"
+            class="menu__link menu__button menu__link--primary"
+          >
+            Save Items
+          </button>
         </nav>
       </div>
     </header>
 
     <main class="container">
-      <section class="card" aria-labelledby="items-title">
+      <section class="card card--itemize" aria-labelledby="items-title">
         <div class="list-header">
           <h2 id="items-title">Items</h2>
           <div class="list-actions">
-            <button type="button" id="saveItemsBtn" class="btn btn--primary">
-              Save Items
-            </button>
-          </div>
-        </div>
-
-        <form id="itemForm" class="inline-form" novalidate>
-          <input
-            type="hidden"
-            id="editingItemId"
-            name="editingItemId"
-            value=""
-          />
-
-          <div class="grid grid--items">
-            <div class="field field--span2">
-              <label for="itemTitle"
-                >Title<span class="req" aria-hidden="true">*</span></label
-              >
-              <input
-                id="itemTitle"
-                name="itemTitle"
-                type="text"
-                autocomplete="off"
-                required
-              />
-              <div
-                class="error"
-                id="error-itemTitle"
-                role="alert"
-                aria-live="polite"
-              ></div>
-            </div>
-
-            <div class="field">
-              <label for="itemEuro">Euro (€)</label>
-              <input
-                id="itemEuro"
-                name="itemEuro"
-                type="number"
-                inputmode="decimal"
-                step="0.01"
-                min="0"
-              />
-              <div
-                class="error"
-                id="error-itemEuro"
-                role="alert"
-                aria-live="polite"
-              ></div>
-            </div>
-
-            <div class="field">
-              <label for="itemUsd">USD ($)</label>
-              <input
-                id="itemUsd"
-                name="itemUsd"
-                type="number"
-                inputmode="decimal"
-                step="0.01"
-                min="0"
-              />
-              <div
-                class="error"
-                id="error-itemUsd"
-                role="alert"
-                aria-live="polite"
-              ></div>
-            </div>
-          </div>
-
-          <div class="actions">
             <button
-              type="submit"
+              type="button"
               class="btn btn--primary"
-              id="addOrUpdateItemBtn"
+              id="openItemModalBtn"
             >
               Add Item
             </button>
-            <button
-              type="button"
-              class="btn btn--ghost"
-              id="cancelEditItemBtn"
-              hidden
-            >
-              Cancel Edit
+            <button type="button" class="btn btn--ghost" id="addMilageBtn">
+              Add Milage
             </button>
           </div>
-        </form>
+        </div>
 
         <div
           class="table-wrap"
@@ -172,7 +102,7 @@
             </tbody>
             <tfoot>
               <tr>
-                <th scope="row" colspan="2" class="num">Totals</th>
+                <th scope="row" colspan="2">Totals</th>
                 <td class="num" id="totalEuro">€ 0.00</td>
                 <td class="num" id="totalUsd">$ 0.00</td>
                 <td></td>
@@ -248,6 +178,365 @@
       </section>
     </main>
 
-    <script src="app.js" defer></script>
+    <div id="itemModal" class="modal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="itemModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <div id="itemModalTitle" class="modal__poHeader">Add Item</div>
+          </div>
+          <button
+            type="button"
+            class="modal__close"
+            data-modal-close
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="modal__body">
+          <form id="itemForm" class="inline-form" novalidate>
+            <input
+              type="hidden"
+              id="editingItemId"
+              name="editingItemId"
+              value=""
+            />
+
+            <div class="grid grid--items">
+              <div class="field field--span2">
+                <label for="itemTitle"
+                  >Title<span class="req" aria-hidden="true">*</span></label
+                >
+                <input
+                  id="itemTitle"
+                  name="itemTitle"
+                  type="text"
+                  autocomplete="off"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-itemTitle"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field">
+                <label for="itemEuro">Euro (€)</label>
+                <input
+                  id="itemEuro"
+                  name="itemEuro"
+                  type="number"
+                  inputmode="decimal"
+                  step="0.01"
+                  min="0"
+                />
+                <div
+                  class="error"
+                  id="error-itemEuro"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field">
+                <label for="itemUsd">USD ($)</label>
+                <input
+                  id="itemUsd"
+                  name="itemUsd"
+                  type="number"
+                  inputmode="decimal"
+                  step="0.01"
+                  min="0"
+                />
+                <div
+                  class="error"
+                  id="error-itemUsd"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="modal__footer">
+          <button
+            type="submit"
+            form="itemForm"
+            class="btn btn--primary"
+            id="addOrUpdateItemBtn"
+          >
+            Add Item
+          </button>
+          <button type="button" class="btn" data-modal-close>Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="milageModal" class="modal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="milageModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <div id="milageModalTitle" class="modal__poHeader">Add Milage</div>
+          </div>
+          <button
+            type="button"
+            class="modal__close"
+            data-modal-close
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <form id="milageForm" novalidate>
+            <input
+              type="hidden"
+              id="milageEditingId"
+              name="milageEditingId"
+              value=""
+            />
+            <input
+              type="hidden"
+              id="milageAttachmentId"
+              name="milageAttachmentId"
+              value=""
+            />
+
+            <div class="grid">
+              <div class="field">
+                <label for="milageDate"
+                  >Date<span class="req" aria-hidden="true">*</span></label
+                >
+                <input id="milageDate" name="milageDate" type="date" required />
+                <div
+                  class="error"
+                  id="error-milageDate"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field">
+                <label for="milageVehicleType"
+                  >Vehicle Type<span class="req" aria-hidden="true"
+                    >*</span
+                  ></label
+                >
+                <select
+                  id="milageVehicleType"
+                  name="milageVehicleType"
+                  required
+                >
+                  <option value="" selected disabled>Select…</option>
+                  <option value="car">Car</option>
+                  <option value="motorcycle">Motorcycle</option>
+                </select>
+                <div
+                  class="error"
+                  id="error-milageVehicleType"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field field--span2">
+                <label for="milageStart"
+                  >Start (Departure Location)<span
+                    class="req"
+                    aria-hidden="true"
+                    >*</span
+                  ></label
+                >
+                <input
+                  id="milageStart"
+                  name="milageStart"
+                  type="text"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-milageStart"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field field--span2">
+                <label for="milageDestination"
+                  >Destination<span class="req" aria-hidden="true"
+                    >*</span
+                  ></label
+                >
+                <input
+                  id="milageDestination"
+                  name="milageDestination"
+                  type="text"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-milageDestination"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field">
+                <label for="milageKilometers"
+                  >Kilometers<span class="req" aria-hidden="true"
+                    >*</span
+                  ></label
+                >
+                <input
+                  id="milageKilometers"
+                  name="milageKilometers"
+                  type="number"
+                  inputmode="decimal"
+                  step="0.1"
+                  min="0"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-milageKilometers"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field">
+                <label for="milageTotalCost"
+                  >Total Cost<span class="req" aria-hidden="true"
+                    >*</span
+                  ></label
+                >
+                <input
+                  id="milageTotalCost"
+                  name="milageTotalCost"
+                  type="number"
+                  inputmode="decimal"
+                  step="0.01"
+                  min="0"
+                  readonly
+                  aria-readonly="true"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-milageTotalCost"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field field--span2">
+                <label for="milageAttachment"
+                  >ADAC Route Planner Attachment<span
+                    class="req"
+                    aria-hidden="true"
+                    >*</span
+                  ></label
+                >
+                <div class="subhead">
+                  <strong>Note:</strong> Kilometers should be calculated using
+                  the
+                  <a
+                    href="https://maps.adac.de"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >ADAC Route Planner</a
+                  >
+                  and uploaded as an attachment.
+                </div>
+                <input
+                  id="milageAttachment"
+                  name="milageAttachment"
+                  type="file"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-milageAttachment"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+                <div class="subhead" id="milageAttachmentHint" hidden>
+                  Current attachment is saved. Upload a file to replace it.
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal__footer">
+          <button type="submit" form="milageForm" class="btn btn--primary">
+            Save
+          </button>
+          <button type="button" class="btn" data-modal-close>Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="milageViewModal" class="modal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="milageViewModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <div id="milageViewModalTitle" class="modal__poHeader">Milage</div>
+          </div>
+          <button
+            type="button"
+            class="modal__close"
+            data-modal-close
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <div id="milageViewBody"></div>
+          <div
+            id="milageViewError"
+            class="error"
+            role="alert"
+            aria-live="polite"
+          ></div>
+        </div>
+        <div class="modal__footer">
+          <button type="button" class="btn btn--ghost" id="milageDownloadBtn">
+            Download
+          </button>
+          <button type="button" class="btn btn--editBlue" id="milageEditBtn">
+            Edit
+          </button>
+          <button type="button" class="btn btn--danger" id="milageDeleteBtn">
+            Delete
+          </button>
+          <button type="button" class="btn" data-modal-close>Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js?v=a3c12b7-20260224203153" defer></script>
   </body>
 </html>

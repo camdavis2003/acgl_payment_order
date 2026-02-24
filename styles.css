@@ -26,8 +26,8 @@ html[data-theme="dark"] {
   --border: #263244;
   --focus: #60a5fa;
   --danger: #f87171;
-  --primary-bg: #e5e7eb;
-  --primary-text: #111827;
+  --primary-bg: #111827;
+  --primary-text: #ffffff;
   --table-head: #0b1324;
   --menu-hover: #0b1324;
   --danger-border: #f87171;
@@ -696,10 +696,22 @@ body {
   color: var(--text);
   text-decoration: none;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .menu__link:hover {
   background: var(--menu-hover);
+}
+
+.menu__link--primary {
+  background: var(--primary-bg);
+  border-color: var(--primary-bg);
+  color: var(--primary-text);
+}
+
+.menu__link--primary:hover {
+  background: var(--primary-bg);
+  filter: brightness(0.95);
 }
 
 .menu__button {
@@ -1695,6 +1707,11 @@ input:focus, textarea:focus, select:focus, button:focus {
   flex-wrap: wrap;
 }
 
+/* Itemize: a bit more space below Add Item/Add Milage buttons */
+.card--itemize .list-header {
+  margin-bottom: 14px;
+}
+
 .list-search {
   flex: 1;
   min-width: 220px;
@@ -1873,6 +1890,13 @@ input:focus, textarea:focus, select:focus, button:focus {
   background: var(--table-head);
   font-weight: 600;
   border-top: 2px solid var(--border);
+}
+
+.table tfoot th {
+  background: var(--table-head);
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+  text-align: left;
 }
 
 .ordersTotalsRow__label {

@@ -49,11 +49,35 @@ function acgl_fms_is_plugin_rest_request() {
     return (strpos($path, '/wp-json/acgl-fms/v1/') !== false) || (strpos($path, '/wp-json/acgl-fms/') !== false);
 }
 
+function acgl_fms_is_login_rest_request() {
+    // Match both rest_route query format and pretty permalinks.
+    $restRoute = isset($_GET['rest_route']) ? (string) $_GET['rest_route'] : '';
+    if ($restRoute !== '') {
+        $r = trim($restRoute);
+        if ($r === 'acgl-fms/v1/auth/login' || $r === '/acgl-fms/v1/auth/login') return true;
+    }
+
+    $uri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+    $path = $uri ? (string) parse_url($uri, PHP_URL_PATH) : '';
+    if ($path === '') return false;
+    return (strpos($path, '/wp-json/acgl-fms/v1/auth/login') !== false);
+}
+
 add_filter('rest_authentication_errors', function ($result) {
     if (!acgl_fms_is_plugin_rest_request()) return $result;
-    // Let our routes decide via permission_callback + bearer-token checks.
-    return null;
-}, 0);
+
+    // Only bypass WP/security REST auth when our plugin is doing *its own* auth:
+    // - Public login endpoint (issues bearer token)
+    // - Any request carrying a bearer token
+    // This keeps WordPress cookie+nonce CSRF protection intact for cookie-auth requests.
+    $isLogin = acgl_fms_is_login_rest_request();
+    $hasToken = function_exists('acgl_fms_get_bearer_token') && acgl_fms_get_bearer_token();
+    if ($isLogin || $hasToken) {
+        return null;
+    }
+
+    return $result;
+}, PHP_INT_MAX);
 
 function acgl_fms_register_fullpage_route() {
     $slug = trim((string) ACGL_FMS_FULLPAGE_SLUG);

@@ -281,8 +281,15 @@ void (async () => {
     if (WP_REST_NONCE) mergedHeaders['X-WP-Nonce'] = WP_REST_NONCE;
     if (token) mergedHeaders.Authorization = `Bearer ${token}`;
 
+    // This app uses bearer tokens for authorization. Sending WordPress cookies can
+    // trigger REST cookie/nonce enforcement (403) even though our routes are public.
+    // Default to omitting cookies unless an individual call explicitly opts in.
+    const credentials = options && typeof options.credentials === 'string'
+      ? options.credentials
+      : 'omit';
+
     const res = await fetch(url, {
-      credentials: 'include',
+      credentials,
       ...options,
       headers: {
         ...mergedHeaders,
@@ -1494,7 +1501,9 @@ void (async () => {
 
       const res = await fetch(url, {
         method: 'POST',
-        credentials: 'include',
+        // Do not send WordPress cookies; cookie auth can require a REST nonce and
+        // cause 403 before our plugin handler runs.
+        credentials: 'omit',
         headers,
         body: JSON.stringify({ username, password }),
       });

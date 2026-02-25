@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=277a786-20260224212726" />
+    <link rel="stylesheet" href="styles.css?v=a8559a2-20260224230307" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -55,196 +55,37 @@
           >
             <div class="list-header">
               <h2 id="roles-title">User Roles</h2>
-            </div>
-
-            <form id="createUserForm" novalidate>
-              <div class="grid">
-                <div class="field">
-                  <label for="newUsername">Username</label>
+              <div class="list-actions">
+                <div class="list-search">
+                  <label class="sr-only" for="usersSearch">Search users</label>
                   <input
-                    id="newUsername"
-                    name="newUsername"
+                    id="usersSearch"
                     type="text"
-                    autocomplete="username"
-                    required
+                    inputmode="search"
+                    placeholder="Search users…"
+                    autocomplete="off"
                   />
-                  <div
-                    class="error"
-                    id="error-newUsername"
-                    role="alert"
-                    aria-live="polite"
-                  ></div>
-                </div>
-                <div class="field">
-                  <label for="newPassword">Password</label>
-                  <input
-                    id="newPassword"
-                    name="newPassword"
-                    type="password"
-                    autocomplete="new-password"
-                    required
-                  />
-                  <div
-                    class="error"
-                    id="error-newPassword"
-                    role="alert"
-                    aria-live="polite"
-                  ></div>
+                  <button
+                    type="button"
+                    id="usersClearSearchBtn"
+                    class="searchClearBtn"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    hidden
+                  >
+                    ×
+                  </button>
                 </div>
 
-                <div class="field field--span2">
-                  <label for="newEmail">Email</label>
-                  <input
-                    id="newEmail"
-                    name="newEmail"
-                    type="email"
-                    inputmode="email"
-                    autocomplete="email"
-                  />
-                  <div
-                    class="error"
-                    id="error-newEmail"
-                    role="alert"
-                    aria-live="polite"
-                  ></div>
-                </div>
+                <button
+                  type="button"
+                  id="openCreateUserBtn"
+                  class="btn btn--primary"
+                >
+                  Add User
+                </button>
               </div>
-
-              <div class="rolesGrid" aria-label="Module access">
-                <div
-                  class="rolesGrid__row"
-                  role="group"
-                  aria-label="Select all module access"
-                >
-                  <div class="rolesGrid__label">Select all</div>
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permAllWrite" /> Full
-                    access</label
-                  >
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permAllPartial" /> Partial
-                    access</label
-                  >
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permAllRead" /> Read only</label
-                  >
-                </div>
-
-                <div
-                  class="rolesGrid__row"
-                  role="group"
-                  aria-label="Budget access"
-                >
-                  <div class="rolesGrid__label">Budget</div>
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permBudgetWrite" /> Full
-                    access</label
-                  >
-                  <label
-                    class="rolesGrid__check"
-                    data-tooltip="Allows: view/edit/save budget table, add/remove lines, export/template. Restricted (no access): Activate Budget, New Budget Year, Deactivate Budget, Import CSV."
-                    ><input type="checkbox" id="permBudgetPartial" /> Partial
-                    access</label
-                  >
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permBudgetRead" /> Read
-                    only</label
-                  >
-                </div>
-
-                <div
-                  class="rolesGrid__row"
-                  role="group"
-                  aria-label="Income access"
-                >
-                  <div class="rolesGrid__label">Income</div>
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permIncomeWrite" /> Full
-                    access</label
-                  >
-                  <label
-                    class="rolesGrid__check"
-                    data-tooltip="Allows: view/edit/save existing income entries, export/template. Restricted (no access): New Income, Import CSV."
-                    ><input type="checkbox" id="permIncomePartial" /> Partial
-                    access</label
-                  >
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permIncomeRead" /> Read
-                    only</label
-                  >
-                </div>
-
-                <div
-                  class="rolesGrid__row"
-                  role="group"
-                  aria-label="Payment Orders access"
-                >
-                  <div class="rolesGrid__label">Payment Orders</div>
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permOrdersWrite" /> Full
-                    access</label
-                  >
-                  <label
-                    class="rolesGrid__check"
-                    data-tooltip="Allows: view Payment Orders and open the View form. Partial access can update only the 'With' and 'Status' fields from the View form. Restricted (no access): Create new requests, Edit requests, Delete requests, Items editing, and all Reconciliation actions."
-                    ><input type="checkbox" id="permOrdersPartial" /> Partial
-                    access</label
-                  >
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permOrdersRead" /> Read
-                    only</label
-                  >
-                </div>
-
-                <div
-                  class="rolesGrid__row"
-                  role="group"
-                  aria-label="Ledger access"
-                >
-                  <div class="rolesGrid__label">Ledger</div>
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permLedgerWrite" /> Full
-                    access</label
-                  >
-                  <label
-                    class="rolesGrid__check"
-                    data-tooltip="Allows: view Ledger and export CSV. Restricted (no access): checking/unchecking Verified."
-                    ><input type="checkbox" id="permLedgerPartial" /> Partial
-                    access</label
-                  >
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permLedgerRead" /> Read
-                    only</label
-                  >
-                </div>
-
-                <div
-                  class="rolesGrid__row"
-                  role="group"
-                  aria-label="Settings access"
-                >
-                  <div class="rolesGrid__label">Settings</div>
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permSettingsWrite" /> Full
-                    access</label
-                  >
-                  <label
-                    class="rolesGrid__check"
-                    data-tooltip="Allows: view Settings and edit/save Payment Order Numbering settings, view Audit Log. Restricted (read-only): User Roles (no add/edit/delete users or permissions)."
-                    ><input type="checkbox" id="permSettingsPartial" /> Partial
-                    access</label
-                  >
-                  <label class="rolesGrid__check"
-                    ><input type="checkbox" id="permSettingsRead" /> Read
-                    only</label
-                  >
-                </div>
-              </div>
-
-              <div class="actions actions--createUser actions--right">
-                <button type="submit" class="btn btn--primary">Add User</button>
-              </div>
-            </form>
+            </div>
 
             <div
               class="table-wrap"
@@ -258,7 +99,7 @@
                     <th scope="col">Username</th>
                     <th scope="col">Budget</th>
                     <th scope="col">Income</th>
-                    <th scope="col">Orders</th>
+                    <th scope="col">P.O.</th>
                     <th scope="col">Ledger</th>
                     <th scope="col">Settings</th>
                     <th scope="col" class="col-actions">Actions</th>
@@ -271,7 +112,7 @@
             </div>
 
             <div id="usersEmptyState" class="empty" hidden>
-              No users yet. Create the first user above.
+              No users yet. Click Add User to create the first user.
             </div>
           </section>
 
@@ -457,6 +298,224 @@
             </div>
           </section>
         </main>
+      </div>
+    </div>
+
+    <div id="createUserModal" class="modal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="createUserModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <div id="createUserModalTitle" class="modal__poHeader">
+              Add User
+            </div>
+          </div>
+          <button
+            type="button"
+            class="modal__close"
+            data-modal-close
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal__body">
+          <form id="createUserForm" novalidate>
+            <div class="grid">
+              <div class="field">
+                <label for="newUsername">Username</label>
+                <input
+                  id="newUsername"
+                  name="newUsername"
+                  type="text"
+                  autocomplete="username"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-newUsername"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+              <div class="field">
+                <label for="newPassword">Password</label>
+                <input
+                  id="newPassword"
+                  name="newPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  required
+                />
+                <div
+                  class="error"
+                  id="error-newPassword"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+
+              <div class="field field--span2">
+                <label for="newEmail">Email</label>
+                <input
+                  id="newEmail"
+                  name="newEmail"
+                  type="email"
+                  inputmode="email"
+                  autocomplete="email"
+                />
+                <div
+                  class="error"
+                  id="error-newEmail"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
+            </div>
+
+            <div class="rolesGrid" aria-label="Module access">
+              <div
+                class="rolesGrid__row"
+                role="group"
+                aria-label="Select all module access"
+              >
+                <div class="rolesGrid__label">Select all</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permAllWrite" /> Full
+                  access</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permAllPartial" /> Partial
+                  access</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permAllRead" /> Read only</label
+                >
+              </div>
+
+              <div
+                class="rolesGrid__row"
+                role="group"
+                aria-label="Budget access"
+              >
+                <div class="rolesGrid__label">Budget</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetWrite" /> Full
+                  access</label
+                >
+                <label
+                  class="rolesGrid__check"
+                  data-tooltip="Allows: view/edit/save budget table, add/remove lines, export/template. Restricted (no access): Activate Budget, New Budget Year, Deactivate Budget, Import CSV."
+                  ><input type="checkbox" id="permBudgetPartial" /> Partial
+                  access</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetRead" /> Read
+                  only</label
+                >
+              </div>
+
+              <div
+                class="rolesGrid__row"
+                role="group"
+                aria-label="Income access"
+              >
+                <div class="rolesGrid__label">Income</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeWrite" /> Full
+                  access</label
+                >
+                <label
+                  class="rolesGrid__check"
+                  data-tooltip="Allows: view/edit/save existing income entries, export/template. Restricted (no access): New Income, Import CSV."
+                  ><input type="checkbox" id="permIncomePartial" /> Partial
+                  access</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeRead" /> Read
+                  only</label
+                >
+              </div>
+
+              <div
+                class="rolesGrid__row"
+                role="group"
+                aria-label="Payment Orders access"
+              >
+                <div class="rolesGrid__label">Payment Orders</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersWrite" /> Full
+                  access</label
+                >
+                <label
+                  class="rolesGrid__check"
+                  data-tooltip="Allows: view Payment Orders and open the View form. Partial access can update only the 'With' and 'Status' fields from the View form. Restricted (no access): Create new requests, Edit requests, Delete requests, Items editing, and all Reconciliation actions."
+                  ><input type="checkbox" id="permOrdersPartial" /> Partial
+                  access</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersRead" /> Read
+                  only</label
+                >
+              </div>
+
+              <div
+                class="rolesGrid__row"
+                role="group"
+                aria-label="Ledger access"
+              >
+                <div class="rolesGrid__label">Ledger</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWrite" /> Full
+                  access</label
+                >
+                <label
+                  class="rolesGrid__check"
+                  data-tooltip="Allows: view Ledger and export CSV. Restricted (no access): checking/unchecking Verified."
+                  ><input type="checkbox" id="permLedgerPartial" /> Partial
+                  access</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerRead" /> Read
+                  only</label
+                >
+              </div>
+
+              <div
+                class="rolesGrid__row"
+                role="group"
+                aria-label="Admin Settings access"
+              >
+                <div class="rolesGrid__label">Admin Settings</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsWrite" /> Full
+                  access</label
+                >
+                <label
+                  class="rolesGrid__check"
+                  data-tooltip="Allows: view Admin Settings and edit/save Payment Order Numbering settings, view Audit Log. Restricted (read-only): User Roles (no add/edit/delete users or permissions)."
+                  ><input type="checkbox" id="permSettingsPartial" /> Partial
+                  access</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsRead" /> Read
+                  only</label
+                >
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal__footer">
+          <button type="submit" form="createUserForm" class="btn btn--primary">
+            Add User
+          </button>
+          <button type="button" class="btn" data-modal-close>Cancel</button>
+        </div>
       </div>
     </div>
 
@@ -652,6 +711,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=277a786-20260224212726" defer></script>
+    <script src="app.js?v=a8559a2-20260224230307" defer></script>
   </body>
 </html>

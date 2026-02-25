@@ -44,6 +44,13 @@ html[data-theme="dark"] {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+#wiseUsdTable .wiseUsdCol--receivedFrom {
+  max-width: 170px;
+  width: 170px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* Ensure the HTML `hidden` attribute always wins over author display rules. */
 [hidden] {
   display: none !important;

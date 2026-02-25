@@ -20,6 +20,8 @@ const FILES = [
   'budget.html',
   'budget_dashboard.html',
   'income.html',
+  'wise_eur.html',
+  'wise_usd.html',
   'reconciliation.html',
   'grand_secretary_ledger.html',
   'settings.html',
@@ -29,6 +31,8 @@ const FILES = [
   'bic.js',
   'app.js',
   'styles.css',
+  'wise_eur_2026_seed.csv',
+  'wise_usd_2026_seed.csv',
 ];
 
 function ensureDir(p) {

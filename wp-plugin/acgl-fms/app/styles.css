@@ -38,6 +38,12 @@ html[data-theme="dark"] {
 
 * { box-sizing: border-box; }
 
+#wiseEurTable .wiseEurCol--receivedFrom {
+  max-width: 170px;
+  width: 170px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* Ensure the HTML `hidden` attribute always wins over author display rules. */
 [hidden] {
   display: none !important;
@@ -2132,6 +2138,29 @@ input[type='checkbox'].cb {
 #ordersTable td.num,
 #ordersTable th.num {
   text-align: center;
+}
+
+/* wiseEUR: center all columns except Description */
+#wiseEurTable th,
+#wiseEurTable td {
+  text-align: center;
+}
+
+/* Description column (7th) stays left-aligned */
+#wiseEurTable th:nth-child(7),
+#wiseEurTable td:nth-child(7) {
+  text-align: left;
+}
+
+/* Override global numeric alignment for wiseEUR */
+#wiseEurTable td.num,
+#wiseEurTable th.num {
+  text-align: center;
+}
+
+/* wiseEUR footer labels: left-align text only */
+#wiseEurTable .ordersTotalsRow__label {
+  text-align: left;
 }
 
 .table td.actions {

@@ -55,6 +55,40 @@ void (async () => {
   applyAppTabTitle();
   applyAppVersion();
 
+  function repairJsonEscapes(textRaw) {
+    const text = String(textRaw ?? '');
+    // Fix common invalid JSON escapes like "C:\Users\..." (\U) by doubling
+    // backslashes that are not part of a valid JSON escape sequence.
+    return text
+      .replace(/\\u(?![0-9a-fA-F]{4})/g, '\\\\u')
+      .replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+  }
+
+  function safeJsonParse(raw, fallback) {
+    const text = String(raw ?? '').trim();
+    if (!text) return fallback;
+    try {
+      return JSON.parse(text);
+    } catch (err) {
+      const msg = err && typeof err.message === 'string' ? err.message : '';
+      if (msg.includes('Bad Unicode escape') || msg.includes('Bad escaped character')) {
+        try {
+          const repaired = repairJsonEscapes(text);
+          if (repaired !== text) return JSON.parse(repaired);
+        } catch {
+          // ignore
+        }
+      }
+      return fallback;
+    }
+  }
+
+  async function readJsonResponse(res) {
+    const text = await res.text();
+    if (!text) return null;
+    return safeJsonParse(text, null);
+  }
+
   // ---- WordPress shared-storage bridge (optional) ----
   // When the app is embedded via the WP plugin, the iframe src includes:
   //   ?restUrl=https://example.com/wp-json/&restNonce=...&wp=1
@@ -339,7 +373,7 @@ void (async () => {
         return;
       }
       if (res.ok) {
-        const payload = await res.json();
+        const payload = await readJsonResponse(res);
         const items = payload && Array.isArray(payload.items) ? payload.items : [];
         for (const it of items) {
           if (!it || typeof it !== 'object') continue;
@@ -1469,7 +1503,7 @@ void (async () => {
         try {
           const text = await res.text();
           if (text) {
-            const parsed = JSON.parse(text);
+            const parsed = safeJsonParse(text, null);
             if (parsed && typeof parsed.error === 'string') serverError = parsed.error;
             if (parsed && typeof parsed.code === 'string') wpCode = parsed.code;
             if (!serverError && parsed && typeof parsed.message === 'string') serverError = parsed.message;
@@ -1486,7 +1520,7 @@ void (async () => {
         return { ok: false, error: res.status >= 500 ? 'server_error' : 'invalid', status: res.status };
       }
 
-      const data = await res.json();
+      const data = await readJsonResponse(res);
       const token = String((data && data.token) || '').trim();
       if (!token) return { ok: false, error: 'invalid' };
 
@@ -3838,7 +3872,8 @@ void (async () => {
     const res = await wpFetchJson(url, { method: 'GET' });
     if (res.status === 401 || res.status === 403) throw new Error('not_authorized');
     if (!res.ok) throw new Error(`list_failed_${res.status}`);
-    const payload = await res.json();
+    const payload = await readJsonResponse(res);
+    if (!payload || typeof payload !== 'object') throw new Error('invalid_json');
     const items = payload && Array.isArray(payload.items) ? payload.items : [];
     return items;
   }
@@ -3850,7 +3885,7 @@ void (async () => {
     const res = await wpFetchJson(url, { method: 'GET' });
     if (res.status === 401 || res.status === 403) throw new Error('not_authorized');
     if (!res.ok) return null;
-    const payload = await res.json();
+    const payload = await readJsonResponse(res);
     return payload && typeof payload === 'object' ? payload : null;
   }
 
@@ -3866,7 +3901,7 @@ void (async () => {
     const res = await wpFetchJson(url, { method: 'POST', body: fd });
     if (res.status === 401 || res.status === 403) throw new Error('not_authorized');
     if (!res.ok) throw new Error(`upload_failed_${res.status}`);
-    const payload = await res.json();
+    const payload = await readJsonResponse(res);
     if (!payload || payload.ok !== true) throw new Error('upload_failed');
     return payload.item && typeof payload.item === 'object' ? payload.item : null;
   }
@@ -3882,7 +3917,7 @@ void (async () => {
     const res = await wpFetchJson(url, { method: 'POST', body: fd });
     if (res.status === 401 || res.status === 403) throw new Error('not_authorized');
     if (!res.ok) throw new Error(`upload_failed_${res.status}`);
-    const payload = await res.json();
+    const payload = await readJsonResponse(res);
     if (!payload || payload.ok !== true) throw new Error('upload_failed');
     return payload.item && typeof payload.item === 'object' ? payload.item : null;
   }

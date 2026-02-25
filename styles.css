@@ -640,6 +640,21 @@ body {
   left: 23px;
 }
 
+/* Dark mode: ensure toggles are visible against dark surfaces */
+html[data-theme="dark"] .switch__track {
+  background: var(--muted);
+  border-color: var(--muted);
+}
+
+html[data-theme="dark"] .switch__track::after {
+  background: var(--card);
+}
+
+html[data-theme="dark"] .switch__input:checked + .switch__track {
+  background: var(--focus);
+  border-color: var(--focus);
+}
+
 .switch__input:focus-visible + .switch__track {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -1340,8 +1355,8 @@ input:focus, textarea:focus, select:focus, button:focus {
   right: 0;
   bottom: calc(100% + 10px);
   transform: none;
-  width: max-content;
-  max-width: 360px;
+  width: min(360px, calc(100vw - 40px));
+  max-width: min(360px, calc(100vw - 40px));
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--surface);
@@ -1349,6 +1364,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
+  box-sizing: border-box;
   z-index: 30;
 }
 
@@ -1616,7 +1632,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .rolesGrid__row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 200px 200px 200px;
+  grid-template-columns: minmax(160px, 1fr) repeat(3, minmax(0, 1fr));
   align-items: center;
   gap: 10px 12px;
 }
@@ -1652,10 +1668,10 @@ input:focus, textarea:focus, select:focus, button:focus {
 .rolesGrid__check[data-tooltip]:focus-within::after {
   content: attr(data-tooltip);
   position: absolute;
-  left: 0;
+  right: 0;
   top: calc(100% + 10px);
-  width: max-content;
-  max-width: 360px;
+  width: min(360px, calc(100vw - 40px));
+  max-width: min(360px, calc(100vw - 40px));
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--surface);
@@ -1663,6 +1679,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
+  box-sizing: border-box;
   z-index: 40;
 }
 
@@ -1670,7 +1687,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 .rolesGrid__check[data-tooltip]:focus-within::before {
   content: '';
   position: absolute;
-  left: 18px;
+  right: 18px;
   top: calc(100% + 4px);
   width: 0;
   height: 0;
@@ -1678,6 +1695,31 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-right: 7px solid transparent;
   border-bottom: 7px solid var(--border);
   z-index: 41;
+}
+
+/* Add User modal: use JS-driven tooltips so hovering does not expand scroll area */
+#createUserModal .rolesGrid__check[data-tooltip]:hover::after,
+#createUserModal .rolesGrid__check[data-tooltip]:focus-within::after,
+#createUserModal .rolesGrid__check[data-tooltip]:hover::before,
+#createUserModal .rolesGrid__check[data-tooltip]:focus-within::before {
+  content: none;
+}
+
+.floatingTooltip {
+  position: fixed;
+  z-index: 2005;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  max-width: min(360px, calc(100vw - 40px));
+  max-height: min(260px, calc(100vh - 80px));
+  overflow: auto;
+  white-space: normal;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 @media (max-width: 900px) {
@@ -1772,6 +1814,12 @@ input:focus, textarea:focus, select:focus, button:focus {
   background: var(--surface);
 }
 
+/* Settings: Users table should fit without horizontal scroll */
+#usersTable {
+  min-width: 0;
+  table-layout: auto;
+}
+
 .table th, .table td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
@@ -1798,7 +1846,77 @@ input:focus, textarea:focus, select:focus, button:focus {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 180px;
+  min-width: 0;
+}
+
+/* Settings: Users table column sizing (keep Actions on one line) */
+#usersTable th:first-child,
+#usersTable td:first-child {
+  width: 220px;
+}
+
+/* Settings: Bring permission columns closer together */
+#usersTable th:nth-child(2),
+#usersTable td:nth-child(2),
+#usersTable th:nth-child(3),
+#usersTable td:nth-child(3),
+#usersTable th:nth-child(4),
+#usersTable td:nth-child(4),
+#usersTable th:nth-child(5),
+#usersTable td:nth-child(5) {
+  width: 96px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+#usersTable th:nth-child(6),
+#usersTable td:nth-child(6) {
+  width: 130px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+#usersTable th:nth-child(6) {
+  white-space: normal;
+}
+
+
+#usersTable .usersTable__identity strong {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Settings: Users table action buttons should wrap (no horizontal scroll) */
+#usersTable td.actions {
+  white-space: nowrap;
+}
+
+#usersTable .usersTable__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#usersTable .usersTable__actions .btn {
+  padding: 8px 10px;
+}
+
+#usersTable .usersTable__actions .btn + .btn {
+  margin-left: 0;
+}
+
+@media (max-width: 900px) {
+  /* Avoid horizontal overflow on narrow screens */
+  #usersTable td.actions {
+    white-space: normal;
+  }
+  #usersTable .usersTable__actions {
+    flex-wrap: wrap;
+  }
 }
 
 /* Settings: Users table password/email line under access columns */
@@ -1812,6 +1930,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   justify-content: flex-start;
   gap: 8px;
   padding-bottom: 8px;
+  overflow-wrap: anywhere;
 }
 
 #usersTable .usersTable__detailsLabel {

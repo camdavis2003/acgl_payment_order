@@ -6532,6 +6532,8 @@ void (async () => {
 
   const usersTableViewState = {
     editingUsername: null,
+    globalFilter: '',
+    defaultEmptyText: '',
   };
 
   function formatAccessLabel(level) {
@@ -6542,23 +6544,100 @@ void (async () => {
     return 'None';
   }
 
+  function getUsersFilterTokens(filterText) {
+    const raw = String(filterText || '').trim().toLowerCase();
+    if (!raw) return [];
+    return raw.split(/\s+/).map((t) => t.trim()).filter(Boolean);
+  }
+
+  function userMatchesUsersFilter(user, tokens) {
+    if (!tokens || tokens.length === 0) return true;
+    const u = user || {};
+    const p = getEffectivePermissions(u);
+    const haystack = [
+      normalizeUsername(u.username),
+      normalizeEmail(u.email),
+      formatAccessLabel(p.budget),
+      formatAccessLabel(p.income),
+      formatAccessLabel(p.orders),
+      formatAccessLabel(p.ledger),
+      formatAccessLabel(p.settings),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return tokens.every((t) => haystack.includes(t));
+  }
+
+  function applyMaxVisibleUsers(maxVisibleUsers) {
+    const tableEl = document.getElementById('usersTable');
+    const wrapEl = tableEl && tableEl.closest ? tableEl.closest('.table-wrap') : null;
+    if (!wrapEl || !usersTbody) return;
+
+    const maxUsers = Math.max(1, Number(maxVisibleUsers) || 1);
+    const maxRows = maxUsers * 2; // each user renders as 2 table rows
+    const rows = Array.from(usersTbody.querySelectorAll('tr'));
+
+    wrapEl.style.overflowY = 'auto';
+    if (!rows || rows.length <= maxRows) {
+      wrapEl.style.maxHeight = '';
+      return;
+    }
+
+    const prevScrollTop = wrapEl.scrollTop;
+    if (prevScrollTop) wrapEl.scrollTop = 0;
+    let total = 0;
+    try {
+      const wrapRect = wrapEl.getBoundingClientRect ? wrapEl.getBoundingClientRect() : null;
+      const last = rows[Math.min(maxRows, rows.length) - 1];
+      const lastRect = last && last.getBoundingClientRect ? last.getBoundingClientRect() : null;
+      if (wrapRect && lastRect) {
+        total = (lastRect.bottom - wrapRect.top);
+      }
+    } finally {
+      if (prevScrollTop) wrapEl.scrollTop = prevScrollTop;
+    }
+
+    if (!Number.isFinite(total) || total <= 0) {
+      total = 0;
+      for (let i = 0; i < Math.min(maxRows, rows.length); i += 1) {
+        total += rows[i].offsetHeight;
+      }
+    }
+
+    wrapEl.style.maxHeight = `${Math.max(140, Math.ceil(total))}px`;
+  }
+
   function renderUsersTable() {
     if (!usersTbody || !usersEmptyState) return;
     const users = loadUsers();
     const visibleUsers = (Array.isArray(users) ? users : []).filter((u) => (
       normalizeUsername(u && u.username) !== normalizeUsername(HARD_CODED_ADMIN_USERNAME)
     ));
+    const filterTokens = getUsersFilterTokens(usersTableViewState.globalFilter);
+    const filteredUsers = visibleUsers.filter((u) => userMatchesUsersFilter(u, filterTokens));
     const currentUser = getCurrentUser();
     const canEdit = currentUser ? canWrite(currentUser, 'settings') : false;
+
+    if (!usersTableViewState.defaultEmptyText) {
+      usersTableViewState.defaultEmptyText = String(usersEmptyState.textContent || '').trim() || 'No users yet.';
+    }
 
     usersTbody.innerHTML = '';
     if (!visibleUsers || visibleUsers.length === 0) {
       usersEmptyState.hidden = false;
+      usersEmptyState.textContent = usersTableViewState.defaultEmptyText;
+      return;
+    }
+
+    if (!filteredUsers || filteredUsers.length === 0) {
+      usersEmptyState.hidden = false;
+      usersEmptyState.textContent = 'No users match your search.';
       return;
     }
     usersEmptyState.hidden = true;
 
-    const rows = visibleUsers
+    const rows = filteredUsers
       .slice()
       .sort((a, b) => normalizeUsername(a && a.username).localeCompare(normalizeUsername(b && b.username)))
       .map((u) => {
@@ -6635,6 +6714,8 @@ void (async () => {
           `.trim();
         })();
 
+        const actionsWrap = `<div class="usersTable__actions">${actionsCell}</div>`;
+
         return `
           <tr data-username="${safeName}">
             <td>
@@ -6647,7 +6728,7 @@ void (async () => {
             <td>${isEditing ? accessChecks('orders', p.orders) : accessDisplay('orders', p.orders)}</td>
             <td>${isEditing ? accessChecks('ledger', p.ledger) : accessDisplay('ledger', p.ledger)}</td>
             <td>${isEditing ? accessChecks('settings', p.settings) : accessDisplay('settings', p.settings)}</td>
-            <td class="actions">${actionsCell}</td>
+            <td class="actions">${actionsWrap}</td>
           </tr>
           <tr class="usersTable__detailsRow" data-details-for="${safeName}">
             <td>${emailDetailsCell}</td>
@@ -6659,6 +6740,13 @@ void (async () => {
       .join('');
 
     usersTbody.innerHTML = rows;
+
+    // Enforce: max 3 visible users; scroll to see the rest.
+    // Run twice to reduce cases where first paint hasn't finalized heights yet.
+    requestAnimationFrame(() => {
+      applyMaxVisibleUsers(3);
+      requestAnimationFrame(() => applyMaxVisibleUsers(3));
+    });
   }
 
   async function createUser(usernameRaw, passwordRaw, permissions, emailRaw) {
@@ -8309,6 +8397,11 @@ void (async () => {
     const currentUser = getCurrentUser();
     const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings') : false);
 
+    const createUserModal = document.getElementById('createUserModal');
+    const openCreateUserBtn = document.getElementById('openCreateUserBtn');
+    const usersSearchInput = document.getElementById('usersSearch');
+    const usersClearSearchBtn = document.getElementById('usersClearSearchBtn');
+
     // Settings page: allow each user to reorder cards (persisted via cookie).
     initSettingsCardsDragAndDrop();
 
@@ -8336,12 +8429,217 @@ void (async () => {
       });
     }
 
-    // If the current user cannot write Settings (and users already exist), make the
-    // create-user form visibly read-only (submit handler also blocks).
-    if (hasAnyUsers && !canEdit) {
-      const createInputs = Array.from(createUserForm.querySelectorAll('input, select, textarea, button'));
-      createInputs.forEach((el) => {
-        el.disabled = true;
+    function resetCreateUserForm() {
+      const errUser = document.getElementById('error-newUsername');
+      const errEmail = document.getElementById('error-newEmail');
+      const errPass = document.getElementById('error-newPassword');
+      if (errUser) errUser.textContent = '';
+      if (errEmail) errEmail.textContent = '';
+      if (errPass) errPass.textContent = '';
+
+      const newUsername = document.getElementById('newUsername');
+      const newEmail = document.getElementById('newEmail');
+      const newPassword = document.getElementById('newPassword');
+      if (newUsername) newUsername.value = '';
+      if (newEmail) newEmail.value = '';
+      if (newPassword) newPassword.value = '';
+
+      [
+        'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
+        'permIncomeWrite', 'permIncomePartial', 'permIncomeRead',
+        'permOrdersWrite', 'permOrdersPartial', 'permOrdersRead',
+        'permLedgerWrite', 'permLedgerPartial', 'permLedgerRead',
+        'permSettingsWrite', 'permSettingsPartial', 'permSettingsRead',
+        'permAllWrite', 'permAllPartial', 'permAllRead',
+      ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = false;
+      });
+    }
+
+    let hideCreateUserTooltip = () => {};
+
+    function initCreateUserModalTooltips(modalEl) {
+      if (!modalEl || modalEl.dataset.rolesTooltipBound) return;
+      modalEl.dataset.rolesTooltipBound = '1';
+
+      const TOOLTIP_SELECTOR = '.rolesGrid__check[data-tooltip]';
+      const margin = 12;
+      const gap = 10;
+      let tooltipEl = null;
+      let activeTarget = null;
+      let rafId = 0;
+
+      const ensureTooltipEl = () => {
+        if (tooltipEl) return tooltipEl;
+        tooltipEl = document.createElement('div');
+        tooltipEl.className = 'floatingTooltip';
+        tooltipEl.setAttribute('role', 'tooltip');
+        tooltipEl.style.display = 'none';
+        document.body.appendChild(tooltipEl);
+        return tooltipEl;
+      };
+
+      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+      const positionTooltipFor = (target) => {
+        if (!target) return;
+        const text = String(target.getAttribute('data-tooltip') || '').trim();
+        if (!text) return;
+
+        const el = ensureTooltipEl();
+        el.textContent = text;
+        el.style.display = 'block';
+        el.style.visibility = 'hidden';
+        el.style.left = '0px';
+        el.style.top = '0px';
+
+        const targetRect = target.getBoundingClientRect();
+
+        // Measure tooltip with the new content
+        const tipRect = el.getBoundingClientRect();
+        const maxLeft = window.innerWidth - margin - tipRect.width;
+        const left = clamp(targetRect.left, margin, maxLeft);
+
+        const belowTop = targetRect.bottom + gap;
+        const aboveTop = targetRect.top - gap - tipRect.height;
+        const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
+        const fitsAbove = aboveTop >= margin;
+
+        let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
+        top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
+
+        el.style.left = `${Math.round(left)}px`;
+        el.style.top = `${Math.round(top)}px`;
+        el.style.visibility = 'visible';
+      };
+
+      const scheduleReposition = () => {
+        if (!activeTarget) return;
+        if (rafId) return;
+        rafId = window.requestAnimationFrame(() => {
+          rafId = 0;
+          positionTooltipFor(activeTarget);
+        });
+      };
+
+      const hide = () => {
+        activeTarget = null;
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        if (tooltipEl) {
+          tooltipEl.style.display = 'none';
+          tooltipEl.textContent = '';
+        }
+      };
+
+      hideCreateUserTooltip = hide;
+
+      const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
+
+      modalEl.addEventListener('mouseover', (e) => {
+        const t = findTarget(e.target);
+        if (!t) return;
+        if (activeTarget === t) return;
+        activeTarget = t;
+        positionTooltipFor(activeTarget);
+      });
+
+      modalEl.addEventListener('mouseout', (e) => {
+        if (!activeTarget) return;
+        const from = findTarget(e.target);
+        if (!from || from !== activeTarget) return;
+        const to = e.relatedTarget;
+        if (to && from.contains && from.contains(to)) return;
+        hide();
+      });
+
+      modalEl.addEventListener('focusin', (e) => {
+        const t = findTarget(e.target);
+        if (!t) return;
+        activeTarget = t;
+        positionTooltipFor(activeTarget);
+      });
+
+      modalEl.addEventListener('focusout', (e) => {
+        if (!activeTarget) return;
+        const from = findTarget(e.target);
+        if (!from || from !== activeTarget) return;
+        const to = e.relatedTarget;
+        if (to && from.contains && from.contains(to)) return;
+        hide();
+      });
+
+      const bodyEl = modalEl.querySelector ? modalEl.querySelector('.modal__body') : null;
+      if (bodyEl && !bodyEl.dataset.rolesTooltipScrollBound) {
+        bodyEl.dataset.rolesTooltipScrollBound = '1';
+        bodyEl.addEventListener('scroll', scheduleReposition, { passive: true });
+      }
+
+      if (!window.__acglRolesTooltipResizeBound) {
+        window.__acglRolesTooltipResizeBound = true;
+        window.addEventListener('resize', scheduleReposition);
+      }
+    }
+
+    function closeCreateUserModal() {
+      resetCreateUserForm();
+      hideCreateUserTooltip();
+      closeSimpleModal(createUserModal);
+    }
+
+    if (createUserModal && !createUserModal.dataset.bound) {
+      createUserModal.dataset.bound = '1';
+      initCreateUserModalTooltips(createUserModal);
+      createUserModal.addEventListener('click', (e) => {
+        const closeBtn = e.target && e.target.closest ? e.target.closest('[data-modal-close]') : null;
+        if (!closeBtn) return;
+        closeCreateUserModal();
+      });
+    }
+
+    if (openCreateUserBtn) {
+      openCreateUserBtn.disabled = hasAnyUsers && !canEdit;
+      if (openCreateUserBtn.disabled) {
+        openCreateUserBtn.setAttribute('data-tooltip', 'Read-only: your account cannot add users.');
+      } else {
+        openCreateUserBtn.removeAttribute('data-tooltip');
+      }
+
+      if (!openCreateUserBtn.dataset.bound) {
+        openCreateUserBtn.dataset.bound = '1';
+        openCreateUserBtn.addEventListener('click', () => {
+          if (hasAnyUsers && !canEdit) {
+            window.alert('This Settings page is read only for your account.');
+            return;
+          }
+          resetCreateUserForm();
+          openSimpleModal(createUserModal, '#newUsername');
+        });
+      }
+    }
+
+    if (usersSearchInput && !usersSearchInput.dataset.bound) {
+      usersSearchInput.dataset.bound = '1';
+      usersSearchInput.value = usersTableViewState.globalFilter || '';
+      if (usersClearSearchBtn) usersClearSearchBtn.hidden = !usersSearchInput.value;
+      usersSearchInput.addEventListener('input', () => {
+        usersTableViewState.globalFilter = usersSearchInput.value;
+        if (usersClearSearchBtn) usersClearSearchBtn.hidden = !usersSearchInput.value;
+        renderUsersTable();
+      });
+    }
+
+    if (usersClearSearchBtn && usersSearchInput && !usersClearSearchBtn.dataset.bound) {
+      usersClearSearchBtn.dataset.bound = '1';
+      usersClearSearchBtn.addEventListener('click', () => {
+        usersSearchInput.value = '';
+        usersTableViewState.globalFilter = '';
+        usersClearSearchBtn.hidden = true;
+        renderUsersTable();
+        if (usersSearchInput.focus) usersSearchInput.focus();
       });
     }
 
@@ -8562,6 +8860,8 @@ void (async () => {
 
       renderUsersTable();
 
+      closeCreateUserModal();
+
       // Auto-login the first created user to start using the app.
       if (hadNoUsers) {
         setCurrentUsername(normalizeUsername(username));
@@ -8722,6 +9022,19 @@ void (async () => {
         if (other) other.checked = false;
       }
     });
+
+    // Re-apply Users table cap on resize (layout changes can affect row heights).
+    if (!usersTbody.dataset.usersCapResizeBound) {
+      usersTbody.dataset.usersCapResizeBound = '1';
+      let resizeTimer = 0;
+      window.addEventListener('resize', () => {
+        if (resizeTimer) window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(() => {
+          resizeTimer = 0;
+          applyMaxVisibleUsers(3);
+        }, 120);
+      });
+    }
   }
 
   // ---- Income (year-scoped) ----

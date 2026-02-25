@@ -28,11 +28,16 @@
                   <span class="navIconBtn__lines" aria-hidden="true"></span>
                 </button>
                 <div class="headerTitleBlock">
-                  <h1 data-gs-ledger-title>Ledger</h1>
-                  <p class="subhead" data-gs-ledger-subhead>
-                    Consolidated ledger of Income and Approved/Paid Payment
-                    Orders.
+                  <h1 data-wise-eur-title>2026 wiseEUR</h1>
+                  <p class="subhead">
+                    This page lists wiseEUR transactions and totals.
                   </p>
+                  <a
+                    id="wiseEurBackToIncomeLink"
+                    class="actionLink"
+                    href="grand_secretary_ledger.html?year=2026"
+                    >← Back to 2026 Ledger</a
+                  >
                 </div>
               </div>
               <div class="header-actions">
@@ -61,26 +66,19 @@
         </header>
 
         <main class="container container--wide">
-          <section class="card" aria-labelledby="gs-ledger-list-title">
+          <section class="card" aria-labelledby="wise-eur-list-title">
             <div class="list-header">
-              <h2 id="gs-ledger-list-title" data-gs-ledger-list-title>
-                Ledger
+              <h2 id="wise-eur-list-title" data-wise-eur-list-title>
+                2026 wiseEUR
               </h2>
+
               <div class="list-actions">
-                <button
-                  type="button"
-                  id="gsLedgerWiseEurBtn"
-                  class="btn btn--primary"
-                  title="Open the 2026 wiseEUR grid"
-                >
-                  2026 wiseEUR
-                </button>
                 <div class="list-search">
-                  <label class="sr-only" for="gsLedgerGlobalSearch"
+                  <label class="sr-only" for="wiseEurGlobalSearch"
                     >Search all columns</label
                   >
                   <input
-                    id="gsLedgerGlobalSearch"
+                    id="wiseEurGlobalSearch"
                     type="text"
                     inputmode="search"
                     placeholder="Search all columns…"
@@ -88,7 +86,7 @@
                   />
                   <button
                     type="button"
-                    id="gsLedgerClearSearchBtn"
+                    id="wiseEurClearSearchBtn"
                     class="searchClearBtn"
                     title="Clear search"
                     aria-label="Clear search"
@@ -98,14 +96,14 @@
                   </button>
                 </div>
 
-                <div class="budgetMenu" data-gs-ledger-menu>
+                <div class="budgetMenu" data-wise-eur-menu>
                   <button
                     type="button"
-                    id="gsLedgerActionsMenuBtn"
+                    id="wiseEurActionsMenuBtn"
                     class="actionLink actionLink--icon"
                     aria-haspopup="menu"
                     aria-expanded="false"
-                    aria-controls="gsLedgerActionsMenu"
+                    aria-controls="wiseEurActionsMenu"
                     title="Menu"
                     aria-label="Menu"
                   >
@@ -113,20 +111,50 @@
                   </button>
 
                   <div
-                    id="gsLedgerActionsMenu"
+                    id="wiseEurActionsMenu"
                     class="budgetMenu__panel"
                     role="menu"
-                    aria-label="Ledger menu"
+                    aria-label="wiseEUR menu"
                     hidden
                   >
                     <a
                       href="#"
-                      id="gsLedgerExportCsvLink"
+                      id="wiseEurNewLink"
                       class="actionLink"
                       role="menuitem"
-                      title="Download the ledger as CSV"
-                      data-tooltip="Downloads a CSV file of the consolidated ledger for this year (includes Verified)."
+                      title="Create a new wiseEUR entry"
+                      data-tooltip="Opens the New Income form for wiseEUR."
+                      >New Income</a
+                    >
+
+                    <a
+                      href="#"
+                      id="wiseEurExportCsvLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Download the current wiseEUR list as CSV"
+                      data-tooltip="Downloads a CSV file of the current wiseEUR entries so you can save it or open it in Excel."
                       >Export CSV</a
+                    >
+
+                    <a
+                      href="#"
+                      id="wiseEurDownloadTemplateLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Download a blank CSV template"
+                      data-tooltip="Downloads a CSV template you can fill in and import. Use Receipts for money in, Disburse for money out."
+                      >Download CSV template</a
+                    >
+
+                    <a
+                      href="#"
+                      id="wiseEurImportCsvLink"
+                      class="actionLink"
+                      role="menuitem"
+                      title="Import a CSV to add entries"
+                      data-tooltip="Imports a CSV file and adds entries to the current wiseEUR list."
+                      >Import CSV</a
                     >
                   </div>
                 </div>
@@ -136,18 +164,17 @@
             <div
               class="table-wrap"
               role="region"
-              aria-label="Ledger table"
+              aria-label="wiseEUR table"
               tabindex="0"
             >
               <table
-                id="gsLedgerTable"
+                id="wiseEurTable"
                 class="table"
-                aria-describedby="gs-ledger-help"
+                aria-describedby="wise-eur-help"
               >
-                <caption id="gs-ledger-help" class="sr-only">
-                  Consolidated list of Income entries and Payment Orders with
-                  status Approved or Paid. Use the Verified column to audit each
-                  transaction.
+                <caption id="wise-eur-help" class="sr-only">
+                  Entries are shown in date order. Use the leftmost column to
+                  edit or delete an entry using the Actions column.
                 </caption>
                 <thead>
                   <tr>
@@ -156,54 +183,73 @@
                       class="is-sortable"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="date"
+                      data-sort-key="budgetNo"
                     >
-                      Date
+                      Budget #
                     </th>
                     <th
                       scope="col"
                       class="is-sortable"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="budgetNumber"
+                      data-sort-key="datePL"
                     >
-                      Budget Number
+                      Date P-L
                     </th>
                     <th
                       scope="col"
                       class="is-sortable"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="creditorDebtor"
+                      data-sort-key="idTrack"
                     >
-                      Creditor/Debtor
+                      # ID-Track
                     </th>
                     <th
                       scope="col"
-                      class="is-sortable"
+                      class="is-sortable wiseEurCol--receivedFrom"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="paymentOrderNo"
+                      data-sort-key="receivedFromDisbursedTo"
                     >
-                      Payment Order Nr.
+                      Received From -<br />
+                      Disbursed To:
                     </th>
                     <th
                       scope="col"
                       class="num is-sortable"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="euro"
+                      data-sort-key="receipts"
                     >
-                      Euro (€)
+                      Receipts €
                     </th>
                     <th
                       scope="col"
                       class="num is-sortable"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="usd"
+                      data-sort-key="disburse"
                     >
-                      USD ($)
+                      Disburse €
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="description"
+                    >
+                      Description
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="issuanceDateBank"
+                    >
+                      Issuance Date Bank
                     </th>
                     <th
                       scope="col"
@@ -219,49 +265,92 @@
                       class="is-sortable"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="with"
+                      data-sort-key="checksum"
                     >
-                      With
+                      Checksum
                     </th>
                     <th
                       scope="col"
                       class="is-sortable"
                       tabindex="0"
                       aria-sort="none"
-                      data-sort-key="status"
+                      data-sort-key="bankStatements"
                     >
-                      Status
+                      Bank Statements
                     </th>
-                    <th
-                      scope="col"
-                      class="is-sortable"
-                      tabindex="0"
-                      aria-sort="none"
-                      data-sort-key="details"
-                    >
-                      Details
-                    </th>
+                    <th scope="col" class="col-actions">Actions</th>
                   </tr>
                 </thead>
-                <tbody id="gsLedgerTbody">
+                <tbody id="wiseEurTbody">
                   <!-- rows inserted by app.js -->
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colspan="4" class="ordersTotalsRow__label">Total</td>
-                    <td class="num" id="gsLedgerTotalEuro"></td>
-                    <td class="num" id="gsLedgerTotalUsd"></td>
-                    <td colspan="4"></td>
+                    <td colspan="4" class="ordersTotalsRow__label">Totals</td>
+                    <td class="num" id="wiseEurTotalReceipts"></td>
+                    <td class="num" id="wiseEurTotalDisburse"></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <td colspan="4" class="ordersTotalsRow__label">
+                      Total Receipts - Disbursements
+                    </td>
+                    <td
+                      colspan="2"
+                      class="num"
+                      id="wiseEurTotalReceiptsMinusDisburse"
+                    ></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
                   </tr>
                 </tfoot>
               </table>
             </div>
 
-            <div id="gsLedgerEmptyState" class="empty" hidden>
-              No ledger entries yet.
+            <div id="wiseEurEmptyState" class="empty" hidden>
+              No wiseEUR entries yet.
             </div>
           </section>
         </main>
+      </div>
+    </div>
+
+    <div class="modal" id="wiseEurModal" aria-hidden="true">
+      <div class="modal__backdrop" data-wise-eur-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wiseEurModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <h2 id="wiseEurModalTitle" class="modal__poHeader">wiseEUR</h2>
+            <p id="wiseEurModalSubhead" class="modal__poDate"></p>
+          </div>
+        </div>
+        <div class="modal__body" id="wiseEurModalBody"></div>
+        <div class="modal__footer">
+          <button type="button" id="wiseEurSaveBtn" class="btn btn--primary">
+            Save
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost"
+            data-wise-eur-modal-close
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
 

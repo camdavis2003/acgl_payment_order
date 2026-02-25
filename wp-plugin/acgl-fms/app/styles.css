@@ -44,6 +44,13 @@ html[data-theme="dark"] {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+#wiseUsdTable .wiseUsdCol--receivedFrom {
+  max-width: 170px;
+  width: 170px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* Ensure the HTML `hidden` attribute always wins over author display rules. */
 [hidden] {
   display: none !important;
@@ -2155,6 +2162,26 @@ input[type='checkbox'].cb {
 /* Override global numeric alignment for wiseEUR */
 #wiseEurTable td.num,
 #wiseEurTable th.num {
+  text-align: center;
+}
+
+/* Ledger: center all columns except Creditor/Debtor and Details */
+#gsLedgerTable th,
+#gsLedgerTable td {
+  text-align: center;
+}
+
+/* Creditor/Debtor (3rd) and Details (10th) stay left-aligned */
+#gsLedgerTable th:nth-child(3),
+#gsLedgerTable td:nth-child(3),
+#gsLedgerTable th:nth-child(10),
+#gsLedgerTable td:nth-child(10) {
+  text-align: left;
+}
+
+/* Override global numeric alignment for the Ledger */
+#gsLedgerTable td.num,
+#gsLedgerTable th.num {
   text-align: center;
 }
 

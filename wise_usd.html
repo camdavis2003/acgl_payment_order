@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=c2eedd1-20260225143654" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -28,12 +28,12 @@
                   <span class="navIconBtn__lines" aria-hidden="true"></span>
                 </button>
                 <div class="headerTitleBlock">
-                  <h1 data-wise-eur-title>2026 wiseEUR</h1>
+                  <h1 data-wise-usd-title>2026 wiseUSD</h1>
                   <p class="subhead">
-                    This page lists wiseEUR transactions and totals.
+                    This page lists wiseUSD transactions and totals.
                   </p>
                   <a
-                    id="wiseEurBackToIncomeLink"
+                    id="wiseUsdBackToIncomeLink"
                     class="actionLink"
                     href="grand_secretary_ledger.html?year=2026"
                     >← Back to 2026 Ledger</a
@@ -66,19 +66,19 @@
         </header>
 
         <main class="container container--wide">
-          <section class="card" aria-labelledby="wise-eur-list-title">
+          <section class="card" aria-labelledby="wise-usd-list-title">
             <div class="list-header">
-              <h2 id="wise-eur-list-title" data-wise-eur-list-title>
-                2026 wiseEUR
+              <h2 id="wise-usd-list-title" data-wise-usd-list-title>
+                2026 wiseUSD
               </h2>
 
               <div class="list-actions">
                 <div class="list-search">
-                  <label class="sr-only" for="wiseEurGlobalSearch"
+                  <label class="sr-only" for="wiseUsdGlobalSearch"
                     >Search all columns</label
                   >
                   <input
-                    id="wiseEurGlobalSearch"
+                    id="wiseUsdGlobalSearch"
                     type="text"
                     inputmode="search"
                     placeholder="Search all columns…"
@@ -86,7 +86,7 @@
                   />
                   <button
                     type="button"
-                    id="wiseEurClearSearchBtn"
+                    id="wiseUsdClearSearchBtn"
                     class="searchClearBtn"
                     title="Clear search"
                     aria-label="Clear search"
@@ -96,14 +96,14 @@
                   </button>
                 </div>
 
-                <div class="budgetMenu" data-wise-eur-menu>
+                <div class="budgetMenu" data-wise-usd-menu>
                   <button
                     type="button"
-                    id="wiseEurActionsMenuBtn"
+                    id="wiseUsdActionsMenuBtn"
                     class="actionLink actionLink--icon"
                     aria-haspopup="menu"
                     aria-expanded="false"
-                    aria-controls="wiseEurActionsMenu"
+                    aria-controls="wiseUsdActionsMenu"
                     title="Menu"
                     aria-label="Menu"
                   >
@@ -111,35 +111,35 @@
                   </button>
 
                   <div
-                    id="wiseEurActionsMenu"
+                    id="wiseUsdActionsMenu"
                     class="budgetMenu__panel"
                     role="menu"
-                    aria-label="wiseEUR menu"
+                    aria-label="wiseUSD menu"
                     hidden
                   >
                     <a
                       href="#"
-                      id="wiseEurNewLink"
+                      id="wiseUsdNewLink"
                       class="actionLink"
                       role="menuitem"
-                      title="Create a new wiseEUR entry"
-                      data-tooltip="Opens the New Income form for wiseEUR."
+                      title="Create a new wiseUSD entry"
+                      data-tooltip="Opens the New Income form for wiseUSD."
                       >New Income</a
                     >
 
                     <a
                       href="#"
-                      id="wiseEurExportCsvLink"
+                      id="wiseUsdExportCsvLink"
                       class="actionLink"
                       role="menuitem"
-                      title="Download the current wiseEUR list as CSV"
-                      data-tooltip="Downloads a CSV file of the current wiseEUR entries so you can save it or open it in Excel."
+                      title="Download the current wiseUSD list as CSV"
+                      data-tooltip="Downloads a CSV file of the current wiseUSD entries so you can save it or open it in Excel."
                       >Export CSV</a
                     >
 
                     <a
                       href="#"
-                      id="wiseEurDownloadTemplateLink"
+                      id="wiseUsdDownloadTemplateLink"
                       class="actionLink"
                       role="menuitem"
                       title="Download a blank CSV template"
@@ -149,11 +149,11 @@
 
                     <a
                       href="#"
-                      id="wiseEurImportCsvLink"
+                      id="wiseUsdImportCsvLink"
                       class="actionLink"
                       role="menuitem"
                       title="Import a CSV to add entries"
-                      data-tooltip="Imports a CSV file and adds entries to the current wiseEUR list."
+                      data-tooltip="Imports a CSV file and adds entries to the current wiseUSD list."
                       >Import CSV</a
                     >
                   </div>
@@ -164,15 +164,15 @@
             <div
               class="table-wrap"
               role="region"
-              aria-label="wiseEUR table"
+              aria-label="wiseUSD table"
               tabindex="0"
             >
               <table
-                id="wiseEurTable"
+                id="wiseUsdTable"
                 class="table"
-                aria-describedby="wise-eur-help"
+                aria-describedby="wise-usd-help"
               >
-                <caption id="wise-eur-help" class="sr-only">
+                <caption id="wise-usd-help" class="sr-only">
                   Entries are shown in date order. Use the leftmost column to
                   edit or delete an entry using the Actions column.
                 </caption>
@@ -207,7 +207,7 @@
                     </th>
                     <th
                       scope="col"
-                      class="is-sortable wiseEurCol--receivedFrom"
+                      class="is-sortable wiseUsdCol--receivedFrom"
                       tabindex="0"
                       aria-sort="none"
                       data-sort-key="receivedFromDisbursedTo"
@@ -222,7 +222,7 @@
                       aria-sort="none"
                       data-sort-key="receipts"
                     >
-                      Receipts €
+                      Receipts $
                     </th>
                     <th
                       scope="col"
@@ -231,7 +231,16 @@
                       aria-sort="none"
                       data-sort-key="disburse"
                     >
-                      Disburse €
+                      Disburse $
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="dateBL"
+                    >
+                      Date B/L
                     </th>
                     <th
                       scope="col"
@@ -281,14 +290,14 @@
                     <th scope="col" class="col-actions">Actions</th>
                   </tr>
                 </thead>
-                <tbody id="wiseEurTbody">
+                <tbody id="wiseUsdTbody">
                   <!-- rows inserted by app.js -->
                 </tbody>
                 <tfoot>
                   <tr>
                     <td colspan="4" class="ordersTotalsRow__label">Totals</td>
-                    <td class="num" id="wiseEurTotalReceipts"></td>
-                    <td class="num" id="wiseEurTotalDisburse"></td>
+                    <td class="num" id="wiseUsdTotalReceipts"></td>
+                    <td class="num" id="wiseUsdTotalDisburse"></td>
                     <td></td>
                     <td></td>
                     <td></td>
@@ -303,7 +312,7 @@
                     <td
                       colspan="2"
                       class="num"
-                      id="wiseEurTotalReceiptsMinusDisburse"
+                      id="wiseUsdTotalReceiptsMinusDisburse"
                     ></td>
                     <td></td>
                     <td></td>
@@ -316,37 +325,37 @@
               </table>
             </div>
 
-            <div id="wiseEurEmptyState" class="empty" hidden>
-              No wiseEUR entries yet.
+            <div id="wiseUsdEmptyState" class="empty" hidden>
+              No wiseUSD entries yet.
             </div>
           </section>
         </main>
       </div>
     </div>
 
-    <div class="modal" id="wiseEurModal" aria-hidden="true">
-      <div class="modal__backdrop" data-wise-eur-modal-close></div>
+    <div class="modal" id="wiseUsdModal" aria-hidden="true">
+      <div class="modal__backdrop" data-wise-usd-modal-close></div>
       <div
         class="modal__dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="wiseEurModalTitle"
+        aria-labelledby="wiseUsdModalTitle"
       >
         <div class="modal__header">
           <div class="modal__headerText">
-            <h2 id="wiseEurModalTitle" class="modal__poHeader">wiseEUR</h2>
-            <p id="wiseEurModalSubhead" class="modal__poDate"></p>
+            <h2 id="wiseUsdModalTitle" class="modal__poHeader">wiseUSD</h2>
+            <p id="wiseUsdModalSubhead" class="modal__poDate"></p>
           </div>
         </div>
-        <div class="modal__body" id="wiseEurModalBody"></div>
+        <div class="modal__body" id="wiseUsdModalBody"></div>
         <div class="modal__footer">
-          <button type="button" id="wiseEurSaveBtn" class="btn btn--primary">
+          <button type="button" id="wiseUsdSaveBtn" class="btn btn--primary">
             Save
           </button>
           <button
             type="button"
             class="btn btn--ghost"
-            data-wise-eur-modal-close
+            data-wise-usd-modal-close
           >
             Cancel
           </button>
@@ -354,6 +363,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=c2eedd1-20260225143654" defer></script>
+    <script src="app.js" defer></script>
   </body>
 </html>

@@ -539,6 +539,7 @@ void (async () => {
   const BUDGET_TABLE_HTML_KEY = 'payment_order_budget_table_html_v1';
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
+  const BUDGET_TEMPLATE_ROWS_KEY = 'payment_order_budget_template_rows_v1';
   const USERS_KEY = 'payment_order_users_v1';
   const BACKLOG_KEY = 'payment_order_backlog_v1';
   const CURRENT_USER_KEY = 'payment_order_current_user_v1';
@@ -1353,6 +1354,133 @@ void (async () => {
     if (typeof initialHtml === 'string' && !localStorage.getItem(key)) {
       localStorage.setItem(key, initialHtml);
     }
+  }
+
+  function isBudgetTemplateSectionValue(v) {
+    return v === 1 || v === 2;
+  }
+
+  function isValidBudgetCalcOp(v) {
+    return v === 'add' || v === 'subtract';
+  }
+
+  function normalizeBudgetTemplateText(v) {
+    return String(v ?? '').replace(/\u00A0/g, ' ').trim();
+  }
+
+  function normalizeBudgetTemplateRow(row) {
+    if (!row || typeof row !== 'object') return null;
+    const section = Number(row.section);
+    if (!isBudgetTemplateSectionValue(section)) return null;
+    const inVal = normalizeBudgetTemplateText(row.in);
+    const outVal = normalizeBudgetTemplateText(row.out);
+    const description = normalizeBudgetTemplateText(row.description);
+
+    // Skip completely empty rows.
+    if (!inVal && !outVal && !description) return null;
+
+    const calcReceiptsOp = isValidBudgetCalcOp(row.calcReceiptsOp) ? row.calcReceiptsOp : '';
+    const calcExpendituresOp = isValidBudgetCalcOp(row.calcExpendituresOp) ? row.calcExpendituresOp : '';
+
+    return {
+      section,
+      in: inVal,
+      out: outVal,
+      description,
+      calcReceiptsOp,
+      calcExpendituresOp,
+    };
+  }
+
+  function loadBudgetTemplateRows() {
+    try {
+      const raw = localStorage.getItem(BUDGET_TEMPLATE_ROWS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      const normalized = parsed.map(normalizeBudgetTemplateRow).filter(Boolean);
+      return normalized;
+    } catch {
+      return [];
+    }
+  }
+
+  function saveBudgetTemplateRows(rows) {
+    const normalized = Array.isArray(rows) ? rows.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
+    try {
+      localStorage.setItem(BUDGET_TEMPLATE_ROWS_KEY, JSON.stringify(normalized));
+    } catch {
+      // ignore
+    }
+    return normalized;
+  }
+
+  function readBudgetTemplateRowsFromTbodyEl(tbodyEl) {
+    const tbody = tbodyEl;
+    if (!tbody) return [];
+
+    const allRows = Array.from(tbody.querySelectorAll('tr'));
+    const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
+    const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
+    const secondTotalIndex = totals.length >= 2 ? allRows.indexOf(totals[1]) : -1;
+
+    const rows = [];
+    for (const tr of allRows) {
+      if (tr.classList.contains('budgetTable__spacer')) continue;
+      if (tr.classList.contains('budgetTable__total')) continue;
+      if (tr.classList.contains('budgetTable__remaining')) continue;
+      if (tr.classList.contains('budgetTable__checksum')) continue;
+
+      const tds = Array.from(tr.querySelectorAll('td'));
+      if (tds.length < 7) continue;
+
+      const rowIndex = allRows.indexOf(tr);
+      const section = firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex ? 1 : 2;
+
+      const inVal = normalizeBudgetTemplateText(tds[0]?.textContent);
+      const outVal = normalizeBudgetTemplateText(tds[1]?.textContent);
+      const desc = normalizeBudgetTemplateText(tds[2]?.textContent);
+      if (!inVal && !outVal && !desc) continue;
+
+      const kind = section === 2 ? 'budget' : 'anticipated';
+      const ops = getBudgetCalcOpsForRow(kind, tr, desc);
+      const receiptsOp = isValidBudgetCalcOp(tr.dataset && tr.dataset.calcReceipts) ? tr.dataset.calcReceipts : ops.receiptsOp;
+      const expendituresOp = isValidBudgetCalcOp(tr.dataset && tr.dataset.calcExpenditures) ? tr.dataset.calcExpenditures : ops.expendituresOp;
+
+      rows.push({
+        section,
+        in: inVal,
+        out: outVal,
+        description: desc,
+        calcReceiptsOp: receiptsOp,
+        calcExpendituresOp: expendituresOp,
+      });
+    }
+    return saveBudgetTemplateRows(rows);
+  }
+
+  function readBudgetTemplateRowsFromTbodyHtml(tbodyHtml) {
+    const html = String(tbodyHtml ?? '');
+    if (!html.trim()) return [];
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html');
+      const tbody = doc.querySelector('tbody');
+      if (!tbody) return [];
+      return readBudgetTemplateRowsFromTbodyEl(tbody);
+    } catch {
+      return [];
+    }
+  }
+
+  function updateBudgetTemplateRowsFromBudgetYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return [];
+    const key = getBudgetTableKeyForYear(y);
+    if (!key) return [];
+    const html = localStorage.getItem(key);
+    if (!html) return [];
+    return readBudgetTemplateRowsFromTbodyHtml(html);
   }
 
   function migrateLegacyBudgetIfNeeded() {
@@ -11584,7 +11712,7 @@ void (async () => {
           </div>
 
           <div class="field">
-            <label for="wiseEurDatePL">DATE P-L<span class="req" aria-hidden="true">*</span></label>
+            <label for="wiseEurDatePL">ACTION DATE<span class="req" aria-hidden="true">*</span></label>
             <input id="wiseEurDatePL" name="wiseEurDatePL" type="date" required value="${safeDatePL}" />
             <div class="error" id="error-wiseEurDatePL" role="alert" aria-live="polite"></div>
           </div>
@@ -11760,7 +11888,7 @@ void (async () => {
     }
 
     const kind = receiptsHas && !disburseHas ? 'in' : disburseHas && !receiptsHas ? 'out' : null;
-    if (kind) {
+    if (kind && values.budgetNo) {
       const activeYear = getActiveBudgetYear();
       const allowed = new Set();
       const items = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
@@ -11769,13 +11897,9 @@ void (async () => {
         if (/^\d{4}$/.test(code)) allowed.add(code);
       }
 
-      if (allowed.size === 0) {
-        errors.budgetNo = kind === 'in' ? 'No IN accounts found in the active budget.' : 'No OUT accounts found in the active budget.';
-      } else if (!values.budgetNo) {
-        errors.budgetNo = 'This field is required.';
-      } else if (!/^\d{4}$/.test(values.budgetNo)) {
+      if (!/^\d{4}$/.test(values.budgetNo)) {
         errors.budgetNo = 'Select a valid budget number.';
-      } else if (!allowed.has(values.budgetNo)) {
+      } else if (allowed.size > 0 && !allowed.has(values.budgetNo)) {
         errors.budgetNo = kind === 'in' ? 'Select an IN budget number from the active budget.' : 'Select an OUT budget number from the active budget.';
       }
     }
@@ -11964,7 +12088,7 @@ void (async () => {
     function exportWiseEurToCsv() {
       const header = [
         'Budget #',
-        'DATE P-L',
+        'ACTION DATE',
         '# ID-TRACK',
         'RECEIVED FROM - DISBURSED TO:',
         'RECEIPTS €',
@@ -12007,7 +12131,7 @@ void (async () => {
     function downloadWiseEurCsvTemplate() {
       const header = [
         'Budget #',
-        'DATE P-L',
+        'ACTION DATE',
         '# ID-TRACK',
         'RECEIVED FROM - DISBURSED TO:',
         'RECEIPTS €',
@@ -12179,7 +12303,7 @@ void (async () => {
 
       const idx = {
         budgetNo: findHeaderIndex(header, ['budget #', 'budget', 'budget no', 'budget number']),
-        datePL: findHeaderIndex(header, ['date p-l', 'date pl', 'date']),
+        datePL: findHeaderIndex(header, ['action date', 'date p-l', 'date pl', 'date']),
         idTrack: findHeaderIndex(header, ['# id-track', 'id-track', 'id track', 'track', 'tracking']),
         receivedFromDisbursedTo: findHeaderIndex(header, [
           'received from - disbursed to:',
@@ -12293,7 +12417,7 @@ void (async () => {
         if (!hasAnyText && !hasAnyAmount) continue;
 
         if (!relaxRequired) {
-          if (!datePL) errors.push(`Row ${rowNo}: invalid DATE P-L.`);
+          if (!datePL) errors.push(`Row ${rowNo}: invalid Action Date.`);
           if (!receivedFromDisbursedTo) errors.push(`Row ${rowNo}: Received From - Disbursed To is required.`);
           if (!receiptsHas && !disburseHas) errors.push(`Row ${rowNo}: enter a Receipts or Disburse amount.`);
           if (receiptsHas && disburseHas) errors.push(`Row ${rowNo}: enter only one: Receipts or Disburse.`);
@@ -13109,7 +13233,7 @@ void (async () => {
           </div>
 
           <div class="field">
-            <label for="wiseUsdDatePL">DATE P-L<span class="req" aria-hidden="true">*</span></label>
+            <label for="wiseUsdDatePL">ACTION DATE<span class="req" aria-hidden="true">*</span></label>
             <input id="wiseUsdDatePL" name="wiseUsdDatePL" type="date" required value="${safeDatePL}" />
             <div class="error" id="error-wiseUsdDatePL" role="alert" aria-live="polite"></div>
           </div>
@@ -13285,7 +13409,7 @@ void (async () => {
     }
 
     const kind = receiptsHas && !disburseHas ? 'in' : disburseHas && !receiptsHas ? 'out' : null;
-    if (kind) {
+    if (kind && values.budgetNo) {
       const activeYear = getActiveBudgetYear();
       const allowed = new Set();
       const items = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
@@ -13294,13 +13418,9 @@ void (async () => {
         if (/^\d{4}$/.test(code)) allowed.add(code);
       }
 
-      if (allowed.size === 0) {
-        errors.budgetNo = kind === 'in' ? 'No IN accounts found in the active budget.' : 'No OUT accounts found in the active budget.';
-      } else if (!values.budgetNo) {
-        errors.budgetNo = 'This field is required.';
-      } else if (!/^\d{4}$/.test(values.budgetNo)) {
+      if (!/^\d{4}$/.test(values.budgetNo)) {
         errors.budgetNo = 'Select a valid budget number.';
-      } else if (!allowed.has(values.budgetNo)) {
+      } else if (allowed.size > 0 && !allowed.has(values.budgetNo)) {
         errors.budgetNo = kind === 'in' ? 'Select an IN budget number from the active budget.' : 'Select an OUT budget number from the active budget.';
       }
     }
@@ -13489,7 +13609,7 @@ void (async () => {
     function exportWiseUsdToCsv() {
       const header = [
         'Budget #',
-        'DATE P-L',
+        'ACTION DATE',
         '# ID-TRACK',
         'RECEIVED FROM - DISBURSED TO:',
         'RECEIPTS $',
@@ -13532,7 +13652,7 @@ void (async () => {
     function downloadWiseUsdCsvTemplate() {
       const header = [
         'Budget #',
-        'DATE P-L',
+        'ACTION DATE',
         '# ID-TRACK',
         'RECEIVED FROM - DISBURSED TO:',
         'RECEIPTS $',
@@ -13704,7 +13824,7 @@ void (async () => {
 
       const idx = {
         budgetNo: findHeaderIndex(header, ['budget #', 'budget', 'budget no', 'budget number']),
-        datePL: findHeaderIndex(header, ['date p-l', 'date pl', 'date']),
+        datePL: findHeaderIndex(header, ['action date', 'date p-l', 'date pl', 'date']),
         idTrack: findHeaderIndex(header, ['# id-track', 'id-track', 'id track', 'track', 'tracking']),
         receivedFromDisbursedTo: findHeaderIndex(header, [
           'received from - disbursed to:',
@@ -13818,7 +13938,7 @@ void (async () => {
         if (!hasAnyText && !hasAnyAmount) continue;
 
         if (!relaxRequired) {
-          if (!datePL) errors.push(`Row ${rowNo}: invalid DATE P-L.`);
+          if (!datePL) errors.push(`Row ${rowNo}: invalid Action Date.`);
           if (!receivedFromDisbursedTo) errors.push(`Row ${rowNo}: Received From - Disbursed To is required.`);
           if (!receiptsHas && !disburseHas) errors.push(`Row ${rowNo}: enter a Receipts or Disburse amount.`);
           if (receiptsHas && disburseHas) errors.push(`Row ${rowNo}: enter only one: Receipts or Disburse.`);
@@ -14200,6 +14320,72 @@ void (async () => {
     const tbody = table.querySelector('tbody');
     if (!tbody) return;
 
+    function getBudgetTemplateRowsForSeeding(fallbackTbodyHtml) {
+      const existing = loadBudgetTemplateRows();
+      if (existing && existing.length) return existing;
+
+      const active = loadActiveBudgetYear();
+      if (active) {
+        const fromActive = updateBudgetTemplateRowsFromBudgetYear(active);
+        if (fromActive && fromActive.length) return fromActive;
+      }
+
+      // Last resort: derive from the static HTML template shipped with this page.
+      const derived = readBudgetTemplateRowsFromTbodyHtml(fallbackTbodyHtml);
+      return derived && derived.length ? derived : [];
+    }
+
+    function buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows) {
+      const normalized = Array.isArray(templateRows) ? templateRows.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
+      if (!normalized.length) return '';
+
+      const section1 = normalized.filter((r) => r.section === 1);
+      const section2 = normalized.filter((r) => r.section === 2);
+
+      const seedTbody = document.createElement('tbody');
+      for (const r of section1) {
+        seedTbody.appendChild(
+          buildDataRowFromRecord({
+            in: r.in,
+            out: r.out,
+            description: r.description,
+            approvedEuro: '0.00 €',
+            receiptsEuro: '0.00 €',
+            expendituresEuro: '0.00 €',
+            balanceEuro: '0.00 €',
+            receiptsUsd: '-',
+            expendituresUsd: '-',
+            calcReceiptsOp: r.calcReceiptsOp,
+            calcExpendituresOp: r.calcExpendituresOp,
+          })
+        );
+      }
+      seedTbody.appendChild(buildSpacerRow());
+      seedTbody.appendChild(buildTotalRow('Total Anticipated Values'));
+      seedTbody.appendChild(buildSpacerRow());
+      for (const r of section2) {
+        seedTbody.appendChild(
+          buildDataRowFromRecord({
+            in: r.in,
+            out: r.out,
+            description: r.description,
+            approvedEuro: '0.00 €',
+            receiptsEuro: '0.00 €',
+            expendituresEuro: '0.00 €',
+            balanceEuro: '0.00 €',
+            receiptsUsd: '-',
+            expendituresUsd: '-',
+            calcReceiptsOp: r.calcReceiptsOp,
+            calcExpendituresOp: r.calcExpendituresOp,
+          })
+        );
+      }
+      seedTbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
+      seedTbody.appendChild(buildRemainingRow());
+      for (const el of buildChecksumSection()) seedTbody.appendChild(el);
+      return seedTbody.innerHTML;
+    }
+
     // Page title ("YYYY Budget")
     const titleEl = document.querySelector('[data-budget-title]');
     if (titleEl) titleEl.textContent = `${budgetYear} Budget`;
@@ -14211,9 +14397,12 @@ void (async () => {
     if (subheadEl) subheadEl.textContent = `Budget overview table for ${budgetYear}.`;
     applyAppTabTitle();
 
-    // Register this year and seed it with the current template (if missing)
+    // Register this year and seed it using the stored template rows (derived from the Active Budget).
+    // Fallback: the static HTML template shipped in this page.
     const templateHtml = tbody.innerHTML;
-    ensureBudgetYearExists(budgetYear, templateHtml);
+    const seedRows = getBudgetTemplateRowsForSeeding(templateHtml);
+    const seedHtml = buildSeedBudgetTbodyHtmlFromTemplateRows(seedRows) || templateHtml;
+    ensureBudgetYearExists(budgetYear, seedHtml);
     initBudgetYearNav();
 
     function syncActiveBudgetButton() {
@@ -14269,6 +14458,9 @@ void (async () => {
         e.preventDefault();
         if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         saveActiveBudgetYear(budgetYear);
+
+        // Treat the newly-activated budget's structure as the template.
+        readBudgetTemplateRowsFromTbodyEl(tbody);
 
         // First activation: if no Payment Orders list exists for this year,
         // create it and reset numbering so the first PO number is always 01.
@@ -14900,6 +15092,13 @@ void (async () => {
       clone.querySelectorAll('.budgetRow--selected').forEach((el) => el.classList.remove('budgetRow--selected'));
       clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
       clone.querySelectorAll('[spellcheck]').forEach((el) => el.removeAttribute('spellcheck'));
+
+      // If this year is the Active Budget (or no active is set yet), treat its structure as the template.
+      const active = loadActiveBudgetYear();
+      if (!active || active === budgetYear) {
+        readBudgetTemplateRowsFromTbodyEl(clone);
+      }
+
       if (budgetKey) localStorage.setItem(budgetKey, clone.innerHTML);
     }
 
@@ -14932,9 +15131,9 @@ void (async () => {
         return;
       }
 
-      // Seed new year from the currently saved table for this page's year.
-      const seedHtml = budgetKey ? localStorage.getItem(budgetKey) : null;
-      const initial = seedHtml || templateHtml;
+      // Seed new year from the template rows (derived from the Active Budget).
+      const templateRows = getBudgetTemplateRowsForSeeding(templateHtml);
+      const initial = buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows) || templateHtml;
       localStorage.setItem(key, initial);
       saveBudgetYears([y, ...years]);
       openBudgetYear(y);
@@ -15043,15 +15242,48 @@ void (async () => {
         'Expenditures USD',
       ];
 
-      const exampleRows = [
-        // Use values that match the importer's expectations and the UI's formatting.
-        ['Anticipated', '1020', '2020', 'Example anticipated line', '0.00 €', 'subtract (-)', '0.00 €', 'add (+)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
-        ['Budget', '1998', '2998', 'Example budget line', '0.00 €', 'add (+)', '0.00 €', 'subtract (-)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
-      ];
+      function opLabel(op) {
+        if (op === 'add') return 'add (+)';
+        if (op === 'subtract') return 'subtract (-)';
+        if (op === 'equals') return 'equals (=)';
+        return '';
+      }
+
+      const templateRows = getBudgetTemplateRowsForSeeding(templateHtml);
+
+      const dataRows = templateRows.length
+        ? templateRows.map((r) => {
+            const sectionName = r.section === 1 ? 'Anticipated' : 'Budget';
+            const kind = r.section === 2 ? 'budget' : 'anticipated';
+            const ops = getBudgetCalcOpsForRow(kind, null, r.description);
+            const receiptsOp = r.calcReceiptsOp || ops.receiptsOp;
+            const expendituresOp = r.calcExpendituresOp || ops.expendituresOp;
+
+            return [
+              sectionName,
+              r.in,
+              r.out,
+              r.description,
+              '0.00 €',
+              opLabel(receiptsOp),
+              '0.00 €',
+              opLabel(expendituresOp),
+              '0.00 €',
+              opLabel('equals'),
+              '0.00 €',
+              '-',
+              '-',
+            ];
+          })
+        : [
+            // Minimal fallback if no template exists yet.
+            ['Anticipated', '1020', '2020', 'Example anticipated line', '0.00 €', 'subtract (-)', '0.00 €', 'subtract (-)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
+            ['Budget', '1998', '2998', 'Example budget line', '0.00 €', 'add (+)', '0.00 €', 'subtract (-)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
+          ];
 
       const lines = [];
       lines.push(header.map(escapeCsvValue).join(','));
-      for (const r of exampleRows) lines.push(r.map(escapeCsvValue).join(','));
+      for (const r of dataRows) lines.push(r.map(escapeCsvValue).join(','));
 
       const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
       downloadCsvFile(csv, getTemplateFileName());
@@ -15236,56 +15468,110 @@ void (async () => {
       }
 
       const ok = window.confirm(
-        `Importing a CSV will add rows to the current budget table. Continue?\n\nFile: ${fileName || 'CSV'}`
+        `Importing a CSV will update currency values for matching rows and add any missing rows. Continue?\n\nFile: ${fileName || 'CSV'}`
       );
       if (!ok) return;
 
-      function readExistingRecordsBySection() {
+      function normalizeKeyText(v) {
+        return String(v ?? '').replace(/\u00A0/g, ' ').trim();
+      }
+
+      function makeLineKey(inVal, outVal, desc) {
+        const a = normalizeKeyText(inVal);
+        const b = normalizeKeyText(outVal);
+        if (a || b) return `${a}::${b}`;
+        return `desc::${normalizeKeyText(desc).toLowerCase()}`;
+      }
+
+      function getRowSection(tr) {
         const allRows = Array.from(tbody.querySelectorAll('tr'));
         const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
         const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
-        const secondTotalIndex = totals.length >= 2 ? allRows.indexOf(totals[1]) : -1;
+        const rowIndex = allRows.indexOf(tr);
+        if (firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex) return 1;
+        return 2;
+      }
 
-        const section1 = [];
-        const section2 = [];
+      function isEffectivelyEmptyBudget() {
+        const rows = Array.from(tbody.querySelectorAll('tr')).filter((r) => isEditableDataRow(r));
+        if (rows.length === 0) return true;
+        for (const row of rows) {
+          const tds = row.querySelectorAll('td');
+          const approved = parseMoney(tds[3]?.textContent);
+          const receipts = parseMoney(tds[4]?.textContent);
+          const expenditures = parseMoney(tds[5]?.textContent);
+          const receiptsUsd = parseMoney(tds[8]?.textContent);
+          const expendituresUsd = parseMoney(tds[10]?.textContent);
+          if (approved !== 0 || receipts !== 0 || expenditures !== 0 || receiptsUsd !== 0 || expendituresUsd !== 0) return false;
+        }
+        return true;
+      }
 
-        for (const tr of allRows) {
-          if (tr.classList.contains('budgetTable__spacer')) continue;
-          if (tr.classList.contains('budgetTable__total')) continue;
-          if (tr.classList.contains('budgetTable__remaining')) continue;
-          if (tr.classList.contains('budgetTable__checksum')) continue;
+      const lockTemplateColumns = isEffectivelyEmptyBudget();
 
-          const tds = Array.from(tr.querySelectorAll('td'));
-          if (tds.length < 7) continue;
+      function findMatchingExistingRow(targetSection, rec) {
+        const targetKey = makeLineKey(rec.in, rec.out, rec.description);
+        if (!targetKey) return null;
 
-          const rowIndex = allRows.indexOf(tr);
-          const isSection1 = firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex;
-          const isSection2 =
-            firstTotalIndex >= 0 &&
-            rowIndex >= 0 &&
-            rowIndex > firstTotalIndex &&
-            (secondTotalIndex < 0 || rowIndex < secondTotalIndex);
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        for (const row of rows) {
+          if (!isEditableDataRow(row)) continue;
+          if (getRowSection(row) !== targetSection) continue;
+          const tds = row.querySelectorAll('td');
+          const key = makeLineKey(tds[0]?.textContent, tds[1]?.textContent, tds[2]?.textContent);
+          if (key === targetKey) return row;
+        }
+        return null;
+      }
 
-          const rec = {
-            in: tds[0]?.textContent ?? '',
-            out: tds[1]?.textContent ?? '',
-            description: tds[2]?.textContent ?? '',
-            approvedEuro: tds[3]?.textContent ?? '',
-            receiptsEuro: tds[4]?.textContent ?? '',
-            expendituresEuro: tds[5]?.textContent ?? '',
-            balanceEuro: tds[6]?.textContent ?? '',
-            receiptsUsd: tds[8]?.textContent ?? '',
-            expendituresUsd: tds[10]?.textContent ?? '',
-            calcReceiptsOp: tr.dataset && tr.dataset.calcReceipts ? tr.dataset.calcReceipts : '',
-            calcExpendituresOp: tr.dataset && tr.dataset.calcExpenditures ? tr.dataset.calcExpenditures : '',
-          };
+      function patchRowFromRecord(row, rec) {
+        if (!row || !isEditableDataRow(row)) return;
+        const tds = row.querySelectorAll('td');
+        if (tds.length < 11) return;
 
-          if (isSection1) section1.push(rec);
-          else if (isSection2) section2.push(rec);
-          else section2.push(rec);
+        const recIn = normalizeKeyText(rec.in);
+        const recOut = normalizeKeyText(rec.out);
+        const recDesc = normalizeKeyText(rec.description);
+
+        // Only update the template columns if the row is blank. For empty budgets,
+        // keep IN/OUT/Description as the template and only patch currency values.
+        if (!lockTemplateColumns) {
+          if (!normalizeKeyText(tds[0]?.textContent) && recIn) tds[0].textContent = recIn;
+          if (!normalizeKeyText(tds[1]?.textContent) && recOut) tds[1].textContent = recOut;
+          if (!normalizeKeyText(tds[2]?.textContent) && recDesc) tds[2].textContent = recDesc;
+        } else {
+          if (!normalizeKeyText(tds[2]?.textContent) && recDesc) tds[2].textContent = recDesc;
         }
 
-        return { section1, section2 };
+        if (String(rec.approvedEuro ?? '').trim() !== '' && tds[3]) tds[3].textContent = rec.approvedEuro;
+        if (String(rec.receiptsEuro ?? '').trim() !== '' && tds[4]) tds[4].textContent = rec.receiptsEuro;
+        if (String(rec.expendituresEuro ?? '').trim() !== '' && tds[5]) tds[5].textContent = rec.expendituresEuro;
+        if (String(rec.balanceEuro ?? '').trim() !== '' && tds[6]) tds[6].textContent = rec.balanceEuro;
+
+        const rUsd = normalizeKeyText(rec.receiptsUsd);
+        const eUsd = normalizeKeyText(rec.expendituresUsd);
+        if (tds[8]) tds[8].textContent = rUsd || '-';
+        if (tds[10]) tds[10].textContent = eUsd || '-';
+
+        if (rec.calcReceiptsOp === 'add' || rec.calcReceiptsOp === 'subtract') row.dataset.calcReceipts = rec.calcReceiptsOp;
+        if (rec.calcExpendituresOp === 'add' || rec.calcExpendituresOp === 'subtract') row.dataset.calcExpenditures = rec.calcExpendituresOp;
+      }
+
+      function insertRowFromRecord(targetSection, rec) {
+        const newRow = buildDataRowFromRecord(rec);
+        const totals = tbody.querySelectorAll('tr.budgetTable__total');
+        const firstTotal = totals.length >= 1 ? totals[0] : null;
+        const secondTotal = totals.length >= 2 ? totals[1] : null;
+
+        if (targetSection === 1 && firstTotal) {
+          firstTotal.insertAdjacentElement('beforebegin', newRow);
+        } else if (targetSection === 2 && secondTotal) {
+          secondTotal.insertAdjacentElement('beforebegin', newRow);
+        } else {
+          tbody.appendChild(newRow);
+        }
+
+        return newRow;
       }
 
       const rows = parseCsvText(csvText);
@@ -15488,22 +15774,21 @@ void (async () => {
         else section2.push(record);
       }
 
-      const existing = readExistingRecordsBySection();
-      const mergedSection1 = [...(existing.section1 || []), ...section1];
-      const mergedSection2 = [...(existing.section2 || []), ...section2];
+      const imported = [
+        ...section1.map((rec) => ({ section: 1, rec })),
+        ...section2.map((rec) => ({ section: 2, rec })),
+      ];
 
-      // Rebuild tbody from merged data
-      tbody.innerHTML = '';
-      for (const rec of mergedSection1) tbody.appendChild(buildDataRowFromRecord(rec));
-      tbody.appendChild(buildSpacerRow());
-      tbody.appendChild(buildTotalRow('Total Anticipated Values'));
-      tbody.appendChild(buildSpacerRow());
-      for (const rec of mergedSection2) tbody.appendChild(buildDataRowFromRecord(rec));
-      tbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
-      tbody.appendChild(buildRemainingRow());
-      for (const el of buildChecksumSection()) tbody.appendChild(el);
+      for (const item of imported) {
+        const targetSection = item.section;
+        const rec = item.rec;
 
-      // Migrate and recalc using the same pipeline as saved HTML.
+        const match = findMatchingExistingRow(targetSection, rec);
+        if (match) patchRowFromRecord(match, rec);
+        else insertRowFromRecord(targetSection, rec);
+      }
+
+      // Normalize and persist using the same pipeline as manual edits.
       ensureRemainingRowLayout();
       ensureTotalRowsLayout();
       ensureChecksumRowsLayout();

@@ -2147,6 +2147,24 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
+/* wiseUSD: center all columns except Description */
+#wiseUsdTable th,
+#wiseUsdTable td {
+  text-align: center;
+}
+
+/* Description column (7th) stays left-aligned */
+#wiseUsdTable th:nth-child(7),
+#wiseUsdTable td:nth-child(7) {
+  text-align: left;
+}
+
+/* Override global numeric alignment for wiseUSD */
+#wiseUsdTable td.num,
+#wiseUsdTable th.num {
+  text-align: center;
+}
+
 /* wiseEUR: center all columns except Description */
 #wiseEurTable th,
 #wiseEurTable td {

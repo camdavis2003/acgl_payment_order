@@ -1600,6 +1600,7 @@ void (async () => {
           href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
+      { key: null, label: 'Archive', href: 'archive.html' },
       { key: 'settings', label: 'Admin Settings', href: 'settings.html' },
       { key: null, label: 'About', href: 'about.html' },
       { key: null, label: 'Log out', href: 'index.html?logout=1' },
@@ -2067,6 +2068,7 @@ void (async () => {
 
     const config = getNavConfig();
     let idSeq = 0;
+    const isYearLabel = (label) => /^\d{4}$/.test(String(label || '').trim());
 
     for (const mount of mounts) {
       mount.innerHTML = '';
@@ -2079,7 +2081,8 @@ void (async () => {
         li.className = 'appNavTree__item';
 
         const children = Array.isArray(item.children) ? item.children : [];
-        const isParent = children.length > 0;
+        const visibleChildren = children.filter((c) => !isYearLabel(c && c.label));
+        const isParent = visibleChildren.length > 0;
 
         if (!isParent) {
           const a = document.createElement('a');
@@ -2112,7 +2115,7 @@ void (async () => {
         childList.id = `navChildren_${idSeq}`;
 
         let anyChildActive = false;
-        for (const child of children) {
+        for (const child of visibleChildren) {
           const childLi = document.createElement('li');
           childLi.className = 'appNavTree__childItem';
 
@@ -16560,6 +16563,63 @@ void (async () => {
     }
   }
 
+  function initArchivePage() {
+    const root = document.querySelector('[data-archive]');
+    if (!root) return;
+
+    const grid = root.querySelector('[data-archive-grid]');
+    const emptyEl = root.querySelector('[data-archive-empty]');
+    if (!grid) return;
+
+    const config = getNavConfig();
+    const isYearLabel = (label) => /^\d{4}$/.test(String(label || '').trim());
+
+    const areas = (Array.isArray(config) ? config : []).filter((it) => {
+      const children = Array.isArray(it && it.children) ? it.children : [];
+      return children.some((c) => isYearLabel(c && c.label));
+    });
+
+    grid.innerHTML = '';
+
+    for (const area of areas) {
+      const card = document.createElement('div');
+      card.className = 'archive__card';
+
+      const header = document.createElement('div');
+      header.className = 'archive__cardHeader';
+
+      const h = document.createElement('h2');
+      h.className = 'archive__title';
+      h.textContent = String(area && area.label ? area.label : '').trim() || 'Archive';
+
+      const yearsWrap = document.createElement('div');
+      yearsWrap.className = 'archive__years';
+
+      const yearChildren = (Array.isArray(area && area.children) ? area.children : []).filter((c) => isYearLabel(c && c.label));
+      for (const child of yearChildren) {
+        const a = document.createElement('a');
+        a.className = 'actionLink';
+        a.href = String(child && child.href ? child.href : '#');
+        a.textContent = '';
+        a.appendChild(document.createTextNode(String(child && child.label ? child.label : '').trim()));
+        if (child && child.isActiveBudgetYear) {
+          const badge = document.createElement('span');
+          badge.className = 'appNavTree__badge';
+          badge.textContent = ' (active)';
+          a.appendChild(badge);
+        }
+        yearsWrap.appendChild(a);
+      }
+
+      header.appendChild(h);
+      card.appendChild(header);
+      card.appendChild(yearsWrap);
+      grid.appendChild(card);
+    }
+
+    if (emptyEl) emptyEl.hidden = areas.length > 0;
+  }
+
   // ---- Event wiring (only when the elements exist on the page) ----
 
   installNavAutoSync();
@@ -16621,6 +16681,7 @@ void (async () => {
   initBudgetEditor();
   initBudgetDashboard();
   initBudgetNumberSelect();
+  initArchivePage();
 
   if (numberingForm) {
     const settings = loadNumberingSettings();

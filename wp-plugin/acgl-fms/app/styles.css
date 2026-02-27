@@ -368,6 +368,17 @@ body {
   gap: 16px;
 }
 
+/* Admin Settings: maximum of 2 columns; collapse to 1 when too narrow. */
+main.archive__grid {
+  grid-template-columns: minmax(560px, 1fr) minmax(560px, 1fr);
+}
+
+@media (max-width: 1136px) {
+  main.archive__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 
 /* Settings: allow a card to span both columns when using the archive__grid layout. */
 .archive__grid > .settingsCard--full {

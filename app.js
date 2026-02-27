@@ -311,6 +311,7 @@ void (async () => {
     if (key === 'payment_order_backlog_v1') return true;
     if (key === 'payment_order_auth_audit_v1') return true;
     if (key === 'payment_order_numbering') return true;
+    if (key === 'payment_order_grand_lodge_info_v1') return true;
     if (key === 'payment_order_budget_years_v1') return true;
     if (key === 'payment_order_active_budget_year_v1') return true;
 
@@ -563,6 +564,7 @@ void (async () => {
   const EDIT_ORDER_ID_KEY = 'payment_order_edit_order_id';
   const EDIT_ORDER_YEAR_KEY = 'payment_order_edit_order_year_v1';
   const NUMBERING_KEY = 'payment_order_numbering';
+  const GRAND_LODGE_INFO_KEY = 'payment_order_grand_lodge_info_v1';
   const FLASH_TOKEN_KEY = 'payment_order_flash_token';
   const BUDGET_TABLE_HTML_KEY = 'payment_order_budget_table_html_v1';
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
@@ -3222,6 +3224,14 @@ void (async () => {
   const masonicYearInput = document.getElementById('masonicYear');
   const firstNumberInput = document.getElementById('firstNumber');
 
+  // Settings page (Grand Lodge Information)
+  const grandLodgeInfoForm = document.getElementById('grandLodgeInfoForm');
+  const grandMasterInput = document.getElementById('grandMaster');
+  const grandSecretaryInput = document.getElementById('grandSecretary');
+  const grandTreasurerInput = document.getElementById('grandTreasurer');
+  const officialAddressInput = document.getElementById('officialAddress');
+  const operationAddressInput = document.getElementById('operationAddress');
+
   // Settings page (roles)
   const createUserForm = document.getElementById('createUserForm');
   const usersTbody = document.getElementById('usersTbody');
@@ -3604,6 +3614,76 @@ void (async () => {
     const n = Number(raw);
     if (!Number.isFinite(n)) return 1;
     return Math.max(1, Math.trunc(n));
+  }
+
+  // ---- Grand Lodge Information ----
+
+  function normalizePersonName(value) {
+    const s = String(value ?? '');
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  function normalizeGermanAddressMultiline(value) {
+    const raw = String(value ?? '').replace(/\r\n/g, '\n');
+    const lines = raw
+      .split('\n')
+      .map((l) => String(l).replace(/\s+$/g, ''));
+
+    // Trim leading/trailing blank lines
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+    // Collapse multiple blank lines
+    const out = [];
+    for (const line of lines) {
+      const isBlank = !String(line).trim();
+      const prevBlank = out.length ? !String(out[out.length - 1]).trim() : false;
+      if (isBlank && prevBlank) continue;
+      out.push(line.trimEnd());
+    }
+    return out.join('\n').trim();
+  }
+
+  function loadGrandLodgeInfo() {
+    try {
+      const raw = localStorage.getItem(GRAND_LODGE_INFO_KEY);
+      if (!raw) {
+        return {
+          grandMaster: '',
+          grandSecretary: '',
+          grandTreasurer: '',
+          officialAddress: '',
+          operationAddress: '',
+        };
+      }
+      const parsed = JSON.parse(raw);
+      return {
+        grandMaster: normalizePersonName(parsed && parsed.grandMaster),
+        grandSecretary: normalizePersonName(parsed && parsed.grandSecretary),
+        grandTreasurer: normalizePersonName(parsed && parsed.grandTreasurer),
+        officialAddress: normalizeGermanAddressMultiline(parsed && parsed.officialAddress),
+        operationAddress: normalizeGermanAddressMultiline(parsed && parsed.operationAddress),
+      };
+    } catch {
+      return {
+        grandMaster: '',
+        grandSecretary: '',
+        grandTreasurer: '',
+        officialAddress: '',
+        operationAddress: '',
+      };
+    }
+  }
+
+  function saveGrandLodgeInfo(info) {
+    const payload = {
+      grandMaster: normalizePersonName(info && info.grandMaster),
+      grandSecretary: normalizePersonName(info && info.grandSecretary),
+      grandTreasurer: normalizePersonName(info && info.grandTreasurer),
+      officialAddress: normalizeGermanAddressMultiline(info && info.officialAddress),
+      operationAddress: normalizeGermanAddressMultiline(info && info.operationAddress),
+    };
+    localStorage.setItem(GRAND_LODGE_INFO_KEY, JSON.stringify(payload));
   }
 
   function loadNumberingSettings() {
@@ -17887,6 +17967,52 @@ void (async () => {
   initBudgetDashboard();
   initBudgetNumberSelect();
   initArchivePage();
+
+  if (grandLodgeInfoForm) {
+    const current = loadGrandLodgeInfo();
+    if (grandMasterInput) grandMasterInput.value = current.grandMaster;
+    if (grandSecretaryInput) grandSecretaryInput.value = current.grandSecretary;
+    if (grandTreasurerInput) grandTreasurerInput.value = current.grandTreasurer;
+    if (officialAddressInput) officialAddressInput.value = current.officialAddress;
+    if (operationAddressInput) operationAddressInput.value = current.operationAddress;
+
+    {
+      const hasAnyUsers = loadUsers().length > 0;
+      const currentUser = getCurrentUser();
+      const canEdit = !hasAnyUsers || (currentUser ? canSettingsEdit(currentUser) : false);
+      if (hasAnyUsers && !canEdit) {
+        if (grandMasterInput) grandMasterInput.disabled = true;
+        if (grandSecretaryInput) grandSecretaryInput.disabled = true;
+        if (grandTreasurerInput) grandTreasurerInput.disabled = true;
+        if (officialAddressInput) officialAddressInput.disabled = true;
+        if (operationAddressInput) operationAddressInput.disabled = true;
+        const submitBtn = grandLodgeInfoForm.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+      }
+    }
+
+    grandLodgeInfoForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      if (!requireSettingsEditAccess('Settings is read only for your account.')) return;
+
+      saveGrandLodgeInfo({
+        grandMaster: grandMasterInput ? grandMasterInput.value : '',
+        grandSecretary: grandSecretaryInput ? grandSecretaryInput.value : '',
+        grandTreasurer: grandTreasurerInput ? grandTreasurerInput.value : '',
+        officialAddress: officialAddressInput ? officialAddressInput.value : '',
+        operationAddress: operationAddressInput ? operationAddressInput.value : '',
+      });
+
+      // Sync normalized values back into the form.
+      const next = loadGrandLodgeInfo();
+      if (grandMasterInput) grandMasterInput.value = next.grandMaster;
+      if (grandSecretaryInput) grandSecretaryInput.value = next.grandSecretary;
+      if (grandTreasurerInput) grandTreasurerInput.value = next.grandTreasurer;
+      if (officialAddressInput) officialAddressInput.value = next.officialAddress;
+      if (operationAddressInput) operationAddressInput.value = next.operationAddress;
+    });
+  }
 
   if (numberingForm) {
     const settings = loadNumberingSettings();

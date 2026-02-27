@@ -907,6 +907,24 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
   }
 }
 
+/* Settings: Grand Lodge Information form should respond to card width (not viewport) */
+@supports (container-type: inline-size) {
+  #grandLodgeInfoForm {
+    container-type: inline-size;
+  }
+
+  /* Override global viewport-based grid breakpoint for this form */
+  #grandLodgeInfoForm .grid {
+    grid-template-columns: 1fr;
+  }
+
+  @container (min-width: 560px) {
+    #grandLodgeInfoForm .grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+}
+
 .field label:not(.switch) {
   display: block;
   font-weight: 600;

@@ -254,6 +254,76 @@
 
           <section
             class="card"
+            aria-labelledby="grandlodge-title"
+            draggable="true"
+            data-settings-card="grandlodge"
+          >
+            <div class="list-header">
+              <h2 id="grandlodge-title">Grand Lodge Information</h2>
+              <div class="list-actions"></div>
+            </div>
+
+            <form id="grandLodgeInfoForm" novalidate>
+              <div class="grid">
+                <div class="field">
+                  <label for="grandMaster">Grand Master</label>
+                  <input
+                    id="grandMaster"
+                    name="grandMaster"
+                    type="text"
+                    autocomplete="off"
+                  />
+                </div>
+
+                <div class="field">
+                  <label for="grandSecretary">Grand Secretary</label>
+                  <input
+                    id="grandSecretary"
+                    name="grandSecretary"
+                    type="text"
+                    autocomplete="off"
+                  />
+                </div>
+
+                <div class="field field--span2">
+                  <label for="grandTreasurer">Grand Treasurer</label>
+                  <input
+                    id="grandTreasurer"
+                    name="grandTreasurer"
+                    type="text"
+                    autocomplete="off"
+                  />
+                </div>
+
+                <div class="field">
+                  <label for="officialAddress">Official Address</label>
+                  <textarea
+                    id="officialAddress"
+                    name="officialAddress"
+                    rows="4"
+                    placeholder="Straße Hausnr.\nPLZ Ort\nLand"
+                  ></textarea>
+                </div>
+
+                <div class="field">
+                  <label for="operationAddress">Operation Address</label>
+                  <textarea
+                    id="operationAddress"
+                    name="operationAddress"
+                    rows="4"
+                    placeholder="Straße Hausnr.\nPLZ Ort\nLand"
+                  ></textarea>
+                </div>
+              </div>
+
+              <div class="actions actions--right">
+                <button type="submit" class="btn btn--primary">Save</button>
+              </div>
+            </form>
+          </section>
+
+          <section
+            class="card"
             aria-labelledby="backup-title"
             draggable="true"
             data-settings-card="backup"

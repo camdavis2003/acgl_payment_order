@@ -56,6 +56,25 @@ function rmIfExists(p) {
   }
 }
 
+function cleanupLegacyPluginZips() {
+  // Avoid confusion from multiple historical zip names (e.g., acgl-fms.zip vs acgl-fms-wp.zip).
+  // Keep the current OUT_ZIP and remove other acgl-fms*.zip files.
+  try {
+    if (!fs.existsSync(DIST_DIR)) return;
+    const entries = fs.readdirSync(DIST_DIR, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      const name = String(e.name || '');
+      if (!/^acgl-fms.*\.zip$/i.test(name)) continue;
+      const abs = path.join(DIST_DIR, name);
+      if (path.resolve(abs) === path.resolve(OUT_ZIP)) continue;
+      rmIfExists(abs);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function run(cmd, args, options = {}) {
   const res = spawnSync(cmd, args, {
     cwd: options.cwd || ROOT,
@@ -92,6 +111,7 @@ function toPosixPath(p) {
 
 async function zipPlugin() {
   ensureDir(DIST_DIR);
+  cleanupLegacyPluginZips();
   rmIfExists(OUT_ZIP);
 
   const output = fs.createWriteStream(OUT_ZIP);

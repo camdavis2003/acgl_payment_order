@@ -56,3 +56,47 @@ Access control:
 
 ## Database
 The KV table name is `{wp_prefix}acgl_fms_kv` (the prefix depends on your WordPress install).
+
+## Automated Google Drive backups (WordPress server)
+The plugin can upload **year backups** (same schema as the app's backup download) to Google Drive on a daily WordPress cron schedule.
+
+### 1) Create a Google Service Account
+- In Google Cloud Console, create a project (or use an existing one).
+- Enable the **Google Drive API**.
+- Create a **Service Account** and generate a **JSON key**.
+
+### 2) Create a Drive folder and share it
+- Create a folder in Google Drive for backups.
+- Share that folder with the service account email (the `client_email` field in the JSON key) as **Editor**.
+- Copy the folder ID from the Drive URL.
+
+### 3) Add secrets in `wp-config.php`
+Add these constants (recommended so the private key is not stored in the database):
+
+```php
+define('ACGL_FMS_GDRIVE_FOLDER_ID', 'YOUR_DRIVE_FOLDER_ID');
+define('ACGL_FMS_GDRIVE_SERVICE_ACCOUNT_JSON', 'PASTE_THE_SERVICE_ACCOUNT_JSON_HERE');
+```
+
+Notes:
+- `ACGL_FMS_GDRIVE_SERVICE_ACCOUNT_JSON` must be the full JSON string. If you paste it as a single-quoted string, you must keep the `\n` escapes inside the `private_key`.
+
+#### No `wp-config.php` / file access?
+If you cannot edit `wp-config.php` or upload files to the server, you can configure Drive backups in **WordPress Admin**:
+
+- Go to **Settings → ACGL FMS → Google Drive Backups**
+- Paste the Drive folder ID
+- Paste the full service account JSON
+
+The JSON is stored in `wp_options` (encrypted when OpenSSL is available). The Drive backup code will use these settings automatically if the `wp-config.php` constants are not set.
+
+### 4) Trigger an immediate test upload (optional)
+As an admin, you can run:
+
+`POST /wp-json/acgl-fms/v1/admin/gdrive-backup/run`
+
+This endpoint requires the `acgl_fms_write` capability.
+
+### Schedule
+- The plugin schedules a daily WordPress cron event (`acgl_fms_gdrive_backup_daily`).
+- It uploads backups for all years listed in `payment_order_budget_years_v1` (and includes the active year if missing).

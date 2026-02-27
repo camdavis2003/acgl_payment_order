@@ -20,6 +20,7 @@ function acgl_fms_shortcode($atts = []) {
         'restUrl' => $rest_url,
         'restNonce' => $nonce,
         'wp' => '1',
+        'v' => defined('ACGL_FMS_APP_VERSION') ? ACGL_FMS_APP_VERSION : '0',
     ], $app_url);
 
     $height = isset($atts['height']) ? preg_replace('/[^0-9]/', '', (string)$atts['height']) : '';

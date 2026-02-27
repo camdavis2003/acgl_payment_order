@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=7ab3ccc-20260227065229" />
+    <link rel="stylesheet" href="styles.css?v=e75232a-20260227212728" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -14,7 +14,7 @@
 
       <div class="appMain">
         <header class="site-header">
-          <div class="container">
+          <div class="container container--wide">
             <div class="header-top">
               <div class="header-left">
                 <button
@@ -46,7 +46,7 @@
           </div>
         </header>
 
-        <main class="container">
+        <main class="container container--wide archive__grid">
           <section
             class="card"
             aria-labelledby="roles-title"
@@ -196,7 +196,10 @@
             draggable="true"
             data-settings-card="numbering"
           >
-            <h2 id="settings-title">Payment Order Numbering</h2>
+            <div class="list-header">
+              <h2 id="settings-title">Payment Order Numbering</h2>
+              <div class="list-actions"></div>
+            </div>
 
             <p class="subhead">
               Set the masonic year and the first Payment Order number for the
@@ -247,6 +250,51 @@
                 </button>
               </div>
             </form>
+          </section>
+
+          <section
+            class="card"
+            aria-labelledby="backup-title"
+            draggable="true"
+            data-settings-card="backup"
+            data-backup
+          >
+            <div class="list-header">
+              <h2 id="backup-title">Backup</h2>
+              <div class="list-actions">
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  data-backup-create-active
+                >
+                  WP Backup
+                </button>
+                <button
+                  type="button"
+                  class="btn btn--editBlue"
+                  data-gdrive-upload-now
+                  hidden
+                >
+                  Cloud Backup
+                </button>
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  data-backup-restore-file-btn
+                >
+                  Restore from File
+                </button>
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  data-backup-restore-file
+                  hidden
+                />
+              </div>
+            </div>
+
+            <div class="archive__grid" data-backup-grid></div>
+            <p class="empty" data-backup-empty hidden>No backups yet.</p>
           </section>
 
           <section
@@ -711,6 +759,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=7ab3ccc-20260227065229" defer></script>
+    <script src="app.js?v=e75232a-20260227212728" defer></script>
   </body>
 </html>

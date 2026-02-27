@@ -12,6 +12,21 @@ function acgl_fms_require_write() {
     return is_user_logged_in() && current_user_can(ACGL_FMS_CAP_WRITE);
 }
 
+function acgl_fms_authorize_settings_write() {
+    // Allow WordPress users with caps.
+    if (acgl_fms_require_write()) return true;
+
+    // Token mode: require settings write/partial.
+    $token = acgl_fms_get_bearer_token();
+    if (!$token) return false;
+    $payload = acgl_fms_verify_token($token);
+    if (!$payload) return false;
+
+    $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
+    $lvl = $perms['settings'] ?? 'none';
+    return $lvl === 'write' || $lvl === 'partial';
+}
+
 function acgl_fms_public_year2_from_budget_year($budgetYear) {
     $y = is_string($budgetYear) ? trim($budgetYear) : '';
     if ($y === '' || !preg_match('/^\d{4}$/', $y)) return null;
@@ -614,6 +629,85 @@ function acgl_fms_register_rest_routes() {
                 'nextSeq' => $nextSeq,
                 'paymentOrderNo' => $po,
             ];
+        },
+    ]);
+
+    // Admin helper: trigger an immediate Google Drive backup upload (service account).
+    // Requires WP write capability (server-side cron jobs run without a user).
+    register_rest_route('acgl-fms/v1', '/admin/gdrive-backup/run', [
+        'methods' => 'POST',
+        'permission_callback' => function () {
+            return acgl_fms_authorize_settings_write();
+        },
+        'callback' => function (WP_REST_Request $request) {
+            if (!function_exists('acgl_fms_gdrive_run_backup_upload')) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'not_available' ], 500);
+            }
+
+            // Ensure KV exists.
+            if (function_exists('acgl_fms_db_ensure_installed')) {
+                try {
+                    acgl_fms_db_ensure_installed();
+                } catch (Throwable $e) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error', 'message' => $e->getMessage() ], 500);
+                }
+            }
+
+            $res = acgl_fms_gdrive_run_backup_upload('manual');
+            if (!is_array($res)) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error' ], 500);
+            }
+            return $res;
+        },
+    ]);
+
+    // Admin helper: list recent Google Drive backup files in the configured folder.
+    register_rest_route('acgl-fms/v1', '/admin/gdrive-backup/list', [
+        'methods' => 'GET',
+        'permission_callback' => function () {
+            return acgl_fms_authorize_settings_write();
+        },
+        'callback' => function (WP_REST_Request $request) {
+            if (!function_exists('acgl_fms_gdrive_list_backups')) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'not_available' ], 500);
+            }
+
+            $n = (int) $request->get_param('n');
+            if ($n < 1) $n = 20;
+
+            $res = acgl_fms_gdrive_list_backups($n);
+            if (!is_array($res)) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error' ], 500);
+            }
+            return $res;
+        },
+    ]);
+
+    // Admin helper: fetch a specific Drive backup JSON by file id.
+    register_rest_route('acgl-fms/v1', '/admin/gdrive-backup/file', [
+        'methods' => 'GET',
+        'permission_callback' => function () {
+            return acgl_fms_authorize_settings_write();
+        },
+        'callback' => function (WP_REST_Request $request) {
+            if (!function_exists('acgl_fms_gdrive_get_backup_payload_by_file_id')) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'not_available' ], 500);
+            }
+
+            $id = (string) $request->get_param('id');
+            if (function_exists('sanitize_text_field')) {
+                $id = sanitize_text_field($id);
+            }
+            $id = trim($id);
+            if ($id === '' || !preg_match('/^[A-Za-z0-9_\-]+$/', $id)) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'invalid_id' ], 400);
+            }
+
+            $res = acgl_fms_gdrive_get_backup_payload_by_file_id($id);
+            if (!is_array($res)) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error' ], 500);
+            }
+            return $res;
         },
     ]);
     // Public (unauthenticated) submission endpoint: persist a new Payment Order.

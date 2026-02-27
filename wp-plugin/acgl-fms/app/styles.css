@@ -368,9 +368,69 @@ body {
   gap: 16px;
 }
 
+
+/* Settings: allow a card to span both columns when using the archive__grid layout. */
+.archive__grid > .settingsCard--full {
+  grid-column: 1 / -1;
+}
+
+/* Settings: cards are equal-height per row, up to a cap. */
+main.archive__grid {
+  /* Default grid behavior: items stretch to the tallest card in the row. */
+  align-items: stretch;
+}
+
+main.archive__grid > section.card {
+  /* Keep Admin Settings compact: cap card height and scroll the body. */
+  max-height: min(520px, 65vh);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* In a grid layout we use gap for spacing; card margins make cards look too tall. */
+  margin: 0;
+}
+
+/* Settings: cap card max-height (set by JS from Backlog card height).
+   This lets smaller cards auto-size while keeping long sections contained. */
+main.archive__grid.settingsUniformHeight > section.card {
+  max-height: min(520px, 65vh);
+  overflow: hidden;
+}
+
+/* Settings: scroll only the content below the card header. */
+main.archive__grid > section.card > .settingsCardBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Settings: keep header spacing tight so vertical padding matches horizontal. */
+main.archive__grid > section.card .list-header > h2,
+main.archive__grid > section.card .settingsCardHeader > h2 {
+  margin: 0;
+}
+
 @media (max-width: 720px) {
   .archive__grid {
     grid-template-columns: 1fr;
+  }
+
+
+  /* Mobile: avoid nested scrolling inside cards. */
+  main.archive__grid > section.card {
+    max-height: none;
+    overflow: visible;
+    display: block;
+  }
+
+  /* Mobile: disable uniform max-height cap. */
+  main.archive__grid.settingsUniformHeight > section.card {
+    max-height: none;
+  }
+
+  /* Mobile: disable internal card body scroll. */
+  main.archive__grid > section.card > .settingsCardBody {
+    overflow: visible;
   }
 }
 
@@ -1233,6 +1293,45 @@ input:focus, textarea:focus, select:focus, button:focus {
   position: relative;
 }
 
+/* Settings card gear dropdown */
+.settingsGear {
+  position: relative;
+  display: inline-flex;
+}
+
+.settingsGear > summary {
+  list-style: none;
+}
+
+.settingsGear > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settingsGear__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  min-width: 170px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settingsGear:not([open]) .settingsGear__panel {
+  display: none;
+}
+
+.settingsGear__panel .actionLink {
+  width: 100%;
+  justify-content: flex-start;
+  cursor: pointer;
+}
+
 /* Tooltip popup for menu items (e.g., Add line) */
 .budgetMenu__panel .actionLink[data-tooltip]:hover::after,
 .budgetMenu__panel .actionLink[data-tooltip]:focus-visible::after {
@@ -1337,6 +1436,28 @@ input:focus, textarea:focus, select:focus, button:focus {
   gap: 10px;
   margin-top: 8px;
   flex-wrap: wrap;
+}
+
+/* Backup cards: keep the timestamp left and actions right. */
+.backupRow {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.backupRow__label {
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+.backupRow__buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .actions--right {
@@ -1867,6 +1988,13 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
 }
 
+/* Admin Settings: avoid nested vertical scrollbars inside settings cards.
+   Let the card body scroll vertically; keep table-wrap for horizontal scrolling only. */
+main.archive__grid > section.card > .settingsCardBody .table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -1895,6 +2023,45 @@ input:focus, textarea:focus, select:focus, button:focus {
   z-index: 1;
   text-align: left;
   font-size: 0.95rem;
+}
+
+/* Table column resizing (Admin Settings: User Roles). */
+.table.is-colResizable {
+  table-layout: fixed;
+}
+
+/* Override the Admin Settings Users table default (table-layout:auto) when resizing is enabled. */
+#usersTable.is-colResizable {
+  table-layout: fixed;
+}
+
+.tableColResizer {
+  position: absolute;
+  top: 0;
+  right: -6px;
+  height: 100%;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.tableColResizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  background: transparent;
+}
+
+.tableColResizer:hover::before {
+  background: var(--border);
+}
+
+body.isTableResizing {
+  user-select: none;
+  cursor: col-resize;
 }
 
 /* Settings: Users table email under username */
@@ -2594,15 +2761,13 @@ input[type='checkbox'].cb {
   display: grid;
   gap: 5px;
   margin-top: 3px;
-  /* Keep the Audit Log to ~6 lines, then scroll. */
-  max-height: 66px;
-  overflow-y: auto;
-  overscroll-behavior: auto;
+  /* Let the Settings card body handle scrolling (avoid nested scrollbars). */
 }
 
 /* Extra specificity so this wins if any other CSS overrides .auditLog. */
 #auditLogList.auditLog {
-  max-height: 66px;
+  max-height: none;
+  overflow: visible;
 }
 
 .auditLog__item {

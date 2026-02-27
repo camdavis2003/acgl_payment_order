@@ -10,7 +10,7 @@ void (async () => {
   'use strict';
 
   const APP_TAB_TITLE = 'ACGL - FMS';
-  const APP_VERSION = '0.1.0';
+  const APP_VERSION = '0.1.1';
 
   function setBrowserTabTitle(title) {
     const next = String(title || '').trim();
@@ -363,11 +363,18 @@ void (async () => {
   async function initWpSharedStorageBridge() {
     if (!IS_WP_SHARED_MODE) return;
     if (typeof window.fetch !== 'function') return;
-    if (!window.localStorage) return;
+    let storage;
+    try {
+      storage = window.localStorage;
+    } catch {
+      // Some embedded/browser privacy modes throw on storage access.
+      return;
+    }
+    if (!storage) return;
 
-    const nativeGet = window.localStorage.getItem.bind(window.localStorage);
-    const nativeSet = window.localStorage.setItem.bind(window.localStorage);
-    const nativeRemove = window.localStorage.removeItem.bind(window.localStorage);
+    const nativeGet = storage.getItem.bind(storage);
+    const nativeSet = storage.setItem.bind(storage);
+    const nativeRemove = storage.removeItem.bind(storage);
 
     const mem = new Map();
     const pendingUpserts = new Map();
@@ -483,13 +490,13 @@ void (async () => {
     window.acglFmsWpFlushNow = flushNow;
 
     // 2) Override localStorage for shared keys only.
-    window.localStorage.getItem = (key) => {
+    storage.getItem = (key) => {
       const k = String(key || '');
       if (!isWpSharedKey(k)) return nativeGet(k);
       return mem.has(k) ? mem.get(k) : null;
     };
 
-    window.localStorage.setItem = (key, value) => {
+    storage.setItem = (key, value) => {
       const k = String(key || '');
       if (!isWpSharedKey(k)) {
         nativeSet(k, value);
@@ -508,7 +515,7 @@ void (async () => {
       scheduleFlush();
     };
 
-    window.localStorage.removeItem = (key) => {
+    storage.removeItem = (key) => {
       const k = String(key || '');
       if (!isWpSharedKey(k)) {
         nativeRemove(k);
@@ -530,7 +537,12 @@ void (async () => {
     // the shared store is authoritative and reload is typically acceptable.
   }
 
-  await initWpSharedStorageBridge();
+  try {
+    await initWpSharedStorageBridge();
+  } catch {
+    // If the WP bridge fails for any reason, continue in standalone mode so
+    // the UI still works (sign-in, itemize, etc.).
+  }
 
   // If we arrived on a page without WP params (e.g., user clicked a bare "settings.html" link),
   // restore the remembered embed params so shared mode stays consistent across pages.
@@ -811,7 +823,7 @@ void (async () => {
     if (IS_WP_SHARED_MODE) clearWpToken();
 
     // Bring the user back to the public request page.
-    window.location.href = 'index.html?new=1';
+    window.location.href = withWpEmbedParams('index.html?new=1');
   }
 
   let idleLogoutInstalled = false;
@@ -7403,6 +7415,9 @@ void (async () => {
     const archiveListEl = document.getElementById('backlogArchiveList');
     if (!listEl || !emptyEl) return;
 
+    const hasArchiveUi = Boolean(archiveToggleEl && archiveWrapEl && archiveEmptyEl && archiveListEl);
+    const showArchivedOnly = hasArchiveUi && archiveWrapEl.dataset.open === '1';
+
     // Bind search UI once.
     if (searchInput && !searchInput.dataset.bound) {
       searchInput.dataset.bound = 'true';
@@ -7421,6 +7436,7 @@ void (async () => {
       clearBtn.addEventListener('click', () => {
         searchInput.value = '';
         renderBacklogList(canEdit);
+        searchInput.focus();
       });
     }
     if (clearBtn && searchInput) {
@@ -7428,30 +7444,30 @@ void (async () => {
       clearBtn.hidden = !has;
     }
 
-    const hasArchiveUi = Boolean(archiveToggleEl && archiveWrapEl && archiveEmptyEl && archiveListEl);
-    const archiveOpen = hasArchiveUi && archiveWrapEl.dataset.open === '1';
+    // One mode at a time: either show archived-only or active-only.
+    if (hasArchiveUi) {
+      archiveToggleEl.textContent = showArchivedOnly ? 'Active' : 'Archive';
+      archiveToggleEl.setAttribute('aria-expanded', showArchivedOnly ? 'true' : 'false');
+      archiveWrapEl.hidden = !showArchivedOnly;
+    }
+    listEl.hidden = Boolean(showArchivedOnly);
 
     const tokens = getBacklogQueryTokens();
-
     const items = loadBacklogItems();
+    const usedRefNos = new Set(
+      items
+        .map((x) => (x && typeof x === 'object' ? String(x.refNo || '') : ''))
+        .filter((x) => isFiveDigitNumber(x))
+    );
 
-    // Normalize + migrate: ensure each item has a stable id, unique 5-digit refNo, and priority.
-    const usedRefNos = new Set();
     let needsSave = false;
-    const patched = items.map((it) => {
+    const patched = items.map((it, idx) => {
       if (!it || typeof it !== 'object') return it;
-
       const out = { ...it };
 
       const id = String(out.id || '').trim();
       if (!id) {
-        out.id = (crypto?.randomUUID ? crypto.randomUUID() : `bl_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-        needsSave = true;
-      }
-
-      const p = normalizeBacklogPriority(out.priority);
-      if (p !== out.priority) {
-        out.priority = p;
+        out.id = (crypto?.randomUUID ? crypto.randomUUID() : `bl_${Date.now()}_${idx}_${Math.random().toString(16).slice(2)}`);
         needsSave = true;
       }
 
@@ -7537,25 +7553,10 @@ void (async () => {
     });
 
     if (metaEl) {
-      const label = tokens.length > 0 ? `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} match` : `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} total`;
+      const label = tokens.length > 0
+        ? `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} match`
+        : `${activeItems.length} open • ${archivedItems.length} archived • ${normalized.length} total`;
       metaEl.textContent = label;
-    }
-
-    if (tokens.length > 0) {
-      emptyEl.textContent = 'No matching backlog items.';
-    } else {
-      emptyEl.textContent = 'No backlog items yet.';
-    }
-
-    emptyEl.hidden = normalized.length > 0;
-    if (normalized.length === 0) {
-      listEl.innerHTML = '';
-      if (hasArchiveUi) {
-        archiveListEl.innerHTML = '';
-        archiveEmptyEl.textContent = tokens.length > 0 ? 'No matching archived items.' : 'No archived items.';
-        archiveEmptyEl.hidden = false;
-      }
-      return;
     }
 
     const actionsDisabled = !canEdit;
@@ -7563,17 +7564,17 @@ void (async () => {
     function renderItems(itemsToRender) {
       return itemsToRender
         .map((it) => {
-        const createdLabel = it.createdAt ? formatIsoDateTimeShort(it.createdAt) : '—';
-        const completedLabel = it.completedAt ? formatIsoDateTimeShort(it.completedAt) : '—';
+          const createdLabel = it.createdAt ? formatIsoDateTimeShort(it.createdAt) : '—';
+          const completedLabel = it.completedAt ? formatIsoDateTimeShort(it.completedAt) : '—';
 
-        const comments = (Array.isArray(it.comments) ? it.comments : [])
-          .map((c, commentIdx) => {
-            const at = c.at ? String(c.at) : '';
-            const by = c.by !== undefined ? String(c.by || '—') : '—';
-            const text = String(c.text || '').trim();
-            if (!text) return '';
-            const time = at ? formatIsoDateTimeShort(at) : '—';
-            return `
+          const comments = (Array.isArray(it.comments) ? it.comments : [])
+            .map((c, commentIdx) => {
+              const at = c.at ? String(c.at) : '';
+              const by = c.by !== undefined ? String(c.by || '—') : '—';
+              const text = String(c.text || '').trim();
+              if (!text) return '';
+              const time = at ? formatIsoDateTimeShort(at) : '—';
+              return `
               <div class="backlog__comment" data-comment-idx="${escapeHtml(commentIdx)}">
                 <div class="backlog__commentHead">
                   <span><strong>${escapeHtml(by)}</strong></span>
@@ -7583,23 +7584,23 @@ void (async () => {
                 <div class="backlog__commentBody">${escapeHtml(text)}</div>
               </div>
             `.trim();
-          })
-          .filter(Boolean)
-          .join('');
+            })
+            .filter(Boolean)
+            .join('');
 
-        const subjectClass = it.completed ? 'backlog__subject backlog__subject--completed' : 'backlog__subject';
-        const itemClass = it.completed ? 'backlog__item backlog__item--completed' : 'backlog__item';
-        const completeText = it.completed ? 'Reopen' : 'Complete';
+          const subjectClass = it.completed ? 'backlog__subject backlog__subject--completed' : 'backlog__subject';
+          const itemClass = it.completed ? 'backlog__item backlog__item--completed' : 'backlog__item';
+          const completeText = it.completed ? 'Reopen' : 'Complete';
 
-        const attachmentBtn = it.attachmentId
-          ? `<button type="button" class="btn btn--ghost" data-backlog-action="attachment">Attachment</button>`
-          : '';
+          const attachmentBtn = it.attachmentId
+            ? `<button type="button" class="btn btn--ghost" data-backlog-action="attachment">Attachment</button>`
+            : '';
 
-        const completedMeta = it.completed
-          ? ` <span class="timelinegraph__eventSep">•</span> <span>Completed: <strong>${escapeHtml(completedLabel)}</strong></span> <span class="timelinegraph__eventSep">•</span> <span>By: <strong>${escapeHtml(it.completedBy || '—')}</strong></span>`
-          : '';
+          const completedMeta = it.completed
+            ? ` <span class="timelinegraph__eventSep">•</span> <span>Completed: <strong>${escapeHtml(completedLabel)}</strong></span> <span class="timelinegraph__eventSep">•</span> <span>By: <strong>${escapeHtml(it.completedBy || '—')}</strong></span>`
+            : '';
 
-        return `
+          return `
           <div class="${itemClass}" data-id="${escapeHtml(it.id)}">
             <div class="backlog__header">
               <div class="${subjectClass}">#${escapeHtml(it.refNo)} • P${escapeHtml(it.priority)} • ${escapeHtml(it.subject)}</div>
@@ -7625,27 +7626,28 @@ void (async () => {
         .join('');
     }
 
-    listEl.innerHTML = activeItems.length > 0 ? renderItems(activeItems) : '';
+    if (!showArchivedOnly) {
+      emptyEl.textContent = tokens.length > 0 ? 'No matching backlog items.' : 'No active backlog items.';
+      emptyEl.hidden = activeItems.length > 0;
+      listEl.innerHTML = activeItems.length > 0 ? renderItems(activeItems) : '';
 
-    // Cap list height to ~3 items, then scroll.
-    requestAnimationFrame(() => {
-      applyMaxVisibleBacklogItems(listEl, 3);
-      requestAnimationFrame(() => applyMaxVisibleBacklogItems(listEl, 3));
-    });
+      if (hasArchiveUi) {
+        archiveListEl.innerHTML = '';
+        archiveEmptyEl.textContent = tokens.length > 0 ? 'No matching archived items.' : 'No archived items.';
+        archiveEmptyEl.hidden = true;
+      }
+      return;
+    }
+
+    // Archived-only view.
+    emptyEl.hidden = true;
+    emptyEl.textContent = tokens.length > 0 ? 'No matching backlog items.' : 'No active backlog items.';
+    listEl.innerHTML = '';
 
     if (hasArchiveUi) {
-      archiveWrapEl.hidden = !archiveOpen;
-      archiveToggleEl.setAttribute('aria-expanded', archiveOpen ? 'true' : 'false');
       archiveEmptyEl.textContent = tokens.length > 0 ? 'No matching archived items.' : 'No archived items.';
       archiveEmptyEl.hidden = archivedItems.length > 0;
       archiveListEl.innerHTML = archivedItems.length > 0 ? renderItems(archivedItems) : '';
-
-      requestAnimationFrame(() => {
-        if (!archiveWrapEl.hidden) {
-          applyMaxVisibleBacklogItems(archiveListEl, 3);
-          requestAnimationFrame(() => applyMaxVisibleBacklogItems(archiveListEl, 3));
-        }
-      });
     }
   }
 
@@ -7681,12 +7683,8 @@ void (async () => {
     if (archiveToggleEl && archiveWrapEl && !archiveToggleEl.dataset.bound) {
       archiveToggleEl.dataset.bound = 'true';
       archiveToggleEl.addEventListener('click', () => {
-        const isOpen = archiveWrapEl.dataset.open === '1';
-        archiveWrapEl.dataset.open = isOpen ? '0' : '1';
-        archiveWrapEl.hidden = isOpen;
-        archiveToggleEl.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
-
-        // Re-apply scroll cap after toggling.
+        const showArchivedOnly = archiveWrapEl.dataset.open === '1';
+        archiveWrapEl.dataset.open = showArchivedOnly ? '0' : '1';
         renderBacklogList(canEdit);
       });
     }
@@ -8201,6 +8199,34 @@ void (async () => {
     setCookieValue(cookieName, encodeURIComponent(JSON.stringify(arr)), 365);
   }
 
+  function getSettingsCardFullWidthCookieName() {
+    const username = normalizeUsername(getCurrentUsername());
+    if (!username) return 'acgl_settings_card_fullwidth_v1';
+    return `acgl_settings_card_fullwidth_v1_${encodeURIComponent(username)}`;
+  }
+
+  function readSettingsCardFullWidthFromCookie() {
+    const cookieName = getSettingsCardFullWidthCookieName();
+    if (!cookieName) return null;
+    const raw = getCookieValue(cookieName);
+    if (!raw) return null;
+    try {
+      const decoded = decodeURIComponent(raw);
+      const parsed = JSON.parse(decoded);
+      if (!Array.isArray(parsed)) return null;
+      return parsed.map((x) => String(x || '').trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSettingsCardFullWidthToCookie(fullWidthKeys) {
+    const cookieName = getSettingsCardFullWidthCookieName();
+    if (!cookieName) return;
+    const arr = Array.isArray(fullWidthKeys) ? fullWidthKeys.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    setCookieValue(cookieName, encodeURIComponent(JSON.stringify(arr)), 365);
+  }
+
   function getSettingsCardsContainer() {
     const main = document.querySelector('main.container');
     if (!main) return null;
@@ -8242,6 +8268,121 @@ void (async () => {
     }
   }
 
+  function applySettingsCardFullWidth(containerEl) {
+    const keys = readSettingsCardFullWidthFromCookie();
+    const set = new Set(Array.isArray(keys) ? keys : []);
+    for (const el of getSettingsCardEls(containerEl)) {
+      const key = String(el.getAttribute('data-settings-card') || '').trim();
+      if (!key) continue;
+      if (set.has(key)) el.classList.add('settingsCard--full');
+      else el.classList.remove('settingsCard--full');
+    }
+  }
+
+  function installSettingsCardGearButtons() {
+    const containerEl = getSettingsCardsContainer();
+    if (!containerEl) return;
+
+    // Ensure saved layout preferences are applied even if the dropdown UI is hidden.
+    applySettingsCardFullWidth(containerEl);
+
+    const cards = getSettingsCardEls(containerEl);
+
+    const getTitle = (cardEl) => {
+      const h2 = cardEl.querySelector('h2');
+      const txt = h2 ? String(h2.textContent || '').trim() : '';
+      if (txt) return txt;
+      const key = String(cardEl.getAttribute('data-settings-card') || '').trim();
+      return key || 'Section';
+    };
+
+    for (const card of cards) {
+      const key = String(card.getAttribute('data-settings-card') || '').trim();
+      if (!key) continue;
+      const header = card.querySelector('.list-header');
+      if (!header) continue;
+
+      let actions = header.querySelector('.list-actions');
+      if (!actions) {
+        actions = document.createElement('div');
+        actions.className = 'list-actions';
+        header.appendChild(actions);
+      }
+
+      // Avoid duplicates.
+      if (actions.querySelector(`[data-settings-layout-gear="${key}"]`)) continue;
+
+      // Remove any legacy injected controls from older builds.
+      for (const legacy of Array.from(actions.querySelectorAll('[data-settings-layout-select], [data-settings-gear]'))) {
+        legacy.remove();
+      }
+
+      const title = getTitle(card);
+      const details = document.createElement('details');
+      details.className = 'settingsGear';
+      details.setAttribute('data-settings-layout-gear', key);
+
+      const summary = document.createElement('summary');
+      summary.className = 'btn btn--ghost';
+      summary.textContent = '⚙';
+      summary.title = 'Layout';
+      summary.setAttribute('aria-label', `Layout options for ${title}`);
+      details.appendChild(summary);
+
+      const panel = document.createElement('div');
+      panel.className = 'settingsGear__panel';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'actionLink';
+
+      const readFullWidthSet = () => {
+        const keys = readSettingsCardFullWidthFromCookie();
+        return new Set(Array.isArray(keys) ? keys : []);
+      };
+
+      const refreshLabel = () => {
+        const isFull = card.classList.contains('settingsCard--full');
+        toggleBtn.textContent = isFull ? 'Column view' : 'Full width';
+      };
+
+      toggleBtn.addEventListener('click', () => {
+        const isFull = card.classList.contains('settingsCard--full');
+        const set = readFullWidthSet();
+        if (isFull) set.delete(key);
+        else set.add(key);
+        writeSettingsCardFullWidthToCookie(Array.from(set));
+        applySettingsCardFullWidth(containerEl);
+        refreshLabel();
+        details.open = false;
+      });
+
+      details.addEventListener('toggle', () => {
+        if (!details.open) return;
+        // Close any other open gear menus.
+        for (const other of Array.from(containerEl.querySelectorAll('details.settingsGear[open]')))
+          if (other !== details) other.open = false;
+        refreshLabel();
+      });
+
+      panel.appendChild(toggleBtn);
+      details.appendChild(panel);
+      actions.appendChild(details);
+    }
+
+    // Click outside closes any open gear dropdowns.
+    if (!containerEl.dataset.settingsGearOutsideBound) {
+      containerEl.dataset.settingsGearOutsideBound = '1';
+      document.addEventListener('click', (e) => {
+        const target = e && e.target ? e.target : null;
+        if (!target) return;
+        for (const d of Array.from(containerEl.querySelectorAll('details.settingsGear[open]'))) {
+          if (!d.contains(target)) d.open = false;
+        }
+      });
+    }
+  }
+
   function saveSettingsCardOrder(containerEl) {
     const cards = getSettingsCardEls(containerEl);
     const keys = cards
@@ -8260,6 +8401,7 @@ void (async () => {
     containerEl.dataset.settingsCardDndBound = '1';
 
     applySettingsCardOrder(containerEl);
+    applySettingsCardFullWidth(containerEl);
 
     let draggedEl = null;
 
@@ -8330,6 +8472,14 @@ void (async () => {
     const clearBtn = document.getElementById('auditLogClearSearchBtn');
     if (!listEl || !emptyEl) return;
 
+    // Avoid nested vertical scrollbars: the Settings card body handles scrolling.
+    try {
+      listEl.style.maxHeight = '';
+      listEl.style.overflowY = '';
+    } catch {
+      // ignore
+    }
+
     function getQueryTokens() {
       const raw = searchInput ? String(searchInput.value || '') : '';
       return raw
@@ -8366,48 +8516,6 @@ void (async () => {
         if (!hay.includes(t)) return false;
       }
       return true;
-    }
-
-    function applyMaxVisibleItems(maxVisible) {
-      const items = Array.from(listEl.querySelectorAll('.auditLog__item'));
-
-      listEl.style.overflowY = 'auto';
-      if (items.length <= maxVisible) {
-        listEl.style.maxHeight = '';
-        return;
-      }
-
-      // Prefer bounding-rect measurement so layout gaps are counted correctly,
-      // and so we don't depend on offsetParent quirks.
-      const first = items[0];
-      const last = items[Math.min(maxVisible, items.length) - 1];
-      const prevScrollTop = listEl.scrollTop;
-      if (prevScrollTop) listEl.scrollTop = 0;
-      let total = 0;
-      try {
-        const listRect = listEl.getBoundingClientRect ? listEl.getBoundingClientRect() : null;
-        const firstRect = first && first.getBoundingClientRect ? first.getBoundingClientRect() : null;
-        const lastRect = last && last.getBoundingClientRect ? last.getBoundingClientRect() : null;
-        if (listRect && firstRect && lastRect) {
-          total = (lastRect.bottom - listRect.top);
-        }
-      } finally {
-        if (prevScrollTop) listEl.scrollTop = prevScrollTop;
-      }
-
-      // Fallback: sum item heights + computed gap.
-      if (!Number.isFinite(total) || total <= 0) {
-        const cs = window.getComputedStyle ? window.getComputedStyle(listEl) : null;
-        const gapRaw = cs ? (cs.rowGap || cs.gap || '0px') : '0px';
-        const gap = Number.parseFloat(String(gapRaw)) || 0;
-        total = 0;
-        for (let i = 0; i < Math.min(maxVisible, items.length); i += 1) {
-          total += items[i].offsetHeight;
-        }
-        total += gap * (maxVisible - 1);
-      }
-
-      listEl.style.maxHeight = `${Math.max(80, Math.ceil(total))}px`;
     }
 
     // Bind search input once (re-renders Activity Log on change)
@@ -8687,25 +8795,6 @@ void (async () => {
       })
       .join('');
 
-    // Enforce: max 10 visible items; scroll to see the rest.
-    // Run twice to reduce cases where first paint hasn't finalized heights yet.
-    requestAnimationFrame(() => {
-      applyMaxVisibleItems(10);
-      requestAnimationFrame(() => applyMaxVisibleItems(10));
-    });
-
-    // Re-apply cap on resize (layout changes can affect item wrapping/height).
-    if (!listEl.dataset.auditCapResizeBound) {
-      listEl.dataset.auditCapResizeBound = '1';
-      let resizeTimer = 0;
-      window.addEventListener('resize', () => {
-        if (resizeTimer) window.clearTimeout(resizeTimer);
-        resizeTimer = window.setTimeout(() => {
-          resizeTimer = 0;
-          applyMaxVisibleItems(10);
-        }, 120);
-      });
-    }
   }
 
   function initRolesSettingsPage() {
@@ -8722,14 +8811,24 @@ void (async () => {
 
     // Settings page: allow each user to reorder cards (persisted via cookie).
     initSettingsCardsDragAndDrop();
+    installSettingsCardGearButtons();
+
+    // Settings page: keep card headers fixed; only body content scrolls.
+    prepareSettingsCardsStickyHeaders();
 
     renderUsersTable();
+
+    // Settings page: allow manually resizing User Roles table columns.
+    initUsersTableColumnResizer();
 
     // Backlog (CRUD + comments)
     initBacklogSettingsSection(canEdit);
 
     // Timeline audit log (Payment Orders + Income)
     renderSettingsAuditLog();
+
+    // Keep Settings compact via CSS max-height + per-row equal heights.
+    // Do not force a single global height across all cards.
 
     // Keep Audit Log in sync across tabs/windows.
     const auditListEl = document.getElementById('auditLogList');
@@ -8772,6 +8871,317 @@ void (async () => {
       ].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.checked = false;
+      });
+    }
+
+    function prepareSettingsCardsStickyHeaders() {
+      const mainEl = document.querySelector('main.archive__grid');
+      if (!mainEl) return;
+      if (mainEl.dataset.settingsStickyPrepared) return;
+      mainEl.dataset.settingsStickyPrepared = '1';
+
+      const cards = Array.from(mainEl.querySelectorAll('section.card'));
+      for (const card of cards) {
+        if (card.querySelector(':scope > .settingsCardBody')) continue;
+
+        let header = card.querySelector(':scope > .list-header');
+
+        // Some settings cards (e.g., Payment Order Numbering) do not use .list-header;
+        // treat their direct h2 (+ optional subhead) as the fixed header.
+        if (!header) {
+          const h2 = card.querySelector(':scope > h2');
+          if (h2) {
+            const subhead = h2.nextElementSibling && h2.nextElementSibling.classList && h2.nextElementSibling.classList.contains('subhead')
+              ? h2.nextElementSibling
+              : null;
+
+            const wrap = document.createElement('div');
+            wrap.className = 'settingsCardHeader';
+            card.insertBefore(wrap, h2);
+            wrap.appendChild(h2);
+            if (subhead) wrap.appendChild(subhead);
+            header = wrap;
+          }
+        }
+
+        if (!header) continue;
+
+        const body = document.createElement('div');
+        body.className = 'settingsCardBody';
+
+        // Move all nodes after header into the scrollable body wrapper.
+        let node = header.nextSibling;
+        while (node) {
+          const next = node.nextSibling;
+          body.appendChild(node);
+          node = next;
+        }
+
+        card.appendChild(body);
+      }
+    }
+
+    function installSettingsUniformCardHeightFromBacklog() {
+      const mainEl = document.querySelector('main.archive__grid');
+      if (!mainEl) return;
+      if (mainEl.dataset.uniformHeightBound) return;
+
+      const backlogCardEl = mainEl.querySelector('section.card[data-settings-card="backlog"]');
+      if (!backlogCardEl) return;
+
+      mainEl.dataset.uniformHeightBound = '1';
+
+      const isMobile = () => {
+        try {
+          return window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+        } catch {
+          return false;
+        }
+      };
+
+      const apply = () => {
+        if (isMobile()) {
+          mainEl.classList.remove('settingsUniformHeight');
+          mainEl.style.removeProperty('--settings-card-height');
+          return;
+        }
+
+        const rect = backlogCardEl.getBoundingClientRect();
+        let h = Math.round(rect && typeof rect.height === 'number' ? rect.height : 0);
+        if (!Number.isFinite(h) || h < 240) return;
+
+        // Avoid absurd heights if the page is resized oddly.
+        const cap = Math.round(window.innerHeight * 0.9);
+        if (Number.isFinite(cap) && cap > 0) h = Math.min(h, cap);
+
+        mainEl.style.setProperty('--settings-card-height', `${h}px`);
+        mainEl.classList.add('settingsUniformHeight');
+      };
+
+      // Measure after layout settles (Backlog + Audit render).
+      const schedule = () => {
+        requestAnimationFrame(() => requestAnimationFrame(apply));
+      };
+      schedule();
+      window.setTimeout(apply, 180);
+
+      // Keep in sync if the window size changes.
+      let t = 0;
+      window.addEventListener('resize', () => {
+        if (t) window.clearTimeout(t);
+        t = window.setTimeout(() => {
+          t = 0;
+          apply();
+        }, 120);
+      });
+    }
+
+    function initUsersTableColumnResizer() {
+      const tableEl = document.getElementById('usersTable');
+      if (!tableEl) return;
+      if (tableEl.dataset.colResizeBound) return;
+      tableEl.dataset.colResizeBound = '1';
+
+      const STORAGE_KEY = 'acgl_usersTable_colWidths_v1';
+
+      const isNarrow = () => {
+        try {
+          return window.matchMedia && window.matchMedia('(max-width: 900px)').matches;
+        } catch {
+          return false;
+        }
+      };
+
+      const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+      const readWidths = () => {
+        try {
+          const raw = window.localStorage.getItem(STORAGE_KEY);
+          if (!raw) return null;
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) return null;
+          const widths = arr.map((v) => Math.round(parseFloat(v))).filter((n) => Number.isFinite(n) && n > 0);
+          return widths.length ? widths : null;
+        } catch {
+          return null;
+        }
+      };
+
+      const writeWidths = (widths) => {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(widths.map((n) => Math.round(n))));
+        } catch {
+          // ignore
+        }
+      };
+
+      const clearWidths = () => {
+        try {
+          window.localStorage.removeItem(STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+      };
+
+      const headerRow = tableEl.tHead && tableEl.tHead.rows && tableEl.tHead.rows[0] ? tableEl.tHead.rows[0] : null;
+      if (!headerRow) return;
+      const ths = Array.from(headerRow.cells || []);
+      if (ths.length < 2) return;
+
+      const minWidths = ths.map((th, idx) => {
+        // Username column
+        if (idx === 0) return 180;
+        // Actions column
+        if (idx === ths.length - 1) return 140;
+        // Settings column is a bit wider
+        if (idx === 5) return 120;
+        // Permission columns
+        return 72;
+      });
+
+      const ensureColGroup = () => {
+        let cg = tableEl.querySelector(':scope > colgroup');
+        if (!cg) {
+          cg = document.createElement('colgroup');
+          tableEl.insertBefore(cg, tableEl.firstChild);
+        }
+        while (cg.children.length < ths.length) cg.appendChild(document.createElement('col'));
+        while (cg.children.length > ths.length) cg.removeChild(cg.lastChild);
+        return cg;
+      };
+
+      const measureWidths = () => ths.map((th) => Math.max(1, Math.round(th.getBoundingClientRect().width || 0)));
+
+      let widths = null;
+      let colGroupEl = null;
+
+      const applyWidths = (nextWidths, { persist } = { persist: false }) => {
+        if (isNarrow()) return;
+        widths = nextWidths.slice(0, ths.length);
+        while (widths.length < ths.length) widths.push(80);
+
+        tableEl.classList.add('is-colResizable');
+        colGroupEl = ensureColGroup();
+
+        const cols = Array.from(colGroupEl.children);
+        for (let i = 0; i < cols.length; i += 1) {
+          const w = Math.round(widths[i]);
+          cols[i].style.width = `${Math.max(minWidths[i] || 40, w)}px`;
+        }
+
+        if (persist) writeWidths(widths);
+      };
+
+      const reset = () => {
+        clearWidths();
+        widths = null;
+        tableEl.classList.remove('is-colResizable');
+        const cg = tableEl.querySelector(':scope > colgroup');
+        if (cg) cg.remove();
+      };
+
+      const stored = readWidths();
+      if (stored && stored.length >= ths.length - 1 && !isNarrow()) {
+        applyWidths(stored, { persist: false });
+      }
+
+      let dragging = false;
+      let dragIndex = -1;
+      let startX = 0;
+      let startLeftW = 0;
+      let startRightW = 0;
+
+      const onMove = (e) => {
+        if (!dragging) return;
+        const x = e && typeof e.clientX === 'number' ? e.clientX : 0;
+        const delta = x - startX;
+
+        const next = widths ? widths.slice() : measureWidths();
+
+        const minL = minWidths[dragIndex] || 40;
+        const minR = minWidths[dragIndex + 1] || 40;
+
+        const sum = startLeftW + startRightW;
+        let newLeft = clamp(startLeftW + delta, minL, sum - minR);
+        let newRight = sum - newLeft;
+
+        // Safety clamp.
+        if (newRight < minR) {
+          newRight = minR;
+          newLeft = sum - newRight;
+        }
+
+        next[dragIndex] = Math.round(newLeft);
+        next[dragIndex + 1] = Math.round(newRight);
+
+        applyWidths(next, { persist: false });
+        e.preventDefault();
+      };
+
+      const onUp = () => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.classList.remove('isTableResizing');
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        if (widths) writeWidths(widths);
+      };
+
+      // Attach handles to each header cell except the last.
+      for (let i = 0; i < ths.length - 1; i += 1) {
+        const th = ths[i];
+        if (!th || th.querySelector(':scope > .tableColResizer')) continue;
+        th.style.position = 'sticky';
+
+        const handle = document.createElement('div');
+        handle.className = 'tableColResizer';
+        handle.setAttribute('aria-hidden', 'true');
+        handle.title = 'Drag to resize column (double-click to reset)';
+
+        handle.addEventListener('pointerdown', (e) => {
+          if (isNarrow()) return;
+          dragging = true;
+          dragIndex = i;
+          startX = e && typeof e.clientX === 'number' ? e.clientX : 0;
+
+          const base = widths ? widths.slice() : measureWidths();
+          widths = base;
+
+          // Make sure resize mode is active and widths are applied.
+          applyWidths(base, { persist: false });
+
+          startLeftW = widths[i] || Math.round(ths[i].getBoundingClientRect().width || 80);
+          startRightW = widths[i + 1] || Math.round(ths[i + 1].getBoundingClientRect().width || 80);
+
+          document.body.classList.add('isTableResizing');
+          try {
+            handle.setPointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+          e.preventDefault();
+          e.stopPropagation();
+        });
+
+        handle.addEventListener('dblclick', (e) => {
+          reset();
+          e.preventDefault();
+          e.stopPropagation();
+        });
+
+        th.appendChild(handle);
+      }
+
+      // If the viewport becomes narrow, revert to normal table layout.
+      let rt = 0;
+      window.addEventListener('resize', () => {
+        if (rt) window.clearTimeout(rt);
+        rt = window.setTimeout(() => {
+          rt = 0;
+          if (isNarrow()) reset();
+        }, 150);
       });
     }
 
@@ -17008,6 +17418,238 @@ void (async () => {
     const restoreFileBtn = root.querySelector('[data-backup-restore-file-btn]');
     const restoreFileInput = root.querySelector('[data-backup-restore-file]');
 
+    const gdriveUploadBtn = root.querySelector('[data-gdrive-upload-now]');
+
+    const canUseGdrive = Boolean(IS_WP_SHARED_MODE);
+    if (gdriveUploadBtn) gdriveUploadBtn.hidden = !canUseGdrive;
+
+    function formatIsoForList(iso) {
+      const s = String(iso || '').trim();
+      if (!s) return '';
+      return s.replace('T', ' ').replace('Z', '');
+    }
+
+    let gdriveCloudYear = null;
+    let gdriveCloudStatus = '';
+    /** @type {Array<{id?:string,name?:string,createdTime?:string,webViewLink?:string,size?:string|number}>} */
+    let gdriveCloudFiles = [];
+
+    function getCloudYearForUi() {
+      const active = normalizeBackupYear(getActiveBudgetYear());
+      if (active) return active;
+      const years = loadBudgetYears();
+      const y = Array.isArray(years) && years.length > 0 ? normalizeBackupYear(years[0]) : null;
+      return y;
+    }
+
+    function filterCloudFilesForYear(files, year) {
+      const y = normalizeBackupYear(year);
+      if (!y) return [];
+      const list = Array.isArray(files) ? files : [];
+      const prefix = `acgl-fms-backup-${String(y)}-`;
+      return list
+        .filter((f) => f && typeof f === 'object')
+        .filter((f) => String(f.name || '').trim().startsWith(prefix));
+    }
+
+    async function fetchGdriveBackupPayloadById(fileId) {
+      const id = String(fileId || '').trim();
+      if (!id) return null;
+      const url = `${wpJoin('acgl-fms/v1/admin/gdrive-backup/file')}?id=${encodeURIComponent(id)}`;
+      const res = await wpFetchJson(url, { method: 'GET' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok) {
+        return null;
+      }
+      return data;
+    }
+
+    async function refreshGdriveCloudCard() {
+      if (!canUseGdrive) return;
+
+      const y = getCloudYearForUi();
+      gdriveCloudYear = y;
+
+      if (!getWpToken()) {
+        gdriveCloudStatus = 'Sign in to view cloud backups.';
+        gdriveCloudFiles = [];
+        render();
+        return;
+      }
+
+      gdriveCloudStatus = 'Loading…';
+      gdriveCloudFiles = [];
+      render();
+
+      try {
+        const url = `${wpJoin('acgl-fms/v1/admin/gdrive-backup/list')}?n=50`;
+        const res = await wpFetchJson(url, { method: 'GET' });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.ok) {
+          const err = data && data.error ? String(data.error) : `http_${res.status}`;
+          gdriveCloudStatus = `Could not load cloud backups (${err}).`;
+          gdriveCloudFiles = [];
+          render();
+          return;
+        }
+
+        gdriveCloudStatus = '';
+        gdriveCloudFiles = filterCloudFilesForYear(data.files || [], y);
+        render();
+      } catch {
+        gdriveCloudStatus = 'Could not load cloud backups.';
+        gdriveCloudFiles = [];
+        render();
+      }
+    }
+
+    async function runGdriveUploadNow() {
+      if (!canUseGdrive) return;
+      if (!getWpToken()) {
+        window.alert('Please sign in.');
+        return;
+      }
+
+      gdriveCloudStatus = 'Uploading…';
+      render();
+      try {
+        const url = wpJoin('acgl-fms/v1/admin/gdrive-backup/run');
+        const res = await wpFetchJson(url, { method: 'POST' });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.ok) {
+          const err = data && data.error ? String(data.error) : `http_${res.status}`;
+          gdriveCloudStatus = `Upload failed (${err}).`;
+          render();
+          return;
+        }
+        gdriveCloudStatus = 'Uploaded.';
+        render();
+        await refreshGdriveCloudCard();
+      } catch {
+        gdriveCloudStatus = 'Upload failed.';
+        render();
+      }
+    }
+
+    function renderGdriveCloudCard(year) {
+      const y = normalizeBackupYear(year);
+      if (!y) return null;
+
+      const card = document.createElement('div');
+      card.className = 'archive__card';
+
+      const header = document.createElement('div');
+      header.className = 'archive__cardHeader';
+
+      const h = document.createElement('h3');
+      h.className = 'archive__title';
+      h.textContent = `${String(y)} Cloud (Google)`;
+      header.appendChild(h);
+      card.appendChild(header);
+
+      if (gdriveCloudStatus) {
+        const status = document.createElement('div');
+        status.className = 'subhead';
+        status.textContent = gdriveCloudStatus;
+        card.appendChild(status);
+      }
+
+      const list = gdriveCloudYear === y ? gdriveCloudFiles : [];
+      let any = false;
+      for (const f of list) {
+        if (!f || typeof f !== 'object') continue;
+        const id = String(f.id || '').trim();
+        if (!id) continue;
+        any = true;
+
+        const row = document.createElement('div');
+        row.className = 'backupRow';
+
+        const label = document.createElement('div');
+        label.className = 'muted backupRow__label';
+        label.textContent = f.createdTime ? formatIsoForList(f.createdTime) : '';
+        row.appendChild(label);
+
+        const buttons = document.createElement('div');
+        buttons.className = 'backupRow__buttons';
+
+        const dl = document.createElement('button');
+        dl.type = 'button';
+        dl.className = 'btn btn--ghost';
+        dl.textContent = 'Download';
+        dl.addEventListener('click', async () => {
+          if (!getWpToken()) {
+            window.alert('Please sign in.');
+            return;
+          }
+          gdriveCloudStatus = 'Downloading…';
+          render();
+          const data = await fetchGdriveBackupPayloadById(id);
+          if (!data || !data.payload) {
+            gdriveCloudStatus = 'Could not download cloud backup.';
+            render();
+            return;
+          }
+          const fileName = String((data.file && data.file.name) || '').trim() || `acgl-fms-backup-${String(y)}-${id}.json`;
+          const text = JSON.stringify(data.payload, null, 2);
+          const blob = new Blob([text], { type: 'application/json;charset=utf-8;' });
+          downloadBlob(blob, fileName);
+          gdriveCloudStatus = '';
+          render();
+        });
+        buttons.appendChild(dl);
+
+        const rs = document.createElement('button');
+        rs.type = 'button';
+        rs.className = 'btn btn--danger';
+        rs.textContent = 'Restore';
+        rs.addEventListener('click', async () => {
+          if (!requireSettingsEditAccess('Settings access required to restore backups.')) return;
+          if (!getWpToken()) {
+            window.alert('Please sign in.');
+            return;
+          }
+          const ok = window.confirm(`Restore ${String(y)} from this cloud backup? This will overwrite ${String(y)} data.`);
+          if (!ok) return;
+
+          gdriveCloudStatus = 'Restoring…';
+          render();
+          const data = await fetchGdriveBackupPayloadById(id);
+          if (!data || !data.payload) {
+            gdriveCloudStatus = 'Could not restore cloud backup.';
+            render();
+            return;
+          }
+          const res = restoreYearBackupFromPayload(data.payload);
+          if (!res.ok && res.error === 'wp_login_required') {
+            window.alert('Please sign in.');
+            return;
+          }
+          if (!res.ok) {
+            window.alert('Could not restore backup.');
+            gdriveCloudStatus = '';
+            render();
+            return;
+          }
+          window.location.reload();
+        });
+        buttons.appendChild(rs);
+
+        row.appendChild(buttons);
+
+        card.appendChild(row);
+      }
+
+      if (!any) {
+        const empty = document.createElement('p');
+        empty.className = 'empty';
+        empty.textContent = 'No cloud backups yet.';
+        card.appendChild(empty);
+      }
+
+      return card;
+    }
+
     function getKnownYears() {
       const years = loadBudgetYears();
       const active = normalizeBackupYear(getActiveBudgetYear());
@@ -17018,10 +17660,20 @@ void (async () => {
 
     function render() {
       const years = getKnownYears();
+      const cloudYear = canUseGdrive ? getCloudYearForUi() : null;
+      const activeYear = normalizeBackupYear(getActiveBudgetYear());
       grid.innerHTML = '';
 
       let anyBackups = false;
       for (const y of years) {
+        const idx = loadBackupIndex(y);
+        if (idx.length > 0) anyBackups = true;
+
+        // Only render a WordPress year card if it has backups, or if it's the active year.
+        // (Create actions live in the card header now.)
+        const showWpYearCard = idx.length > 0 || (activeYear && y === activeYear);
+
+        if (showWpYearCard) {
         const card = document.createElement('div');
         card.className = 'archive__card';
 
@@ -17030,50 +17682,22 @@ void (async () => {
 
         const h = document.createElement('h3');
         h.className = 'archive__title';
-        h.textContent = String(y);
+        h.textContent = `${String(y)} (WordPress)`;
         header.appendChild(h);
-
-        const actions = document.createElement('div');
-        actions.className = 'actions';
-
-        const createBtn = document.createElement('button');
-        createBtn.type = 'button';
-        createBtn.className = 'btn btn--primary';
-        createBtn.textContent = 'Create Backup';
-        createBtn.addEventListener('click', () => {
-          if (IS_WP_SHARED_MODE && !getWpToken()) {
-            window.alert('Please sign in.');
-            return;
-          }
-          if (!requireSettingsEditAccess('Settings access required to create backups.')) return;
-          const res = createYearBackup(y, 'manual');
-          if (!res.ok && res.error === 'wp_login_required') {
-            window.alert('Please sign in.');
-            return;
-          }
-          if (!res.ok) {
-            window.alert('Could not create backup.');
-            return;
-          }
-          render();
-        });
-        actions.appendChild(createBtn);
-
         card.appendChild(header);
-        card.appendChild(actions);
-
-        const idx = loadBackupIndex(y);
-        if (idx.length > 0) anyBackups = true;
 
         for (const meta of idx) {
           if (!meta || !meta.id) continue;
           const row = document.createElement('div');
-          row.className = 'actions';
+          row.className = 'backupRow';
 
           const label = document.createElement('div');
-          label.className = 'muted';
+          label.className = 'muted backupRow__label';
           label.textContent = formatBackupCreatedAt(meta.createdAt);
           row.appendChild(label);
+
+          const buttons = document.createElement('div');
+          buttons.className = 'backupRow__buttons';
 
           const dl = document.createElement('button');
           dl.type = 'button';
@@ -17082,7 +17706,7 @@ void (async () => {
           dl.addEventListener('click', () => {
             downloadBackupById(y, meta.id);
           });
-          row.appendChild(dl);
+          buttons.appendChild(dl);
 
           const rs = document.createElement('button');
           rs.type = 'button';
@@ -17108,12 +17732,20 @@ void (async () => {
             }
             window.location.reload();
           });
-          row.appendChild(rs);
+          buttons.appendChild(rs);
+
+          row.appendChild(buttons);
 
           card.appendChild(row);
         }
 
         grid.appendChild(card);
+        }
+
+        if (canUseGdrive && cloudYear && y === cloudYear) {
+          const cloudCard = renderGdriveCloudCard(y);
+          if (cloudCard) grid.appendChild(cloudCard);
+        }
       }
 
       if (emptyEl) emptyEl.hidden = anyBackups;
@@ -17178,7 +17810,18 @@ void (async () => {
       });
     }
 
+    if (gdriveUploadBtn && !gdriveUploadBtn.dataset.bound) {
+      gdriveUploadBtn.dataset.bound = '1';
+      gdriveUploadBtn.addEventListener('click', () => {
+        void runGdriveUploadNow();
+      });
+    }
+
     render();
+
+    if (canUseGdrive) {
+      void refreshGdriveCloudCard();
+    }
   }
 
   // ---- Event wiring (only when the elements exist on the page) ----
@@ -17323,7 +17966,7 @@ void (async () => {
       form.reset();
       clearDraft();
       void clearDraftAttachments();
-      window.location.href = 'index.html?new=1';
+      window.location.href = withWpEmbedParams('index.html?new=1');
       return;
     }
 
@@ -18015,7 +18658,7 @@ void (async () => {
 
   if (newPoBtn) {
     newPoBtn.addEventListener('click', () => {
-      window.location.href = 'index.html?new=1';
+      window.location.href = withWpEmbedParams('index.html?new=1');
     });
   }
 

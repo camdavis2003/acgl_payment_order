@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ACGL Financial Management System (FMS)
  * Description: Embeds the ACGL FMS app and provides shared storage via WordPress (custom DB tables + REST API).
- * Version: 0.1.0
+ * Version: 0.1.1
  * Author: Cameron Davis
  */
 
@@ -12,6 +12,12 @@ if (!defined('ABSPATH')) {
 
 define('ACGL_FMS_PLUGIN_FILE', __FILE__);
 define('ACGL_FMS_PLUGIN_DIR', plugin_dir_path(__FILE__));
+
+// Cache-busting version for embedded static app assets.
+// Some hosts/cache plugins aggressively cache plugin static files (including index.html),
+// so we add this version to iframe src query params.
+$acgl_fms_app_index_path = ACGL_FMS_PLUGIN_DIR . 'app/index.html';
+define('ACGL_FMS_APP_VERSION', file_exists($acgl_fms_app_index_path) ? (string) filemtime($acgl_fms_app_index_path) : '0');
 
 define('ACGL_FMS_CAP_ACCESS', 'acgl_fms_access');
 define('ACGL_FMS_CAP_WRITE', 'acgl_fms_write');
@@ -28,6 +34,24 @@ require_once ACGL_FMS_PLUGIN_DIR . 'includes/db.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/auth.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/rest.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/shortcode.php';
+require_once ACGL_FMS_PLUGIN_DIR . 'includes/admin_settings.php';
+require_once ACGL_FMS_PLUGIN_DIR . 'includes/gdrive_backup.php';
+
+define('ACGL_FMS_GDRIVE_CRON_HOOK', 'acgl_fms_gdrive_backup_daily');
+
+function acgl_fms_gdrive_ensure_cron_scheduled() {
+    if (!function_exists('wp_next_scheduled')) return;
+    if (!wp_next_scheduled(ACGL_FMS_GDRIVE_CRON_HOOK)) {
+        // Start within the next hour; then daily.
+        wp_schedule_event(time() + 15 * 60, 'daily', ACGL_FMS_GDRIVE_CRON_HOOK);
+    }
+}
+
+add_action(ACGL_FMS_GDRIVE_CRON_HOOK, function () {
+    if (function_exists('acgl_fms_gdrive_backup_daily_handler')) {
+        acgl_fms_gdrive_backup_daily_handler();
+    }
+});
 
 // Some sites install security plugins that disable the WP REST API for logged-out users,
 // returning 403 before route permission callbacks run. Our app relies on public REST access
@@ -114,6 +138,7 @@ function acgl_fms_render_fullpage() {
         'restUrl' => $rest_url,
         'restNonce' => $nonce,
         'wp' => '1',
+        'v' => ACGL_FMS_APP_VERSION,
     ], $app_url);
 
     // Minimal shell (no wp_head/wp_footer) to avoid theme chrome.
@@ -190,9 +215,16 @@ register_activation_hook(__FILE__, function () {
 
     // Track the current slug so upgrades can flush when it changes.
     update_option(ACGL_FMS_OPTION_FULLPAGE_SLUG, trim((string) ACGL_FMS_FULLPAGE_SLUG));
+
+    // Schedule Drive backups (safe even if not configured; the handler no-ops).
+    acgl_fms_gdrive_ensure_cron_scheduled();
 });
 
 register_deactivation_hook(__FILE__, function () {
+    // Clear scheduled Drive backups.
+    if (function_exists('wp_clear_scheduled_hook')) {
+        wp_clear_scheduled_hook(ACGL_FMS_GDRIVE_CRON_HOOK);
+    }
     flush_rewrite_rules();
 });
 
@@ -220,6 +252,9 @@ add_action('init', function () {
 
     acgl_fms_register_fullpage_route();
     acgl_fms_register_shortcodes();
+
+    // Ensure cron is scheduled (in case activation hooks didn't run).
+    acgl_fms_gdrive_ensure_cron_scheduled();
 
     // If the slug changed between plugin versions, flush once.
     acgl_fms_maybe_flush_rewrite_rules_on_slug_change();

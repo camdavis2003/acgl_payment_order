@@ -12,6 +12,49 @@ function acgl_fms_require_write() {
     return is_user_logged_in() && current_user_can(ACGL_FMS_CAP_WRITE);
 }
 
+function acgl_fms_public_year2_from_budget_year($budgetYear) {
+    $y = is_string($budgetYear) ? trim($budgetYear) : '';
+    if ($y === '' || !preg_match('/^\d{4}$/', $y)) return null;
+    $n = (int) $y;
+    $yy = (($n % 100) + 100) % 100;
+    return str_pad((string) $yy, 2, '0', STR_PAD_LEFT);
+}
+
+function acgl_fms_public_infer_next_seq_from_orders_json($ordersRaw, $year2) {
+    $y2 = is_string($year2) ? trim($year2) : '';
+    if ($y2 === '' || !preg_match('/^\d{2}$/', $y2)) return 1;
+
+    if (!is_string($ordersRaw) || trim($ordersRaw) === '') return 1;
+    $decoded = json_decode($ordersRaw, true);
+    if (!is_array($decoded)) return 1;
+
+    $maxSeq = 0;
+    foreach ($decoded as $o) {
+        if (!is_array($o)) continue;
+        $raw = isset($o['paymentOrderNo']) ? (string) $o['paymentOrderNo'] : '';
+        $s = strtoupper(trim($raw));
+        if ($s === '') continue;
+        $noSpaces = preg_replace('/\s+/', '', $s);
+        $canon = preg_replace('/^PO-/', 'PO', $noSpaces);
+        if (!preg_match('/^PO(\d{2})-(\d+)$/', $canon, $m)) continue;
+        if ((string) $m[1] !== $y2) continue;
+        $seq = (int) $m[2];
+        if ($seq > $maxSeq) $maxSeq = $seq;
+    }
+
+    $next = $maxSeq + 1;
+    return $next < 1 ? 1 : $next;
+}
+
+function acgl_fms_public_format_po_no($year2, $seq) {
+    $y2 = is_string($year2) ? trim($year2) : '';
+    if (!preg_match('/^\d{2}$/', $y2)) $y2 = '00';
+    $n = (int) $seq;
+    if ($n < 1) $n = 1;
+    $seqText = $n < 100 ? str_pad((string) $n, 2, '0', STR_PAD_LEFT) : (string) $n;
+    return 'PO ' . $y2 . '-' . $seqText;
+}
+
 function acgl_fms_sanitize_kv_key($key) {
     $k = is_string($key) ? $key : '';
     $k = trim($k);
@@ -77,6 +120,52 @@ function acgl_fms_sanitize_year_folder($year) {
     if ($y === '') return '';
     if (!preg_match('/^\d{4}$/', $y)) return '';
     return $y;
+}
+
+function acgl_fms_public_submit_rate_limit_key() {
+    $ip = acgl_fms_get_client_ip();
+    return 'acgl_fms_public_submit_' . md5((string) $ip);
+}
+
+function acgl_fms_public_submit_rate_limit_check() {
+    $k = acgl_fms_public_submit_rate_limit_key();
+    $count = (int) get_transient($k);
+    // Simple anti-spam throttle: 30 submissions per hour per IP.
+    return $count < 30;
+}
+
+function acgl_fms_public_submit_rate_limit_bump() {
+    $k = acgl_fms_public_submit_rate_limit_key();
+    $count = (int) get_transient($k);
+    $count++;
+    set_transient($k, $count, 60 * 60);
+}
+
+function acgl_fms_public_sum_items($items) {
+    $sumEur = 0.0;
+    $sumUsd = 0.0;
+    $hasEur = false;
+    $hasUsd = false;
+    if (!is_array($items)) return [ 'ok' => false, 'error' => 'invalid_items' ];
+    foreach ($items as $it) {
+        if (!is_array($it)) continue;
+        if (isset($it['euro']) && $it['euro'] !== null && $it['euro'] !== '') {
+            $hasEur = true;
+            $sumEur += (float) $it['euro'];
+        }
+        if (isset($it['usd']) && $it['usd'] !== null && $it['usd'] !== '') {
+            $hasUsd = true;
+            $sumUsd += (float) $it['usd'];
+        }
+    }
+    if ($hasEur && $hasUsd) return [ 'ok' => false, 'error' => 'mixed_currency' ];
+    if (!$hasEur && !$hasUsd) return [ 'ok' => false, 'error' => 'missing_currency' ];
+    return [
+        'ok' => true,
+        'mode' => $hasEur ? 'EUR' : 'USD',
+        'euro' => $hasEur ? round($sumEur, 2) : null,
+        'usd' => $hasUsd ? round($sumUsd, 2) : null,
+    ];
 }
 
 function acgl_fms_sanitize_po_folder($paymentOrderNo) {
@@ -464,6 +553,186 @@ function acgl_fms_register_rest_routes() {
             }
 
             return [ 'items' => $items ];
+        },
+    ]);
+
+    // Public (unauthenticated) helper: return only the computed next Payment Order No.
+    // This avoids exposing orders/users data, but allows the request form to display
+    // the correct next number even before the user signs into the app.
+    register_rest_route('acgl-fms/v1', '/public/next-po', [
+        'methods' => 'GET',
+        'permission_callback' => '__return_true',
+        'callback' => function (WP_REST_Request $request) {
+            // Ensure KV storage exists even if activation hook didn't run.
+            if (function_exists('acgl_fms_db_ensure_installed')) {
+                try {
+                    acgl_fms_db_ensure_installed();
+                } catch (Throwable $e) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error', 'message' => $e->getMessage() ], 500);
+                }
+            }
+
+            $yearParam = $request->get_param('year');
+            $year = is_string($yearParam) ? trim($yearParam) : '';
+
+            if ($year === '') {
+                // Try active budget year from KV (safe to reveal).
+                $activeRaw = acgl_fms_kv_get_raw('payment_order_active_budget_year_v1');
+                $active = is_string($activeRaw) ? trim($activeRaw) : '';
+                if (preg_match('/^\d{4}$/', $active)) $year = $active;
+            }
+
+            if ($year === '' || !preg_match('/^\d{4}$/', $year)) {
+                $fallback = (string) (int) gmdate('Y');
+                $year = preg_match('/^\d{4}$/', $fallback) ? $fallback : '2000';
+            }
+
+            $year2 = acgl_fms_public_year2_from_budget_year($year);
+            if ($year2 === null) return new WP_REST_Response([ 'ok' => false, 'error' => 'invalid_year' ], 400);
+
+            // Next sequence from orders in this budget year.
+            $ordersKey = 'payment_orders_' . $year . '_v1';
+            $ordersRaw = acgl_fms_kv_get_raw($ordersKey);
+            $nextFromOrders = acgl_fms_public_infer_next_seq_from_orders_json($ordersRaw, $year2);
+
+            // Next sequence from stored numbering settings.
+            $numRaw = acgl_fms_kv_get_raw('payment_order_numbering');
+            $num = is_string($numRaw) ? json_decode($numRaw, true) : null;
+            $storedYear2 = is_array($num) && isset($num['year2']) ? (string) $num['year2'] : '';
+            $storedYear2 = preg_match('/^\d{2}$/', trim($storedYear2)) ? trim($storedYear2) : $year2;
+            $storedNextSeq = is_array($num) && isset($num['nextSeq']) ? (int) $num['nextSeq'] : 1;
+            if ($storedNextSeq < 1) $storedNextSeq = 1;
+
+            // Mirror app behavior: if stored year2 doesn't match this budget year, ignore stored nextSeq.
+            $nextSeq = ($storedYear2 === $year2) ? max($storedNextSeq, $nextFromOrders) : $nextFromOrders;
+            $po = acgl_fms_public_format_po_no($year2, $nextSeq);
+
+            return [
+                'ok' => true,
+                'year' => $year,
+                'year2' => $year2,
+                'nextSeq' => $nextSeq,
+                'paymentOrderNo' => $po,
+            ];
+        },
+    ]);
+    // Public (unauthenticated) submission endpoint: persist a new Payment Order.
+    // Used when the app is embedded in WP shared mode and the viewer has not signed in yet.
+    register_rest_route('acgl-fms/v1', '/public/submit-po', [
+        'methods' => 'POST',
+        'permission_callback' => '__return_true',
+        'callback' => function (WP_REST_Request $request) {
+            try {
+                // Ensure KV storage exists even if activation hook didn't run.
+                if (function_exists('acgl_fms_db_ensure_installed')) {
+                    acgl_fms_db_ensure_installed();
+                }
+
+                if (!acgl_fms_public_submit_rate_limit_check()) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'rate_limited' ], 429);
+                }
+                $body = $request->get_json_params();
+                if (!is_array($body)) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'invalid_json' ], 400);
+                }
+                $year = isset($body['year']) ? trim((string) $body['year']) : '';
+                if ($year === '' || !preg_match('/^\d{4}$/', $year)) {
+                    // Default to current year if missing.
+                    $year = (string) (int) gmdate('Y');
+                }
+                $year2 = acgl_fms_public_year2_from_budget_year($year);
+                if ($year2 === null) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'invalid_year' ], 400);
+                }
+                $values = isset($body['values']) && is_array($body['values']) ? $body['values'] : [];
+                $items = isset($body['items']) ? $body['items'] : [];
+                // Basic required fields. (Keep aligned with the JS form.)
+                $requiredKeys = [ 'date', 'name', 'address', 'purpose' ];
+                foreach ($requiredKeys as $k) {
+                    $v = isset($values[$k]) ? trim((string) $values[$k]) : '';
+                    if ($v === '') {
+                        return new WP_REST_Response([ 'ok' => false, 'error' => 'missing_required', 'field' => $k ], 400);
+                    }
+                }
+                $sum = acgl_fms_public_sum_items($items);
+                if (!is_array($sum) || !($sum['ok'] ?? false)) {
+                    $err = is_array($sum) && isset($sum['error']) ? (string) $sum['error'] : 'invalid_items';
+                    return new WP_REST_Response([ 'ok' => false, 'error' => $err ], 400);
+                }
+                // Compute the next PO number and ensure uniqueness.
+                $ordersKey = 'payment_orders_' . $year . '_v1';
+                $ordersRaw = acgl_fms_kv_get_raw($ordersKey);
+                $orders = [];
+                if (is_string($ordersRaw) && trim($ordersRaw) !== '') {
+                    $parsed = json_decode($ordersRaw, true);
+                    if (is_array($parsed)) $orders = $parsed;
+                }
+                $nextFromOrders = acgl_fms_public_infer_next_seq_from_orders_json($ordersRaw, $year2);
+                $numRaw = acgl_fms_kv_get_raw('payment_order_numbering');
+                $num = is_string($numRaw) ? json_decode($numRaw, true) : null;
+                $storedYear2 = is_array($num) && isset($num['year2']) ? (string) $num['year2'] : '';
+                $storedYear2 = preg_match('/^\d{2}$/', trim($storedYear2)) ? trim($storedYear2) : $year2;
+                $storedNextSeq = is_array($num) && isset($num['nextSeq']) ? (int) $num['nextSeq'] : 1;
+                if ($storedNextSeq < 1) $storedNextSeq = 1;
+                $nextSeq = ($storedYear2 === $year2) ? max($storedNextSeq, $nextFromOrders) : $nextFromOrders;
+                $po = acgl_fms_public_format_po_no($year2, $nextSeq);
+                if ($po === null) return new WP_REST_Response([ 'ok' => false, 'error' => 'format_failed' ], 500);
+                // Ensure uniqueness (in case of concurrent submissions).
+                $canon = strtolower(preg_replace('/[^a-z0-9]/', '', $po));
+                $existingCanon = [];
+                foreach ($orders as $o) {
+                    if (!is_array($o)) continue;
+                    $raw = isset($o['paymentOrderNo']) ? (string) $o['paymentOrderNo'] : '';
+                    $c = strtolower(preg_replace('/[^a-z0-9]/', '', $raw));
+                    if ($c !== '') $existingCanon[$c] = true;
+                }
+                $guard = 0;
+                while (isset($existingCanon[$canon]) && $guard < 10) {
+                    $nextSeq++;
+                    $po2 = acgl_fms_public_format_po_no($year2, $nextSeq);
+                    if ($po2 === null) break;
+                    $po = $po2;
+                    $canon = strtolower(preg_replace('/[^a-z0-9]/', '', $po));
+                    $guard++;
+                }
+                if (isset($existingCanon[$canon])) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'po_conflict' ], 409);
+                }
+                $now = gmdate('c');
+                $id = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : ('po_' . time() . '_' . wp_rand(1000, 9999));
+                $order = [
+                    'id' => $id,
+                    'createdAt' => $now,
+                    'updatedAt' => $now,
+                    'paymentOrderNo' => $po,
+                    'date' => trim((string) ($values['date'] ?? '')),
+                    'name' => trim((string) ($values['name'] ?? '')),
+                    'address' => trim((string) ($values['address'] ?? '')),
+                    'iban' => trim((string) ($values['iban'] ?? '')),
+                    'bic' => trim((string) ($values['bic'] ?? '')),
+                    'usAccountType' => trim((string) ($values['usAccountType'] ?? '')),
+                    'specialInstructions' => trim((string) ($values['specialInstructions'] ?? '')),
+                    'bankDetailsMode' => trim((string) ($values['bankDetailsMode'] ?? '')),
+                    'budgetNumber' => trim((string) ($values['budgetNumber'] ?? '')),
+                    'purpose' => trim((string) ($values['purpose'] ?? '')),
+                    'euro' => $sum['euro'],
+                    'usd' => $sum['usd'],
+                    'items' => is_array($items) ? array_values($items) : [],
+                    // Default status fields; UI can normalize/display.
+                    'status' => 'Submitted',
+                    'with' => '',
+                ];
+                // Save newest first
+                array_unshift($orders, $order);
+                acgl_fms_kv_set_raw($ordersKey, wp_json_encode($orders));
+                // Increment numbering for next time.
+                acgl_fms_kv_set_raw('payment_order_numbering', wp_json_encode([ 'year2' => $year2, 'nextSeq' => $nextSeq + 1 ]));
+                // Bump rate limit after successful persistence.
+                acgl_fms_public_submit_rate_limit_bump();
+                return [ 'ok' => true, 'year' => $year, 'paymentOrderNo' => $po, 'id' => $id ];
+            } catch (Throwable $e) {
+                return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error', 'message' => $e->getMessage() ], 500);
+            }
         },
     ]);
 

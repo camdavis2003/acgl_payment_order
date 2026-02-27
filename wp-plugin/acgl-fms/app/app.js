@@ -278,7 +278,6 @@ void (async () => {
     const mergedHeaders = {
       ...(options && options.headers ? options.headers : {}),
     };
-    if (WP_REST_NONCE) mergedHeaders['X-WP-Nonce'] = WP_REST_NONCE;
     if (token) mergedHeaders.Authorization = `Bearer ${token}`;
 
     // This app uses bearer tokens for authorization. Sending WordPress cookies can
@@ -287,6 +286,11 @@ void (async () => {
     const credentials = options && typeof options.credentials === 'string'
       ? options.credentials
       : 'omit';
+
+    // Important: When logged out, a nonce header can still trigger REST cookie checks
+    // and return 403, even for public routes. Only send the nonce when we are
+    // intentionally using cookie credentials.
+    if (WP_REST_NONCE && credentials !== 'omit') mergedHeaders['X-WP-Nonce'] = WP_REST_NONCE;
 
     const res = await fetch(url, {
       credentials,
@@ -491,6 +495,11 @@ void (async () => {
 
       const v = String(value);
       mem.set(k, v);
+
+      // In public (unauthenticated) mode, do not queue shared writes.
+      // Otherwise stale client-side writes could flush later after login.
+      if (!getWpToken()) return;
+
       pendingDeletes.delete(k);
       pendingUpserts.set(k, v);
       scheduleFlush();
@@ -504,6 +513,10 @@ void (async () => {
       }
 
       mem.delete(k);
+
+      // In public (unauthenticated) mode, do not queue shared deletes.
+      if (!getWpToken()) return;
+
       pendingUpserts.delete(k);
       pendingDeletes.add(k);
       scheduleFlush();
@@ -3697,13 +3710,33 @@ void (async () => {
     if (!form) return;
     const el = form.elements.namedItem('paymentOrderNo');
     if (!el) return;
-    el.value = String(value ?? '');
+    const raw = String(value ?? '').trim();
+    el.value = formatPaymentOrderNoForDisplay(raw) || raw;
     el.readOnly = true;
     el.setAttribute('aria-readonly', 'true');
   }
 
+  const PUBLIC_PAYMENT_ORDER_NO_PLACEHOLDER = 'auto-applied';
+
+  function setPaymentOrderNoPlaceholder() {
+    if (!form) return;
+    const el = form.elements.namedItem('paymentOrderNo');
+    if (!el) return;
+    el.value = PUBLIC_PAYMENT_ORDER_NO_PLACEHOLDER;
+    el.readOnly = true;
+    el.setAttribute('aria-readonly', 'true');
+    el.title = 'Payment Order No. is auto-applied when saving.';
+  }
+
   function maybeAutofillPaymentOrderNo() {
     if (!form) return;
+
+    // Keep numbering aligned to the active budget year so the next PO No.
+    // displayed on the form matches what will be generated on submit.
+    // Avoid syncing/writing shared numbering in unauthenticated WP mode.
+    if (!IS_WP_SHARED_MODE || getWpToken()) {
+      syncNumberingSettingsToBudgetYear(getActiveBudgetYear());
+    }
 
     const editId = getEditOrderId();
     if (editId) {
@@ -3713,13 +3746,61 @@ void (async () => {
       return;
     }
 
-    const draft = loadDraft();
-    if (draft && String(draft.paymentOrderNo || '').trim()) {
-      setPaymentOrderNoField(draft.paymentOrderNo);
+    // In WP shared mode, unauthenticated viewers should not see the next number.
+    // It will be generated and applied at save-time once the user is logged in.
+    if (IS_WP_SHARED_MODE && !getWpToken()) {
+      setPaymentOrderNoPlaceholder();
       return;
     }
 
+    // Only restore a draft Payment Order No when explicitly resuming a draft.
+    // Otherwise stale drafts can cause the field to show a previously-used number.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const resumeDraft = params.get('resumeDraft') === '1';
+      if (resumeDraft) {
+        const draft = loadDraft();
+        if (draft && String(draft.paymentOrderNo || '').trim()) {
+          setPaymentOrderNoField(draft.paymentOrderNo);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     setPaymentOrderNoField(getNextPaymentOrderNo());
+  }
+
+  async function maybeAutofillPaymentOrderNoFromWpPublicEndpoint() {
+    if (!form) return;
+    if (!IS_WP_SHARED_MODE) return;
+    if (getWpToken()) return;
+
+    const editId = getEditOrderId();
+    if (editId) return;
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const resumeDraft = params.get('resumeDraft') === '1';
+      if (resumeDraft) return;
+    } catch {
+      // ignore
+    }
+
+    try {
+      const year = getActiveBudgetYear();
+      const url = `${wpJoin('acgl-fms/v1/public/next-po')}?year=${encodeURIComponent(String(year))}`;
+      const res = await wpFetchJson(url, { method: 'GET' });
+      if (!res.ok) return;
+      const payload = await readJsonResponse(res);
+      if (!payload || payload.ok !== true) return;
+      const po = String(payload.paymentOrderNo || '').trim();
+      if (!po) return;
+      setPaymentOrderNoField(po);
+    } catch {
+      // ignore
+    }
   }
 
   function getIbanUtils() {
@@ -5319,6 +5400,42 @@ void (async () => {
   function appendTimelineEvent(order, evt) {
     const timeline = ensureOrderTimeline(order);
     return [...timeline, evt];
+  }
+
+  async function wpPublicSubmitPaymentOrder(year, values, items) {
+    const url = wpJoin('acgl-fms/v1/public/submit-po');
+    const body = {
+      year: String(year || ''),
+      values: values && typeof values === 'object' ? values : {},
+      items: Array.isArray(items) ? items : [],
+    };
+
+    const res = await wpFetchJson(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    // Read once so we can surface non-JSON server errors (e.g. HTML 500 pages).
+    const rawText = await res.text();
+    const payload = rawText ? safeJsonParse(rawText, null) : null;
+
+    if (!res.ok) {
+      const errObj = payload && typeof payload === 'object' ? payload : null;
+      const errCode = errObj && errObj.error ? String(errObj.error) : '';
+      const errMsg = errObj && errObj.message ? String(errObj.message) : '';
+      const errField = errObj && errObj.field ? String(errObj.field) : '';
+      const suffix = errMsg ? ` (${errMsg})` : (errField ? ` (${errField})` : '');
+      const err = errCode
+        ? `${errCode}${suffix}`
+        : `submit_failed_${res.status}${rawText ? `: ${String(rawText).slice(0, 200)}` : ''}`;
+      throw new Error(err);
+    }
+
+    if (!payload || payload.ok !== true) {
+      throw new Error('submit_failed');
+    }
+    return payload;
   }
 
   function auditIsBlank(value) {
@@ -16747,7 +16864,8 @@ void (async () => {
 
   if (form) {
     const base = getBasename(window.location.pathname);
-    const isRequestForm = base === 'index.html';
+    // Do not rely on the URL path for detection (WP embeds may not end in index.html).
+    const isRequestForm = Boolean(form && form.id === 'paymentOrderForm');
     const params = new URLSearchParams(window.location.search);
     const forceNew = params.get('new') === '1';
     const resumeDraft = params.get('resumeDraft') === '1';
@@ -17043,7 +17161,12 @@ void (async () => {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+      const isPublicSubmit = IS_WP_SHARED_MODE && !getWpToken() && !editId;
+
+      // In WP shared mode, allow public (logged-out) submissions via the server endpoint.
+      if (!isPublicSubmit) {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+      }
 
       clearFieldErrors();
       clearItemsError();
@@ -17135,6 +17258,34 @@ void (async () => {
         // Show the same token after Save Changes (displayed on Payment Orders page)
         setFlashToken('Thank you, your update has been saved.');
       } else {
+        if (isPublicSubmit) {
+          try {
+            const payload = await wpPublicSubmitPaymentOrder(year, orderValues, items);
+            if (payload && payload.paymentOrderNo) {
+              setPaymentOrderNoField(String(payload.paymentOrderNo));
+            }
+
+            form.reset();
+            clearDraft();
+            void clearDraftAttachments();
+            setEditOrderId(null);
+            updateItemsStatus();
+            generateRequestCaptcha();
+            if (euroField) euroField.value = '';
+            if (usdField) usdField.value = '';
+            maybeAutofillPaymentOrderNo();
+
+            showSubmitToken('Thank you, your request has been submitted.');
+            return;
+          } catch (err) {
+            showItemsError(`Could not submit request: ${String(err && err.message ? err.message : err)}`);
+            return;
+          }
+        }
+
+        // Keep numbering aligned to the active budget year before generating.
+        syncNumberingSettingsToBudgetYear(year);
+
         // Enforce next Payment Order No. from settings
         const generatedPo = getNextPaymentOrderNo();
         const generatedCanon = canonicalizePaymentOrderNo(generatedPo);

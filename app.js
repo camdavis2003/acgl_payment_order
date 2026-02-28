@@ -4655,6 +4655,7 @@
         const x = Number(opts && opts.x);
         const startY = Number(opts && opts.y);
         const size = Number(opts && opts.size) || 10;
+        const firstLineOffset = Number(opts && opts.firstLineOffset) || 0;
         const alignRaw = String((opts && opts.align) || 'left').toLowerCase();
         const align = (alignRaw === 'center' || alignRaw === 'right') ? alignRaw : 'left';
         const maxWidth = Number(opts && opts.maxWidth) || 0;
@@ -4692,6 +4693,7 @@
         for (const rawLine of text.split('\n')) pushWrappedLine(lines, rawLine);
 
         let y = startY;
+        let didDrawFirstTextLine = false;
         const minY = effectiveMaxHeight > 0 ? startY - effectiveMaxHeight : -Infinity;
         for (const line of lines) {
           if (y < minY) break;
@@ -4711,9 +4713,29 @@
             : align === 'right'
               ? x + offset
               : x;
-          page.drawText(lineText, { x: drawX, y, size, font });
+          const drawY = y + (!didDrawFirstTextLine ? firstLineOffset : 0);
+          page.drawText(lineText, { x: drawX, y: drawY, size, font });
+          didDrawFirstTextLine = true;
           y -= lineHeight;
         }
+      };
+
+      const drawFittedCenteredText = (textRaw, opts) => {
+        const text = String(textRaw ?? '').replace(/\s+/g, ' ').trim();
+        const x = Number(opts && opts.x);
+        const y = Number(opts && opts.y);
+        const maxWidth = Number(opts && opts.maxWidth) || 0;
+        const size0 = Number(opts && opts.size) || 10;
+        const minSize = Number(opts && opts.minSize) || Math.max(7, size0 - 3);
+        const useFont = (opts && opts.font) || font;
+        if (!text || !Number.isFinite(x) || !Number.isFinite(y) || !(maxWidth > 0)) return;
+
+        let size = size0;
+        while (size > minSize && useFont.widthOfTextAtSize(text, size) > maxWidth) size -= 0.25;
+
+        const w = useFont.widthOfTextAtSize(text, size);
+        const drawX = x + Math.max(0, (maxWidth - w) / 2);
+        page.drawText(text, { x: drawX, y, size, font: useFont });
       };
 
     const drawMarker = (x, y, label) => {
@@ -5000,9 +5022,10 @@
     const textFields = [
       { key: 'paymentOrderNo', source: 'form', x: 350, y: 721, size: 13 },
       { key: 'date', source: 'form', x: 420, y: 687, size: 10 },
+      { key: 'grandTreasurer', source: 'gl', x: 167, y: 687, size: 10 },
       { key: 'name', source: 'form', x: 130, y: 585, size: 10 },
 
-      { key: 'address', source: 'form', x: 130, y: 570, size: 9, wrap: true, lineHeight: 11, maxWidth: 470, maxHeight: 70 },
+      { key: 'address', source: 'form', x: 130, y: 570, size: 9, wrap: true, lineHeight: 11, maxWidth: 470, maxHeight: 70, firstLineOffset: 1 },
       { key: 'iban', source: 'form', x: 130, y: 540, size: 10 },
       { key: 'bic', source: 'form', x: 130, y: 525, size: 10 },
 
@@ -5013,8 +5036,8 @@
       { key: 'specialInstructions', source: 'form', x: 60, y: 435, size: 9, wrap: true, lineHeight: 11, maxWidth: 540, maxHeight: 180 },
       { key: 'purpose', source: 'form', x: 50, y: 210, size: 9, wrap: true, lineHeight: 11, maxWidth: 540, maxHeight: 180 },
 
-      { key: 'grandMaster', source: 'gl', x: 61, y: 765, size: 10 },
-      { key: 'grandSecretary', source: 'gl', x: 465, y: 765, size: 10, marker: 'grandSecretary_top' },
+      { key: 'grandMaster', source: 'gl', x: -47, y: 765, size: 10, maxWidth: 270, fitCenter: true },
+      { key: 'grandSecretary', source: 'gl', x: 370, y: 765, size: 10, maxWidth: 270, fitCenter: true, marker: 'grandSecretary_top' },
       { key: 'grandSecretary', source: 'gl', x: 406, y: 290, size: 10, marker: 'grandSecretary_sig' },
 
       // Operation Address box: bottom ~280, top ~810. Start from the top and wrap downward.
@@ -5052,7 +5075,16 @@
 
     for (const f of textFields) {
       const v = readFieldValue(f);
-      if (f.wrap) {
+      if (f.fitCenter) {
+        drawFittedCenteredText(v, {
+          x: f.x,
+          y: f.y,
+          size: f.size,
+          minSize: 8,
+          maxWidth: f.maxWidth,
+          font,
+        });
+      } else if (f.wrap) {
         const maxHeight = Number.isFinite(f.maxHeight) && f.maxHeight > 0
           ? f.maxHeight
           : (Number.isFinite(f.yBottom) ? Math.max(0, Number(f.y) - Number(f.yBottom)) : 0);
@@ -5064,6 +5096,7 @@
           maxWidth: f.maxWidth,
           maxHeight,
           lineHeight: f.lineHeight,
+          firstLineOffset: f.firstLineOffset,
         });
       } else {
         const useFont = f.key === 'paymentOrderNo' ? fontBold : font;
@@ -6558,7 +6591,7 @@
                 X
               </button>
             </td>
-            <td>${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo))}</td>
+            <td><a href="#" class="poNoDownloadLink" data-action="downloadPdf" title="Download PDF">${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo))}</a></td>
             <td>${escapeHtml(formatDate(o.date))}</td>
             <td>${escapeHtml(o.name)}</td>
             <td class="num">${escapeHtml(formatCurrency(o.euro, 'EUR'))}</td>
@@ -7771,6 +7804,7 @@
       .map((u) => {
         const username = normalizeUsername(u && u.username);
         const email = normalizeEmail(u && u.email);
+        const role = String(u && typeof u.position === 'string' ? u.position : '').trim();
         const passwordPlain = String(u && typeof u.passwordPlain === 'string' ? u.passwordPlain : '')
           || extractLegacyPasswordPlain(u && u.passwordHash, u && u.salt);
         const p = getEffectivePermissions(u);
@@ -7778,6 +7812,7 @@
         const isProtected = username === normalizeUsername(HARD_CODED_ADMIN_USERNAME);
         const safeName = escapeHtml(username);
         const safeEmail = escapeHtml(email);
+        const roleTooltipAttr = role ? ` data-role-tooltip="${escapeHtml(role)}"` : '';
         const disabled = canEdit && !isProtected ? '' : 'disabled';
 
         const accessChecks = (key, level) => {
@@ -7816,12 +7851,48 @@
           </div>
         `.trim();
 
+        const baseRoles = [
+          'Grand Master',
+          'Deputy Grand Master',
+          'Sr. Grand Warden',
+          'Jr. Grand Warden',
+          'Grand Secretary',
+          'Assist. Grand Secretary',
+          'Grand Treasurer',
+          'Assist. Grand Treasurer',
+          'Auditor',
+        ];
+
+        const roleOptionsHtml = (() => {
+          const r = String(role || '').trim();
+          const has = r && baseRoles.includes(r);
+          const extra = !has && r ? `<option value="${escapeHtml(r)}" selected>${escapeHtml(r)}</option>` : '';
+          const placeholder = `<option value="" ${r ? '' : 'selected'}>Select a role…</option>`;
+          const opts = baseRoles
+            .map((v) => `<option value="${escapeHtml(v)}" ${v === r ? 'selected' : ''}>${escapeHtml(v)}</option>`)
+            .join('');
+          return `${extra}${placeholder}${opts}`;
+        })();
+
+        const roleDetailsCell = !isEditing
+          ? ''
+          : `
+            <div class="usersTable__details" aria-label="Role">
+              <span class="usersTable__detailsLabel">Role:</span>
+              <select class="usersTable__detailsInput" data-role aria-label="Role" ${disabled}>
+                ${roleOptionsHtml}
+              </select>
+            </div>
+          `.trim();
+
         const passwordDetailsCell = `
           <div class="usersTable__details" aria-label="Password">
             <span class="usersTable__detailsLabel">Password:</span>
             ${passwordControl}
           </div>
         `.trim();
+
+        const identityDetailsCell = `${emailDetailsCell}${roleDetailsCell ? `\n${roleDetailsCell}` : ''}`;
 
         const actionsCell = (() => {
           const editDisabled = disabled ? 'disabled' : '';
@@ -7848,7 +7919,7 @@
           <tr data-username="${safeName}">
             <td>
               <div class="usersTable__identity">
-                <strong>${safeName}</strong>
+                <strong${roleTooltipAttr}>${safeName}</strong>
               </div>
             </td>
             <td>${isEditing ? accessChecks('budget', p.budget) : accessDisplay('budget', p.budget)}</td>
@@ -7859,7 +7930,7 @@
             <td class="actions">${actionsWrap}</td>
           </tr>
           <tr class="usersTable__detailsRow" data-details-for="${safeName}">
-            <td>${emailDetailsCell}</td>
+            <td>${identityDetailsCell}</td>
             <td colspan="5">${passwordDetailsCell}</td>
             <td></td>
           </tr>
@@ -7877,10 +7948,11 @@
     });
   }
 
-  async function createUser(usernameRaw, passwordRaw, permissions, emailRaw) {
+  async function createUser(usernameRaw, passwordRaw, permissions, emailRaw, positionRaw) {
     const username = normalizeUsername(usernameRaw);
     const password = String(passwordRaw || '').trim();
     const email = normalizeEmail(emailRaw);
+    const position = String(positionRaw || '').trim();
     if (!username) return { ok: false, reason: 'username' };
     if (!password || !password.trim()) return { ok: false, reason: 'password' };
     if (email && !isValidEmail(email)) return { ok: false, reason: 'email' };
@@ -7904,6 +7976,7 @@
       updatedAt: nowIso,
       username,
       email,
+      position: position || '',
       salt,
       passwordHash,
       passwordPlain: password,
@@ -7921,10 +7994,11 @@
     return { ok: true, user };
   }
 
-  async function updateUser(usernameRaw, nextPermissions, newPasswordRaw, nextEmailRaw) {
+  async function updateUser(usernameRaw, nextPermissions, newPasswordRaw, nextEmailRaw, nextRoleRaw) {
     const username = normalizeUsername(usernameRaw);
     const newPassword = String(newPasswordRaw || '').trim();
     const nextEmail = normalizeEmail(nextEmailRaw);
+    const nextRole = String(nextRoleRaw ?? '').trim();
     if (nextEmail && !isValidEmail(nextEmail)) return { ok: false, reason: 'email' };
     const users = loadUsers();
     const idx = users.findIndex((u) => normalizeUsername(u && u.username) === username);
@@ -7949,7 +8023,7 @@
     }
 
     const nowIso = new Date().toISOString();
-    const updated = { ...current, permissions: nextPerms, email: nextEmail, updatedAt: nowIso };
+    const updated = { ...current, permissions: nextPerms, email: nextEmail, position: nextRole || '', updatedAt: nowIso };
 
     // Only update password when a non-whitespace value is provided.
     if (newPassword && newPassword.trim()) {
@@ -9202,10 +9276,28 @@
     applySettingsCardFullWidth(containerEl);
 
     let draggedEl = null;
+    let lastDragPointerDownTarget = null;
 
     function isInteractiveTarget(t) {
       if (!t || !t.closest) return false;
       return Boolean(t.closest('input, textarea, select, button, a, label'));
+    }
+
+    function isSettingsCardDragHandleTarget(t, cardEl) {
+      if (!t || !t.closest || !cardEl) return false;
+      const headerEl = t.closest('.list-header');
+      return Boolean(headerEl && cardEl.contains(headerEl));
+    }
+
+    if (!containerEl.dataset.settingsCardPointerDownBound) {
+      containerEl.dataset.settingsCardPointerDownBound = '1';
+      containerEl.addEventListener('pointerdown', (e) => {
+        lastDragPointerDownTarget = e && e.target ? e.target : null;
+      }, true);
+      // Fallback for environments where Pointer Events are unavailable.
+      containerEl.addEventListener('mousedown', (e) => {
+        lastDragPointerDownTarget = e && e.target ? e.target : null;
+      }, true);
     }
 
     function getDragAfterElement(container, y) {
@@ -9223,7 +9315,10 @@
 
     for (const card of getSettingsCardEls(containerEl)) {
       card.addEventListener('dragstart', (e) => {
-        if (isInteractiveTarget(e.target)) {
+        const handleTarget = (lastDragPointerDownTarget && card.contains(lastDragPointerDownTarget))
+          ? lastDragPointerDownTarget
+          : (e && e.target ? e.target : null);
+        if (isInteractiveTarget(handleTarget) || !isSettingsCardDragHandleTarget(handleTarget, card)) {
           e.preventDefault();
           return;
         }
@@ -9239,6 +9334,7 @@
       card.addEventListener('dragend', () => {
         if (draggedEl) draggedEl.classList.remove('card--dragging');
         draggedEl = null;
+        lastDragPointerDownTarget = null;
         saveSettingsCardOrder(containerEl);
       });
     }
@@ -9607,6 +9703,15 @@
     const usersSearchInput = document.getElementById('usersSearch');
     const usersClearSearchBtn = document.getElementById('usersClearSearchBtn');
 
+    let hideUsersRoleTooltip = () => {};
+    let hideCreateUserTooltip = () => {};
+
+    const renderUsersTableSafe = () => {
+      hideUsersRoleTooltip();
+      hideCreateUserTooltip();
+      renderUsersTable();
+    };
+
     // Settings page: allow each user to reorder cards (persisted via cookie).
     initSettingsCardsDragAndDrop();
     installSettingsCardGearButtons();
@@ -9614,7 +9719,8 @@
     // Settings page: keep card headers fixed; only body content scrolls.
     prepareSettingsCardsStickyHeaders();
 
-    renderUsersTable();
+    renderUsersTableSafe();
+    initUsersRoleHoverTooltips();
 
     // Settings page: allow manually resizing User Roles table columns.
     initUsersTableColumnResizer();
@@ -9648,16 +9754,20 @@
       const errUser = document.getElementById('error-newUsername');
       const errEmail = document.getElementById('error-newEmail');
       const errPass = document.getElementById('error-newPassword');
+      const errPos = document.getElementById('error-newPosition');
       if (errUser) errUser.textContent = '';
       if (errEmail) errEmail.textContent = '';
       if (errPass) errPass.textContent = '';
+      if (errPos) errPos.textContent = '';
 
       const newUsername = document.getElementById('newUsername');
       const newEmail = document.getElementById('newEmail');
       const newPassword = document.getElementById('newPassword');
+      const newPosition = document.getElementById('newPosition');
       if (newUsername) newUsername.value = '';
       if (newEmail) newEmail.value = '';
       if (newPassword) newPassword.value = '';
+      if (newPosition) newPosition.value = '';
 
       [
         'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
@@ -9983,7 +10093,115 @@
       });
     }
 
-    let hideCreateUserTooltip = () => {};
+    function initUsersRoleHoverTooltips() {
+      if (!usersTbody || usersTbody.dataset.userRoleTooltipBound) return;
+      usersTbody.dataset.userRoleTooltipBound = '1';
+
+      const TOOLTIP_SELECTOR = 'strong[data-role-tooltip]';
+      const margin = 12;
+      const gap = 10;
+      let tooltipEl = null;
+      let activeTarget = null;
+      let rafId = 0;
+
+      const ensureTooltipEl = () => {
+        if (tooltipEl) return tooltipEl;
+        tooltipEl = document.createElement('div');
+        tooltipEl.className = 'floatingTooltip userRoleTooltip';
+        tooltipEl.setAttribute('role', 'tooltip');
+        tooltipEl.style.display = 'none';
+        document.body.appendChild(tooltipEl);
+        return tooltipEl;
+      };
+
+      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+      const positionTooltipFor = (target) => {
+        if (!target) return;
+        const text = String(target.getAttribute('data-role-tooltip') || '').trim();
+        if (!text) return;
+
+        const el = ensureTooltipEl();
+        el.textContent = text;
+        el.style.display = 'block';
+        el.style.visibility = 'hidden';
+        el.style.left = '0px';
+        el.style.top = '0px';
+
+        const targetRect = target.getBoundingClientRect();
+
+        // Measure tooltip with the new content
+        const tipRect = el.getBoundingClientRect();
+        const maxLeft = window.innerWidth - margin - tipRect.width;
+        const left = clamp(targetRect.left, margin, maxLeft);
+
+        const belowTop = targetRect.bottom + gap;
+        const aboveTop = targetRect.top - gap - tipRect.height;
+        const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
+        const fitsAbove = aboveTop >= margin;
+
+        let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
+        top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
+
+        el.style.left = `${Math.round(left)}px`;
+        el.style.top = `${Math.round(top)}px`;
+        el.style.visibility = 'visible';
+      };
+
+      const scheduleReposition = () => {
+        if (!activeTarget) return;
+        if (rafId) return;
+        rafId = window.requestAnimationFrame(() => {
+          rafId = 0;
+          positionTooltipFor(activeTarget);
+        });
+      };
+
+      const hide = () => {
+        activeTarget = null;
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        if (tooltipEl) {
+          tooltipEl.style.display = 'none';
+          tooltipEl.textContent = '';
+        }
+      };
+
+      hideUsersRoleTooltip = hide;
+
+      const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
+
+      usersTbody.addEventListener('mouseover', (e) => {
+        const t = findTarget(e.target);
+        if (!t) return;
+        if (activeTarget === t) return;
+        activeTarget = t;
+        positionTooltipFor(activeTarget);
+      });
+
+      usersTbody.addEventListener('mouseout', (e) => {
+        if (!activeTarget) return;
+        const from = findTarget(e.target);
+        if (!from || from !== activeTarget) return;
+        const to = e.relatedTarget;
+        if (to && from.contains && from.contains(to)) return;
+        hide();
+      });
+
+      const tableEl = document.getElementById('usersTable');
+      const wrapEl = tableEl && tableEl.closest ? tableEl.closest('.table-wrap') : null;
+      if (wrapEl && !wrapEl.dataset.userRoleTooltipScrollBound) {
+        wrapEl.dataset.userRoleTooltipScrollBound = '1';
+        wrapEl.addEventListener('scroll', scheduleReposition, { passive: true });
+      }
+
+      if (!window.__acglUserRoleTooltipResizeBound) {
+        window.__acglUserRoleTooltipResizeBound = true;
+        window.addEventListener('resize', scheduleReposition);
+      }
+    }
 
     function initCreateUserModalTooltips(modalEl) {
       if (!modalEl || modalEl.dataset.rolesTooltipBound) return;
@@ -10154,7 +10372,7 @@
       usersSearchInput.addEventListener('input', () => {
         usersTableViewState.globalFilter = usersSearchInput.value;
         if (usersClearSearchBtn) usersClearSearchBtn.hidden = !usersSearchInput.value;
-        renderUsersTable();
+        renderUsersTableSafe();
       });
     }
 
@@ -10164,7 +10382,7 @@
         usersSearchInput.value = '';
         usersTableViewState.globalFilter = '';
         usersClearSearchBtn.hidden = true;
-        renderUsersTable();
+        renderUsersTableSafe();
         if (usersSearchInput.focus) usersSearchInput.focus();
       });
     }
@@ -10307,16 +10525,20 @@
       const newUsername = document.getElementById('newUsername');
       const newEmail = document.getElementById('newEmail');
       const newPassword = document.getElementById('newPassword');
+      const newPosition = document.getElementById('newPosition');
       const errUser = document.getElementById('error-newUsername');
       const errEmail = document.getElementById('error-newEmail');
       const errPass = document.getElementById('error-newPassword');
+      const errPos = document.getElementById('error-newPosition');
       if (errUser) errUser.textContent = '';
       if (errEmail) errEmail.textContent = '';
       if (errPass) errPass.textContent = '';
+      if (errPos) errPos.textContent = '';
 
       const username = newUsername ? newUsername.value : '';
       const email = newEmail ? newEmail.value : '';
       const password = newPassword ? newPassword.value : '';
+      const position = newPosition ? newPosition.value : '';
 
       const perms = {
         budget: document.getElementById('permBudgetWrite')?.checked
@@ -10357,7 +10579,7 @@
       };
 
       const hadNoUsers = loadUsers().length === 0;
-      const res = await createUser(username, password, perms, email);
+      const res = await createUser(username, password, perms, email, position);
       if (!res.ok) {
         if (res.reason === 'username' && errUser) errUser.textContent = 'Username is required.';
         else if (res.reason === 'email' && errEmail) errEmail.textContent = 'Enter a valid email address.';
@@ -10372,6 +10594,7 @@
       if (newUsername) newUsername.value = '';
       if (newEmail) newEmail.value = '';
       if (newPassword) newPassword.value = '';
+      if (newPosition) newPosition.value = '';
       [
         'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
         'permIncomeWrite', 'permIncomePartial', 'permIncomeRead',
@@ -10384,7 +10607,7 @@
         if (el) el.checked = false;
       });
 
-      renderUsersTable();
+      renderUsersTableSafe();
 
       closeCreateUserModal();
 
@@ -10412,13 +10635,13 @@
       if (action === 'edit') {
         if (!username) return;
         usersTableViewState.editingUsername = normalizeUsername(username);
-        renderUsersTable();
+        renderUsersTableSafe();
         return;
       }
 
       if (action === 'cancel') {
         usersTableViewState.editingUsername = null;
-        renderUsersTable();
+        renderUsersTableSafe();
         return;
       }
 
@@ -10444,13 +10667,13 @@
         if (wpRes && wpRes.ok === false) {
           saveUsers(before);
           window.alert('Could not save the deletion to WordPress shared storage. The user was restored.');
-          renderUsersTable();
+          renderUsersTableSafe();
           return;
         }
         if (usersTableViewState.editingUsername && normalizeUsername(username) === usersTableViewState.editingUsername) {
           usersTableViewState.editingUsername = null;
         }
-        renderUsersTable();
+        renderUsersTableSafe();
         return;
       }
 
@@ -10486,7 +10709,10 @@
         const emailEl = (detailsRow || row).querySelector('input[type="email"][data-email]');
         const nextEmail = emailEl ? String(emailEl.value || '') : '';
 
-        const res = await updateUser(username, perms, newPw, nextEmail);
+        const roleEl = (detailsRow || row).querySelector('select[data-role]');
+        const nextRole = roleEl ? String(roleEl.value || '') : '';
+
+        const res = await updateUser(username, perms, newPw, nextEmail, nextRole);
         if (!res.ok && res.reason === 'lastSettings') {
           window.alert('At least one user must keep Settings access.');
           return;
@@ -10506,7 +10732,7 @@
         if (pwEl) pwEl.dataset.touched = '0';
 
         usersTableViewState.editingUsername = null;
-        renderUsersTable();
+        renderUsersTableSafe();
 
         const current = normalizeUsername(getCurrentUsername());
         if (current && current === normalizeUsername(username)) {
@@ -19493,21 +19719,24 @@
   if (tbody) {
     // Delegate View/Delete buttons
     tbody.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-action]');
-      if (!btn) return;
+      const actionEl = e.target.closest('[data-action]');
+      if (!actionEl) return;
+      if (actionEl.tagName === 'A') e.preventDefault();
 
-      const row = btn.closest('tr[data-id]');
+      const row = actionEl.closest('tr[data-id]');
       if (!row) return;
 
       const id = row.getAttribute('data-id');
-      const action = btn.getAttribute('data-action');
+      const action = actionEl.getAttribute('data-action');
 
       const year = getActiveBudgetYear();
       const orders = loadOrders(year);
       const order = orders.find((o) => o.id === id);
       if (!order) return;
 
-      if (action === 'view') {
+      if (action === 'downloadPdf') {
+        generatePaymentOrderPdfFromTemplate({ order });
+      } else if (action === 'view') {
         openModalWithOrder(order);
       } else if (action === 'items') {
         if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;

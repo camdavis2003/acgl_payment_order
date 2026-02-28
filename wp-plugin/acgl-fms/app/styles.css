@@ -880,6 +880,10 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
 
 /* Settings: allow users to reorder cards via drag-and-drop */
 .card[draggable="true"] {
+  cursor: default;
+}
+
+.card[draggable="true"] .list-header {
   cursor: move;
 }
 
@@ -1932,6 +1936,11 @@ input:focus, textarea:focus, select:focus, button:focus {
   pointer-events: none;
 }
 
+.floatingTooltip.userRoleTooltip {
+  font-size: 15px;
+  line-height: 1.25;
+}
+
 @media (max-width: 900px) {
   .rolesGrid__row {
     grid-template-columns: 1fr;
@@ -2387,6 +2396,20 @@ input[type='checkbox'].cb {
 /* Payment Orders: center Euro / USD columns (including totals) */
 #ordersTable td.num,
 #ordersTable th.num {
+  text-align: center;
+}
+
+/* Payment Orders: center selected columns only */
+#ordersTable th:nth-child(2),
+#ordersTable td:nth-child(2),
+#ordersTable th:nth-child(3),
+#ordersTable td:nth-child(3),
+#ordersTable th:nth-child(5),
+#ordersTable td:nth-child(5),
+#ordersTable th:nth-child(6),
+#ordersTable td:nth-child(6),
+#ordersTable th:nth-child(7),
+#ordersTable td:nth-child(7) {
   text-align: center;
 }
 

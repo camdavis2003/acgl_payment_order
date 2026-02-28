@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=9a9131a-20260228152428" />
+    <link rel="stylesheet" href="styles.css?v=0df6aa8-20260228170133" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -516,6 +516,28 @@
                   aria-live="polite"
                 ></div>
               </div>
+
+              <div class="field field--span2">
+                <label for="newPosition">Role</label>
+                <select id="newPosition" name="newPosition">
+                  <option value="" selected>Select a role…</option>
+                  <option value="Grand Master">Grand Master</option>
+                  <option value="Deputy Grand Master">Deputy Grand Master</option>
+                  <option value="Sr. Grand Warden">Sr. Grand Warden</option>
+                  <option value="Jr. Grand Warden">Jr. Grand Warden</option>
+                  <option value="Grand Secretary">Grand Secretary</option>
+                  <option value="Assist. Grand Secretary">Assist. Grand Secretary</option>
+                  <option value="Grand Treasurer">Grand Treasurer</option>
+                  <option value="Assist. Grand Treasurer">Assist. Grand Treasurer</option>
+                  <option value="Auditor">Auditor</option>
+                </select>
+                <div
+                  class="error"
+                  id="error-newPosition"
+                  role="alert"
+                  aria-live="polite"
+                ></div>
+              </div>
             </div>
 
             <div class="rolesGrid" aria-label="Module access">
@@ -851,6 +873,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=9a9131a-20260228152428" defer></script>
+    <script src="app.js?v=0df6aa8-20260228170133" defer></script>
   </body>
 </html>

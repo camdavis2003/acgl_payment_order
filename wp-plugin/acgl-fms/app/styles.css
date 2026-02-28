@@ -880,6 +880,10 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
 
 /* Settings: allow users to reorder cards via drag-and-drop */
 .card[draggable="true"] {
+  cursor: default;
+}
+
+.card[draggable="true"] .list-header {
   cursor: move;
 }
 

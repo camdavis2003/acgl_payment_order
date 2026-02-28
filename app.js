@@ -9235,10 +9235,28 @@
     applySettingsCardFullWidth(containerEl);
 
     let draggedEl = null;
+    let lastDragPointerDownTarget = null;
 
     function isInteractiveTarget(t) {
       if (!t || !t.closest) return false;
       return Boolean(t.closest('input, textarea, select, button, a, label'));
+    }
+
+    function isSettingsCardDragHandleTarget(t, cardEl) {
+      if (!t || !t.closest || !cardEl) return false;
+      const headerEl = t.closest('.list-header');
+      return Boolean(headerEl && cardEl.contains(headerEl));
+    }
+
+    if (!containerEl.dataset.settingsCardPointerDownBound) {
+      containerEl.dataset.settingsCardPointerDownBound = '1';
+      containerEl.addEventListener('pointerdown', (e) => {
+        lastDragPointerDownTarget = e && e.target ? e.target : null;
+      }, true);
+      // Fallback for environments where Pointer Events are unavailable.
+      containerEl.addEventListener('mousedown', (e) => {
+        lastDragPointerDownTarget = e && e.target ? e.target : null;
+      }, true);
     }
 
     function getDragAfterElement(container, y) {
@@ -9256,7 +9274,10 @@
 
     for (const card of getSettingsCardEls(containerEl)) {
       card.addEventListener('dragstart', (e) => {
-        if (isInteractiveTarget(e.target)) {
+        const handleTarget = (lastDragPointerDownTarget && card.contains(lastDragPointerDownTarget))
+          ? lastDragPointerDownTarget
+          : (e && e.target ? e.target : null);
+        if (isInteractiveTarget(handleTarget) || !isSettingsCardDragHandleTarget(handleTarget, card)) {
           e.preventDefault();
           return;
         }
@@ -9272,6 +9293,7 @@
       card.addEventListener('dragend', () => {
         if (draggedEl) draggedEl.classList.remove('card--dragging');
         draggedEl = null;
+        lastDragPointerDownTarget = null;
         saveSettingsCardOrder(containerEl);
       });
     }

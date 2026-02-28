@@ -4655,6 +4655,7 @@
         const x = Number(opts && opts.x);
         const startY = Number(opts && opts.y);
         const size = Number(opts && opts.size) || 10;
+        const firstLineOffset = Number(opts && opts.firstLineOffset) || 0;
         const alignRaw = String((opts && opts.align) || 'left').toLowerCase();
         const align = (alignRaw === 'center' || alignRaw === 'right') ? alignRaw : 'left';
         const maxWidth = Number(opts && opts.maxWidth) || 0;
@@ -4692,6 +4693,7 @@
         for (const rawLine of text.split('\n')) pushWrappedLine(lines, rawLine);
 
         let y = startY;
+        let didDrawFirstTextLine = false;
         const minY = effectiveMaxHeight > 0 ? startY - effectiveMaxHeight : -Infinity;
         for (const line of lines) {
           if (y < minY) break;
@@ -4711,9 +4713,29 @@
             : align === 'right'
               ? x + offset
               : x;
-          page.drawText(lineText, { x: drawX, y, size, font });
+          const drawY = y + (!didDrawFirstTextLine ? firstLineOffset : 0);
+          page.drawText(lineText, { x: drawX, y: drawY, size, font });
+          didDrawFirstTextLine = true;
           y -= lineHeight;
         }
+      };
+
+      const drawFittedCenteredText = (textRaw, opts) => {
+        const text = String(textRaw ?? '').replace(/\s+/g, ' ').trim();
+        const x = Number(opts && opts.x);
+        const y = Number(opts && opts.y);
+        const maxWidth = Number(opts && opts.maxWidth) || 0;
+        const size0 = Number(opts && opts.size) || 10;
+        const minSize = Number(opts && opts.minSize) || Math.max(7, size0 - 3);
+        const useFont = (opts && opts.font) || font;
+        if (!text || !Number.isFinite(x) || !Number.isFinite(y) || !(maxWidth > 0)) return;
+
+        let size = size0;
+        while (size > minSize && useFont.widthOfTextAtSize(text, size) > maxWidth) size -= 0.25;
+
+        const w = useFont.widthOfTextAtSize(text, size);
+        const drawX = x + Math.max(0, (maxWidth - w) / 2);
+        page.drawText(text, { x: drawX, y, size, font: useFont });
       };
 
     const drawMarker = (x, y, label) => {
@@ -5000,9 +5022,10 @@
     const textFields = [
       { key: 'paymentOrderNo', source: 'form', x: 350, y: 721, size: 13 },
       { key: 'date', source: 'form', x: 420, y: 687, size: 10 },
+      { key: 'grandTreasurer', source: 'gl', x: 167, y: 687, size: 10 },
       { key: 'name', source: 'form', x: 130, y: 585, size: 10 },
 
-      { key: 'address', source: 'form', x: 130, y: 570, size: 9, wrap: true, lineHeight: 11, maxWidth: 470, maxHeight: 70 },
+      { key: 'address', source: 'form', x: 130, y: 570, size: 9, wrap: true, lineHeight: 11, maxWidth: 470, maxHeight: 70, firstLineOffset: 1 },
       { key: 'iban', source: 'form', x: 130, y: 540, size: 10 },
       { key: 'bic', source: 'form', x: 130, y: 525, size: 10 },
 
@@ -5013,8 +5036,8 @@
       { key: 'specialInstructions', source: 'form', x: 60, y: 435, size: 9, wrap: true, lineHeight: 11, maxWidth: 540, maxHeight: 180 },
       { key: 'purpose', source: 'form', x: 50, y: 210, size: 9, wrap: true, lineHeight: 11, maxWidth: 540, maxHeight: 180 },
 
-      { key: 'grandMaster', source: 'gl', x: 61, y: 765, size: 10 },
-      { key: 'grandSecretary', source: 'gl', x: 465, y: 765, size: 10, marker: 'grandSecretary_top' },
+      { key: 'grandMaster', source: 'gl', x: -47, y: 765, size: 10, maxWidth: 270, fitCenter: true },
+      { key: 'grandSecretary', source: 'gl', x: 370, y: 765, size: 10, maxWidth: 270, fitCenter: true, marker: 'grandSecretary_top' },
       { key: 'grandSecretary', source: 'gl', x: 406, y: 290, size: 10, marker: 'grandSecretary_sig' },
 
       // Operation Address box: bottom ~280, top ~810. Start from the top and wrap downward.
@@ -5052,7 +5075,16 @@
 
     for (const f of textFields) {
       const v = readFieldValue(f);
-      if (f.wrap) {
+      if (f.fitCenter) {
+        drawFittedCenteredText(v, {
+          x: f.x,
+          y: f.y,
+          size: f.size,
+          minSize: 8,
+          maxWidth: f.maxWidth,
+          font,
+        });
+      } else if (f.wrap) {
         const maxHeight = Number.isFinite(f.maxHeight) && f.maxHeight > 0
           ? f.maxHeight
           : (Number.isFinite(f.yBottom) ? Math.max(0, Number(f.y) - Number(f.yBottom)) : 0);
@@ -5064,6 +5096,7 @@
           maxWidth: f.maxWidth,
           maxHeight,
           lineHeight: f.lineHeight,
+          firstLineOffset: f.firstLineOffset,
         });
       } else {
         const useFont = f.key === 'paymentOrderNo' ? fontBold : font;

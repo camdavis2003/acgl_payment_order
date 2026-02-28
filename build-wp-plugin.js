@@ -30,11 +30,15 @@ const FILES = [
   'loading.html',
   'iban.js',
   'bic.js',
+  'pdf-lib.min.js',
   'app.js',
   'styles.css',
   'wise_eur_2026_seed.csv',
   'wise_usd_2026_seed.csv',
+  'payment_order_template.pdf',
 ];
+
+const OPTIONAL_FILES = new Set(['payment_order_template.pdf']);
 
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
@@ -76,7 +80,7 @@ function patchAssetUrlsInHtml(html, version) {
 
   // Append ?v=... to our local asset URLs to avoid stale browser/WP caches.
   // Only patch exact filenames and skip if a query string is already present.
-  const assets = ['styles.css', 'app.js', 'iban.js', 'bic.js'];
+  const assets = ['styles.css', 'app.js', 'iban.js', 'bic.js', 'pdf-lib.min.js'];
   let out = String(html || '');
   for (const a of assets) {
     // href="styles.css"  /  src="app.js"
@@ -100,6 +104,10 @@ function main() {
     const src = path.join(ROOT, rel);
     const dest = path.join(PLUGIN_APP_DIR, rel);
     if (!fs.existsSync(src)) {
+      if (OPTIONAL_FILES.has(rel)) {
+        console.warn(`Skipping optional missing file: ${rel}`);
+        continue;
+      }
       throw new Error(`Missing source file: ${rel}`);
     }
 

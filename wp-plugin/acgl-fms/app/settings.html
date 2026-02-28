@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=16dcf58-20260227222040" />
+    <link rel="stylesheet" href="styles.css?v=fee0d87-20260227231801" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -300,7 +300,7 @@
                   <textarea
                     id="officialAddress"
                     name="officialAddress"
-                    rows="4"
+                    rows="2"
                     placeholder="Straße Hausnr.\nPLZ Ort\nLand"
                   ></textarea>
                 </div>
@@ -310,9 +310,31 @@
                   <textarea
                     id="operationAddress"
                     name="operationAddress"
-                    rows="4"
+                    rows="2"
                     placeholder="Straße Hausnr.\nPLZ Ort\nLand"
                   ></textarea>
+                </div>
+
+                <div class="field">
+                  <label for="grandLodgeSealFile">Grand Lodge Seal</label>
+                  <input
+                    id="grandLodgeSealFile"
+                    name="grandLodgeSealFile"
+                    type="file"
+                    accept="image/*"
+                  />
+                </div>
+
+                <div class="field">
+                  <label for="grandSecretarySignatureFile">
+                    Grand Secretary's Signature
+                  </label>
+                  <input
+                    id="grandSecretarySignatureFile"
+                    name="grandSecretarySignatureFile"
+                    type="file"
+                    accept="image/*"
+                  />
                 </div>
               </div>
 
@@ -829,6 +851,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=16dcf58-20260227222040" defer></script>
+    <script src="app.js?v=fee0d87-20260227231801" defer></script>
   </body>
 </html>

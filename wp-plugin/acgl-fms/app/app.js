@@ -3231,6 +3231,8 @@ void (async () => {
   const grandTreasurerInput = document.getElementById('grandTreasurer');
   const officialAddressInput = document.getElementById('officialAddress');
   const operationAddressInput = document.getElementById('operationAddress');
+  const grandLodgeSealFileInput = document.getElementById('grandLodgeSealFile');
+  const grandSecretarySignatureFileInput = document.getElementById('grandSecretarySignatureFile');
 
   // Settings page (roles)
   const createUserForm = document.getElementById('createUserForm');
@@ -3244,6 +3246,7 @@ void (async () => {
 
   const euroField = document.getElementById('euro');
   const usdField = document.getElementById('usd');
+  const downloadPdfBtn = document.getElementById('downloadPdfBtn');
 
   let currentViewedOrderId = null;
 
@@ -3654,6 +3657,10 @@ void (async () => {
           grandTreasurer: '',
           officialAddress: '',
           operationAddress: '',
+          grandLodgeSealDataUrl: '',
+          grandLodgeSealFileName: '',
+          grandSecretarySignatureDataUrl: '',
+          grandSecretarySignatureFileName: '',
         };
       }
       const parsed = JSON.parse(raw);
@@ -3663,6 +3670,10 @@ void (async () => {
         grandTreasurer: normalizePersonName(parsed && parsed.grandTreasurer),
         officialAddress: normalizeGermanAddressMultiline(parsed && parsed.officialAddress),
         operationAddress: normalizeGermanAddressMultiline(parsed && parsed.operationAddress),
+        grandLodgeSealDataUrl: String((parsed && parsed.grandLodgeSealDataUrl) || ''),
+        grandLodgeSealFileName: String((parsed && parsed.grandLodgeSealFileName) || ''),
+        grandSecretarySignatureDataUrl: String((parsed && parsed.grandSecretarySignatureDataUrl) || ''),
+        grandSecretarySignatureFileName: String((parsed && parsed.grandSecretarySignatureFileName) || ''),
       };
     } catch {
       return {
@@ -3671,6 +3682,10 @@ void (async () => {
         grandTreasurer: '',
         officialAddress: '',
         operationAddress: '',
+        grandLodgeSealDataUrl: '',
+        grandLodgeSealFileName: '',
+        grandSecretarySignatureDataUrl: '',
+        grandSecretarySignatureFileName: '',
       };
     }
   }
@@ -3682,8 +3697,29 @@ void (async () => {
       grandTreasurer: normalizePersonName(info && info.grandTreasurer),
       officialAddress: normalizeGermanAddressMultiline(info && info.officialAddress),
       operationAddress: normalizeGermanAddressMultiline(info && info.operationAddress),
+      grandLodgeSealDataUrl: String((info && info.grandLodgeSealDataUrl) || ''),
+      grandLodgeSealFileName: String((info && info.grandLodgeSealFileName) || ''),
+      grandSecretarySignatureDataUrl: String((info && info.grandSecretarySignatureDataUrl) || ''),
+      grandSecretarySignatureFileName: String((info && info.grandSecretarySignatureFileName) || ''),
     };
     localStorage.setItem(GRAND_LODGE_INFO_KEY, JSON.stringify(payload));
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!file) {
+          resolve('');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('read_failed'));
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.readAsDataURL(file);
+      } catch (e) {
+        reject(e);
+      }
+    });
   }
 
   function loadNumberingSettings() {
@@ -4465,6 +4501,103 @@ void (async () => {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  function dataUrlToUint8Array(dataUrl) {
+    const s = String(dataUrl || '');
+    const m = s.match(/^data:([^;]+);base64,(.*)$/);
+    if (!m) return null;
+    const b64 = m[2] || '';
+    try {
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  function getDataUrlMime(dataUrl) {
+    const s = String(dataUrl || '');
+    const m = s.match(/^data:([^;]+);base64,/);
+    return m ? String(m[1] || '') : '';
+  }
+
+  async function fetchBinary(url) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('fetch_failed');
+    const buf = await res.arrayBuffer();
+    return new Uint8Array(buf);
+  }
+
+  async function generatePaymentOrderPdfFromTemplate() {
+    const PDFLib = window.PDFLib;
+    if (!PDFLib || !PDFLib.PDFDocument) {
+      window.alert('PDF library not loaded.');
+      return;
+    }
+
+    if (!form) {
+      window.alert('Payment Order form not found.');
+      return;
+    }
+
+    let templateBytes;
+    try {
+      templateBytes = await fetchBinary('payment_order_template.pdf');
+    } catch {
+      window.alert('Missing PDF template file: payment_order_template.pdf');
+      return;
+    }
+
+    const pdfDoc = await PDFLib.PDFDocument.load(templateBytes);
+    const pages = pdfDoc.getPages();
+    const page = pages && pages.length ? pages[0] : null;
+    if (!page) {
+      window.alert('Invalid PDF template.');
+      return;
+    }
+
+    const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+
+    const value = (name) => {
+      try {
+        const el = form.elements.namedItem(name);
+        return el && typeof el.value === 'string' ? el.value : '';
+      } catch {
+        return '';
+      }
+    };
+
+    // Placeholder coordinates until the actual PDF template is added.
+    page.drawText(String(value('paymentOrderNo') || ''), { x: 60, y: 760, size: 10, font });
+    page.drawText(String(value('date') || ''), { x: 380, y: 760, size: 10, font });
+    page.drawText(String(value('requestedBy') || ''), { x: 60, y: 735, size: 10, font });
+    page.drawText(String(value('euro') || ''), { x: 60, y: 710, size: 10, font });
+    page.drawText(String(value('usd') || ''), { x: 160, y: 710, size: 10, font });
+
+    const gl = loadGrandLodgeInfo();
+    const sealBytes = gl && gl.grandLodgeSealDataUrl ? dataUrlToUint8Array(gl.grandLodgeSealDataUrl) : null;
+    const sigBytes = gl && gl.grandSecretarySignatureDataUrl ? dataUrlToUint8Array(gl.grandSecretarySignatureDataUrl) : null;
+
+    if (sealBytes) {
+      const mime = getDataUrlMime(gl.grandLodgeSealDataUrl);
+      const img = mime === 'image/jpeg' ? await pdfDoc.embedJpg(sealBytes) : await pdfDoc.embedPng(sealBytes);
+      page.drawImage(img, { x: 430, y: 690, width: 120, height: 60 });
+    }
+
+    if (sigBytes) {
+      const mime = getDataUrlMime(gl.grandSecretarySignatureDataUrl);
+      const img = mime === 'image/jpeg' ? await pdfDoc.embedJpg(sigBytes) : await pdfDoc.embedPng(sigBytes);
+      page.drawImage(img, { x: 430, y: 620, width: 120, height: 40 });
+    }
+
+    const outBytes = await pdfDoc.save();
+    const blob = new Blob([outBytes], { type: 'application/pdf' });
+    const poNo = String(value('paymentOrderNo') || '').trim().replace(/[^a-z0-9_-]+/gi, '_');
+    const stamp = getTodayStamp();
+    downloadBlob(blob, `payment_order_${poNo || 'draft'}_${stamp}.pdf`);
   }
 
   function openAttachmentInNewTab(att) {
@@ -17935,6 +18068,13 @@ void (async () => {
     }
   }
 
+  if (downloadPdfBtn && !downloadPdfBtn.dataset.bound) {
+    downloadPdfBtn.dataset.bound = '1';
+    downloadPdfBtn.addEventListener('click', () => {
+      void generatePaymentOrderPdfFromTemplate();
+    });
+  }
+
   // Ensure request form nav/hamburger always reflects auth state (even if the header auth button markup changes).
   syncRequestFormHamburgerVisibility();
 
@@ -17986,23 +18126,55 @@ void (async () => {
         if (grandTreasurerInput) grandTreasurerInput.disabled = true;
         if (officialAddressInput) officialAddressInput.disabled = true;
         if (operationAddressInput) operationAddressInput.disabled = true;
+        if (grandLodgeSealFileInput) grandLodgeSealFileInput.disabled = true;
+        if (grandSecretarySignatureFileInput) grandSecretarySignatureFileInput.disabled = true;
         const submitBtn = grandLodgeInfoForm.querySelector('button[type="submit"]');
         if (submitBtn) submitBtn.disabled = true;
       }
     }
 
-    grandLodgeInfoForm.addEventListener('submit', (e) => {
+    grandLodgeInfoForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
       if (!requireSettingsEditAccess('Settings is read only for your account.')) return;
 
-      saveGrandLodgeInfo({
-        grandMaster: grandMasterInput ? grandMasterInput.value : '',
-        grandSecretary: grandSecretaryInput ? grandSecretaryInput.value : '',
-        grandTreasurer: grandTreasurerInput ? grandTreasurerInput.value : '',
-        officialAddress: officialAddressInput ? officialAddressInput.value : '',
-        operationAddress: operationAddressInput ? operationAddressInput.value : '',
-      });
+      const submitBtn = grandLodgeInfoForm.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        const prev = loadGrandLodgeInfo();
+
+        const sealFile = grandLodgeSealFileInput && grandLodgeSealFileInput.files && grandLodgeSealFileInput.files[0]
+          ? grandLodgeSealFileInput.files[0]
+          : null;
+        const sigFile = grandSecretarySignatureFileInput
+          && grandSecretarySignatureFileInput.files
+          && grandSecretarySignatureFileInput.files[0]
+          ? grandSecretarySignatureFileInput.files[0]
+          : null;
+
+        const sealDataUrl = sealFile ? await readFileAsDataUrl(sealFile) : prev.grandLodgeSealDataUrl;
+        const sealName = sealFile ? String(sealFile.name || '') : prev.grandLodgeSealFileName;
+        const sigDataUrl = sigFile ? await readFileAsDataUrl(sigFile) : prev.grandSecretarySignatureDataUrl;
+        const sigName = sigFile ? String(sigFile.name || '') : prev.grandSecretarySignatureFileName;
+
+        saveGrandLodgeInfo({
+          grandMaster: grandMasterInput ? grandMasterInput.value : '',
+          grandSecretary: grandSecretaryInput ? grandSecretaryInput.value : '',
+          grandTreasurer: grandTreasurerInput ? grandTreasurerInput.value : '',
+          officialAddress: officialAddressInput ? officialAddressInput.value : '',
+          operationAddress: operationAddressInput ? operationAddressInput.value : '',
+          grandLodgeSealDataUrl: sealDataUrl,
+          grandLodgeSealFileName: sealName,
+          grandSecretarySignatureDataUrl: sigDataUrl,
+          grandSecretarySignatureFileName: sigName,
+        });
+      } catch {
+        window.alert('Could not read the selected file(s).');
+        return;
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
 
       // Sync normalized values back into the form.
       const next = loadGrandLodgeInfo();

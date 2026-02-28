@@ -7910,10 +7910,11 @@
     });
   }
 
-  async function createUser(usernameRaw, passwordRaw, permissions, emailRaw) {
+  async function createUser(usernameRaw, passwordRaw, permissions, emailRaw, positionRaw) {
     const username = normalizeUsername(usernameRaw);
     const password = String(passwordRaw || '').trim();
     const email = normalizeEmail(emailRaw);
+    const position = String(positionRaw || '').trim();
     if (!username) return { ok: false, reason: 'username' };
     if (!password || !password.trim()) return { ok: false, reason: 'password' };
     if (email && !isValidEmail(email)) return { ok: false, reason: 'email' };
@@ -7937,6 +7938,7 @@
       updatedAt: nowIso,
       username,
       email,
+      position: position || '',
       salt,
       passwordHash,
       passwordPlain: password,
@@ -9703,16 +9705,20 @@
       const errUser = document.getElementById('error-newUsername');
       const errEmail = document.getElementById('error-newEmail');
       const errPass = document.getElementById('error-newPassword');
+      const errPos = document.getElementById('error-newPosition');
       if (errUser) errUser.textContent = '';
       if (errEmail) errEmail.textContent = '';
       if (errPass) errPass.textContent = '';
+      if (errPos) errPos.textContent = '';
 
       const newUsername = document.getElementById('newUsername');
       const newEmail = document.getElementById('newEmail');
       const newPassword = document.getElementById('newPassword');
+      const newPosition = document.getElementById('newPosition');
       if (newUsername) newUsername.value = '';
       if (newEmail) newEmail.value = '';
       if (newPassword) newPassword.value = '';
+      if (newPosition) newPosition.value = '';
 
       [
         'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
@@ -10362,16 +10368,20 @@
       const newUsername = document.getElementById('newUsername');
       const newEmail = document.getElementById('newEmail');
       const newPassword = document.getElementById('newPassword');
+      const newPosition = document.getElementById('newPosition');
       const errUser = document.getElementById('error-newUsername');
       const errEmail = document.getElementById('error-newEmail');
       const errPass = document.getElementById('error-newPassword');
+      const errPos = document.getElementById('error-newPosition');
       if (errUser) errUser.textContent = '';
       if (errEmail) errEmail.textContent = '';
       if (errPass) errPass.textContent = '';
+      if (errPos) errPos.textContent = '';
 
       const username = newUsername ? newUsername.value : '';
       const email = newEmail ? newEmail.value : '';
       const password = newPassword ? newPassword.value : '';
+      const position = newPosition ? newPosition.value : '';
 
       const perms = {
         budget: document.getElementById('permBudgetWrite')?.checked
@@ -10412,7 +10422,7 @@
       };
 
       const hadNoUsers = loadUsers().length === 0;
-      const res = await createUser(username, password, perms, email);
+      const res = await createUser(username, password, perms, email, position);
       if (!res.ok) {
         if (res.reason === 'username' && errUser) errUser.textContent = 'Username is required.';
         else if (res.reason === 'email' && errEmail) errEmail.textContent = 'Enter a valid email address.';
@@ -10427,6 +10437,7 @@
       if (newUsername) newUsername.value = '';
       if (newEmail) newEmail.value = '';
       if (newPassword) newPassword.value = '';
+      if (newPosition) newPosition.value = '';
       [
         'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
         'permIncomeWrite', 'permIncomePartial', 'permIncomeRead',

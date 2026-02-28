@@ -154,9 +154,22 @@ function createServer() {
   server.listen(port, '0.0.0.0', () => {
     // Print both localhost and 127.0.0.1 for convenience
     // (some environments resolve localhost differently)
+    const urls = [`http://localhost:${port}/`, `http://127.0.0.1:${port}/`];
+
+    // Persist the chosen port so tools (and humans) can easily find it.
+    try {
+      fs.writeFileSync(
+        path.join(ROOT_DIR, '.dev-server.json'),
+        JSON.stringify({ port, urls, startedAt: new Date().toISOString() }, null, 2),
+        'utf8'
+      );
+    } catch {
+      // ignore
+    }
+
     console.log(`Dev server running:`);
-    console.log(`  http://localhost:${port}/`);
-    console.log(`  http://127.0.0.1:${port}/`);
+    console.log(`  ${urls[0]}`);
+    console.log(`  ${urls[1]}`);
     if (port !== DEFAULT_PORT) {
       console.log(`(Port ${DEFAULT_PORT} was busy, so I used ${port}.)`);
     }

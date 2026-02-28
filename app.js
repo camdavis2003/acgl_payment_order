@@ -7804,6 +7804,7 @@
       .map((u) => {
         const username = normalizeUsername(u && u.username);
         const email = normalizeEmail(u && u.email);
+        const role = String(u && typeof u.position === 'string' ? u.position : '').trim();
         const passwordPlain = String(u && typeof u.passwordPlain === 'string' ? u.passwordPlain : '')
           || extractLegacyPasswordPlain(u && u.passwordHash, u && u.salt);
         const p = getEffectivePermissions(u);
@@ -7811,6 +7812,7 @@
         const isProtected = username === normalizeUsername(HARD_CODED_ADMIN_USERNAME);
         const safeName = escapeHtml(username);
         const safeEmail = escapeHtml(email);
+        const roleTooltipAttr = role ? ` data-role-tooltip="${escapeHtml(role)}"` : '';
         const disabled = canEdit && !isProtected ? '' : 'disabled';
 
         const accessChecks = (key, level) => {
@@ -7849,12 +7851,48 @@
           </div>
         `.trim();
 
+        const baseRoles = [
+          'Grand Master',
+          'Deputy Grand Master',
+          'Sr. Grand Warden',
+          'Jr. Grand Warden',
+          'Grand Secretary',
+          'Assist. Grand Secretary',
+          'Grand Treasurer',
+          'Assist. Grand Treasurer',
+          'Auditor',
+        ];
+
+        const roleOptionsHtml = (() => {
+          const r = String(role || '').trim();
+          const has = r && baseRoles.includes(r);
+          const extra = !has && r ? `<option value="${escapeHtml(r)}" selected>${escapeHtml(r)}</option>` : '';
+          const placeholder = `<option value="" ${r ? '' : 'selected'}>Select a role…</option>`;
+          const opts = baseRoles
+            .map((v) => `<option value="${escapeHtml(v)}" ${v === r ? 'selected' : ''}>${escapeHtml(v)}</option>`)
+            .join('');
+          return `${extra}${placeholder}${opts}`;
+        })();
+
+        const roleDetailsCell = !isEditing
+          ? ''
+          : `
+            <div class="usersTable__details" aria-label="Role">
+              <span class="usersTable__detailsLabel">Role:</span>
+              <select class="usersTable__detailsInput" data-role aria-label="Role" ${disabled}>
+                ${roleOptionsHtml}
+              </select>
+            </div>
+          `.trim();
+
         const passwordDetailsCell = `
           <div class="usersTable__details" aria-label="Password">
             <span class="usersTable__detailsLabel">Password:</span>
             ${passwordControl}
           </div>
         `.trim();
+
+        const identityDetailsCell = `${emailDetailsCell}${roleDetailsCell ? `\n${roleDetailsCell}` : ''}`;
 
         const actionsCell = (() => {
           const editDisabled = disabled ? 'disabled' : '';
@@ -7881,7 +7919,7 @@
           <tr data-username="${safeName}">
             <td>
               <div class="usersTable__identity">
-                <strong>${safeName}</strong>
+                <strong${roleTooltipAttr}>${safeName}</strong>
               </div>
             </td>
             <td>${isEditing ? accessChecks('budget', p.budget) : accessDisplay('budget', p.budget)}</td>
@@ -7892,7 +7930,7 @@
             <td class="actions">${actionsWrap}</td>
           </tr>
           <tr class="usersTable__detailsRow" data-details-for="${safeName}">
-            <td>${emailDetailsCell}</td>
+            <td>${identityDetailsCell}</td>
             <td colspan="5">${passwordDetailsCell}</td>
             <td></td>
           </tr>
@@ -7956,10 +7994,11 @@
     return { ok: true, user };
   }
 
-  async function updateUser(usernameRaw, nextPermissions, newPasswordRaw, nextEmailRaw) {
+  async function updateUser(usernameRaw, nextPermissions, newPasswordRaw, nextEmailRaw, nextRoleRaw) {
     const username = normalizeUsername(usernameRaw);
     const newPassword = String(newPasswordRaw || '').trim();
     const nextEmail = normalizeEmail(nextEmailRaw);
+    const nextRole = String(nextRoleRaw ?? '').trim();
     if (nextEmail && !isValidEmail(nextEmail)) return { ok: false, reason: 'email' };
     const users = loadUsers();
     const idx = users.findIndex((u) => normalizeUsername(u && u.username) === username);
@@ -7984,7 +8023,7 @@
     }
 
     const nowIso = new Date().toISOString();
-    const updated = { ...current, permissions: nextPerms, email: nextEmail, updatedAt: nowIso };
+    const updated = { ...current, permissions: nextPerms, email: nextEmail, position: nextRole || '', updatedAt: nowIso };
 
     // Only update password when a non-whitespace value is provided.
     if (newPassword && newPassword.trim()) {
@@ -9664,6 +9703,15 @@
     const usersSearchInput = document.getElementById('usersSearch');
     const usersClearSearchBtn = document.getElementById('usersClearSearchBtn');
 
+    let hideUsersRoleTooltip = () => {};
+    let hideCreateUserTooltip = () => {};
+
+    const renderUsersTableSafe = () => {
+      hideUsersRoleTooltip();
+      hideCreateUserTooltip();
+      renderUsersTable();
+    };
+
     // Settings page: allow each user to reorder cards (persisted via cookie).
     initSettingsCardsDragAndDrop();
     installSettingsCardGearButtons();
@@ -9671,7 +9719,8 @@
     // Settings page: keep card headers fixed; only body content scrolls.
     prepareSettingsCardsStickyHeaders();
 
-    renderUsersTable();
+    renderUsersTableSafe();
+    initUsersRoleHoverTooltips();
 
     // Settings page: allow manually resizing User Roles table columns.
     initUsersTableColumnResizer();
@@ -10044,7 +10093,115 @@
       });
     }
 
-    let hideCreateUserTooltip = () => {};
+    function initUsersRoleHoverTooltips() {
+      if (!usersTbody || usersTbody.dataset.userRoleTooltipBound) return;
+      usersTbody.dataset.userRoleTooltipBound = '1';
+
+      const TOOLTIP_SELECTOR = 'strong[data-role-tooltip]';
+      const margin = 12;
+      const gap = 10;
+      let tooltipEl = null;
+      let activeTarget = null;
+      let rafId = 0;
+
+      const ensureTooltipEl = () => {
+        if (tooltipEl) return tooltipEl;
+        tooltipEl = document.createElement('div');
+        tooltipEl.className = 'floatingTooltip userRoleTooltip';
+        tooltipEl.setAttribute('role', 'tooltip');
+        tooltipEl.style.display = 'none';
+        document.body.appendChild(tooltipEl);
+        return tooltipEl;
+      };
+
+      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+      const positionTooltipFor = (target) => {
+        if (!target) return;
+        const text = String(target.getAttribute('data-role-tooltip') || '').trim();
+        if (!text) return;
+
+        const el = ensureTooltipEl();
+        el.textContent = text;
+        el.style.display = 'block';
+        el.style.visibility = 'hidden';
+        el.style.left = '0px';
+        el.style.top = '0px';
+
+        const targetRect = target.getBoundingClientRect();
+
+        // Measure tooltip with the new content
+        const tipRect = el.getBoundingClientRect();
+        const maxLeft = window.innerWidth - margin - tipRect.width;
+        const left = clamp(targetRect.left, margin, maxLeft);
+
+        const belowTop = targetRect.bottom + gap;
+        const aboveTop = targetRect.top - gap - tipRect.height;
+        const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
+        const fitsAbove = aboveTop >= margin;
+
+        let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
+        top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
+
+        el.style.left = `${Math.round(left)}px`;
+        el.style.top = `${Math.round(top)}px`;
+        el.style.visibility = 'visible';
+      };
+
+      const scheduleReposition = () => {
+        if (!activeTarget) return;
+        if (rafId) return;
+        rafId = window.requestAnimationFrame(() => {
+          rafId = 0;
+          positionTooltipFor(activeTarget);
+        });
+      };
+
+      const hide = () => {
+        activeTarget = null;
+        if (rafId) {
+          window.cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+        if (tooltipEl) {
+          tooltipEl.style.display = 'none';
+          tooltipEl.textContent = '';
+        }
+      };
+
+      hideUsersRoleTooltip = hide;
+
+      const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
+
+      usersTbody.addEventListener('mouseover', (e) => {
+        const t = findTarget(e.target);
+        if (!t) return;
+        if (activeTarget === t) return;
+        activeTarget = t;
+        positionTooltipFor(activeTarget);
+      });
+
+      usersTbody.addEventListener('mouseout', (e) => {
+        if (!activeTarget) return;
+        const from = findTarget(e.target);
+        if (!from || from !== activeTarget) return;
+        const to = e.relatedTarget;
+        if (to && from.contains && from.contains(to)) return;
+        hide();
+      });
+
+      const tableEl = document.getElementById('usersTable');
+      const wrapEl = tableEl && tableEl.closest ? tableEl.closest('.table-wrap') : null;
+      if (wrapEl && !wrapEl.dataset.userRoleTooltipScrollBound) {
+        wrapEl.dataset.userRoleTooltipScrollBound = '1';
+        wrapEl.addEventListener('scroll', scheduleReposition, { passive: true });
+      }
+
+      if (!window.__acglUserRoleTooltipResizeBound) {
+        window.__acglUserRoleTooltipResizeBound = true;
+        window.addEventListener('resize', scheduleReposition);
+      }
+    }
 
     function initCreateUserModalTooltips(modalEl) {
       if (!modalEl || modalEl.dataset.rolesTooltipBound) return;
@@ -10215,7 +10372,7 @@
       usersSearchInput.addEventListener('input', () => {
         usersTableViewState.globalFilter = usersSearchInput.value;
         if (usersClearSearchBtn) usersClearSearchBtn.hidden = !usersSearchInput.value;
-        renderUsersTable();
+        renderUsersTableSafe();
       });
     }
 
@@ -10225,7 +10382,7 @@
         usersSearchInput.value = '';
         usersTableViewState.globalFilter = '';
         usersClearSearchBtn.hidden = true;
-        renderUsersTable();
+        renderUsersTableSafe();
         if (usersSearchInput.focus) usersSearchInput.focus();
       });
     }
@@ -10450,7 +10607,7 @@
         if (el) el.checked = false;
       });
 
-      renderUsersTable();
+      renderUsersTableSafe();
 
       closeCreateUserModal();
 
@@ -10478,13 +10635,13 @@
       if (action === 'edit') {
         if (!username) return;
         usersTableViewState.editingUsername = normalizeUsername(username);
-        renderUsersTable();
+        renderUsersTableSafe();
         return;
       }
 
       if (action === 'cancel') {
         usersTableViewState.editingUsername = null;
-        renderUsersTable();
+        renderUsersTableSafe();
         return;
       }
 
@@ -10510,13 +10667,13 @@
         if (wpRes && wpRes.ok === false) {
           saveUsers(before);
           window.alert('Could not save the deletion to WordPress shared storage. The user was restored.');
-          renderUsersTable();
+          renderUsersTableSafe();
           return;
         }
         if (usersTableViewState.editingUsername && normalizeUsername(username) === usersTableViewState.editingUsername) {
           usersTableViewState.editingUsername = null;
         }
-        renderUsersTable();
+        renderUsersTableSafe();
         return;
       }
 
@@ -10552,7 +10709,10 @@
         const emailEl = (detailsRow || row).querySelector('input[type="email"][data-email]');
         const nextEmail = emailEl ? String(emailEl.value || '') : '';
 
-        const res = await updateUser(username, perms, newPw, nextEmail);
+        const roleEl = (detailsRow || row).querySelector('select[data-role]');
+        const nextRole = roleEl ? String(roleEl.value || '') : '';
+
+        const res = await updateUser(username, perms, newPw, nextEmail, nextRole);
         if (!res.ok && res.reason === 'lastSettings') {
           window.alert('At least one user must keep Settings access.');
           return;
@@ -10572,7 +10732,7 @@
         if (pwEl) pwEl.dataset.touched = '0';
 
         usersTableViewState.editingUsername = null;
-        renderUsersTable();
+        renderUsersTableSafe();
 
         const current = normalizeUsername(getCurrentUsername());
         if (current && current === normalizeUsername(username)) {

@@ -1936,6 +1936,11 @@ input:focus, textarea:focus, select:focus, button:focus {
   pointer-events: none;
 }
 
+.floatingTooltip.userRoleTooltip {
+  font-size: 15px;
+  line-height: 1.25;
+}
+
 @media (max-width: 900px) {
   .rolesGrid__row {
     grid-template-columns: 1fr;

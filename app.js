@@ -6591,7 +6591,7 @@
                 X
               </button>
             </td>
-            <td>${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo))}</td>
+            <td><a href="#" class="poNoDownloadLink" data-action="downloadPdf" title="Download PDF">${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo))}</a></td>
             <td>${escapeHtml(formatDate(o.date))}</td>
             <td>${escapeHtml(o.name)}</td>
             <td class="num">${escapeHtml(formatCurrency(o.euro, 'EUR'))}</td>
@@ -19548,21 +19548,24 @@
   if (tbody) {
     // Delegate View/Delete buttons
     tbody.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-action]');
-      if (!btn) return;
+      const actionEl = e.target.closest('[data-action]');
+      if (!actionEl) return;
+      if (actionEl.tagName === 'A') e.preventDefault();
 
-      const row = btn.closest('tr[data-id]');
+      const row = actionEl.closest('tr[data-id]');
       if (!row) return;
 
       const id = row.getAttribute('data-id');
-      const action = btn.getAttribute('data-action');
+      const action = actionEl.getAttribute('data-action');
 
       const year = getActiveBudgetYear();
       const orders = loadOrders(year);
       const order = orders.find((o) => o.id === id);
       if (!order) return;
 
-      if (action === 'view') {
+      if (action === 'downloadPdf') {
+        generatePaymentOrderPdfFromTemplate({ order });
+      } else if (action === 'view') {
         openModalWithOrder(order);
       } else if (action === 'items') {
         if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;

@@ -2394,6 +2394,20 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
+/* Payment Orders: center selected columns only */
+#ordersTable th:nth-child(2),
+#ordersTable td:nth-child(2),
+#ordersTable th:nth-child(3),
+#ordersTable td:nth-child(3),
+#ordersTable th:nth-child(5),
+#ordersTable td:nth-child(5),
+#ordersTable th:nth-child(6),
+#ordersTable td:nth-child(6),
+#ordersTable th:nth-child(7),
+#ordersTable td:nth-child(7) {
+  text-align: center;
+}
+
 /* wiseUSD: center all columns except Description */
 #wiseUsdTable th,
 #wiseUsdTable td {

@@ -6,8 +6,43 @@
   - Renders newest-first table with View/Delete actions
 */
 
-void (async () => {
+(async () => {
   'use strict';
+
+  const __acglIsLocalDevOrigin = (() => {
+    try {
+      const h = String(window.location.hostname || '').toLowerCase();
+      return h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0';
+    } catch {
+      return false;
+    }
+  })();
+
+  // Dev-only: prove the script is running + the button click is reaching JS.
+  // This runs early so it still works even if later initialization crashes.
+  if (__acglIsLocalDevOrigin) {
+    try {
+      const btn = document.getElementById('downloadPdfBtn');
+      const requestForm = document.getElementById('paymentOrderForm');
+      // Only apply the probe on the request-form page.
+      if (btn && requestForm && requestForm.contains(btn) && !btn.dataset.devProbe) {
+        btn.dataset.devProbe = '1';
+        btn.addEventListener(
+          'click',
+          () => {
+            const prev = String(btn.textContent || 'Download PDF');
+            try { btn.textContent = 'Click OK (dev probe)'; } catch { /* ignore */ }
+            window.setTimeout(() => {
+              try { btn.textContent = prev; } catch { /* ignore */ }
+            }, 600);
+          },
+          true
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const APP_TAB_TITLE = 'ACGL - FMS';
   const APP_VERSION = '0.1.1';
@@ -136,7 +171,14 @@ void (async () => {
   const urlRestNonce = String(wpParams.get('restNonce') || '').trim();
   if (urlRestUrl) saveWpCtxToSession(urlRestUrl, urlRestNonce);
 
-  const remembered = loadWpCtxFromSession();
+  const IS_LOCAL_DEV_ORIGIN = __acglIsLocalDevOrigin;
+
+  const urlWpFlag = String(wpParams.get('wp') || '').trim();
+  // In dev, avoid accidentally enabling WP shared mode from a remembered restUrl.
+  // Only honor remembered WP ctx when explicitly requested via query params.
+  const ALLOW_REMEMBERED_WP_CTX = Boolean(urlRestUrl) || urlWpFlag === '1' || !IS_LOCAL_DEV_ORIGIN;
+
+  const remembered = ALLOW_REMEMBERED_WP_CTX ? loadWpCtxFromSession() : null;
   const WP_REST_URL = urlRestUrl || (remembered ? remembered.restUrl : '');
   const WP_REST_NONCE = urlRestNonce || (remembered ? remembered.restNonce : '');
   // Shared storage is enabled when a REST base is provided.
@@ -539,10 +581,14 @@ void (async () => {
   }
 
   try {
-    await initWpSharedStorageBridge();
+    // Never block app startup indefinitely on a network call.
+    await Promise.race([
+      initWpSharedStorageBridge(),
+      new Promise((_, reject) => window.setTimeout(() => reject(new Error('wp_bridge_timeout')), 2500)),
+    ]);
   } catch {
-    // If the WP bridge fails for any reason, continue in standalone mode so
-    // the UI still works (sign-in, itemize, etc.).
+    // If the WP bridge fails or times out, continue in standalone mode so
+    // the UI still works (sign-in, itemize, Download PDF, etc.).
   }
 
   // If we arrived on a page without WP params (e.g., user clicked a bare "settings.html" link),
@@ -698,28 +744,10 @@ void (async () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value }),
       });
-      if (!res.ok) {
-        return { ok: false, status: res.status };
-      }
+      if (!res || !res.ok) return { ok: false };
       return { ok: true };
     } catch {
-      return { ok: false, status: 0 };
-    }
-  }
-
-  function getCurrentUsername() {
-    try {
-      return String(sessionStorage.getItem(CURRENT_USER_KEY) || '').trim();
-    } catch {
-      return '';
-    }
-  }
-
-  function getCurrentLoginAtIso() {
-    try {
-      return String(sessionStorage.getItem(LOGIN_AT_KEY) || '').trim();
-    } catch {
-      return '';
+      return { ok: false };
     }
   }
 
@@ -738,6 +766,24 @@ void (async () => {
       // ignore
     }
     return nowIso;
+  }
+
+  function getCurrentUsername() {
+    try {
+      const raw = String(sessionStorage.getItem(CURRENT_USER_KEY) || '').trim();
+      return raw;
+    } catch {
+      return '';
+    }
+  }
+
+  function getCurrentLoginAtIso() {
+    try {
+      const raw = String(sessionStorage.getItem(LOGIN_AT_KEY) || '').trim();
+      return raw;
+    } catch {
+      return '';
+    }
   }
 
   function setCurrentUsername(username) {
@@ -3231,6 +3277,8 @@ void (async () => {
   const grandTreasurerInput = document.getElementById('grandTreasurer');
   const officialAddressInput = document.getElementById('officialAddress');
   const operationAddressInput = document.getElementById('operationAddress');
+  const grandLodgeSealFileInput = document.getElementById('grandLodgeSealFile');
+  const grandSecretarySignatureFileInput = document.getElementById('grandSecretarySignatureFile');
 
   // Settings page (roles)
   const createUserForm = document.getElementById('createUserForm');
@@ -3244,6 +3292,7 @@ void (async () => {
 
   const euroField = document.getElementById('euro');
   const usdField = document.getElementById('usd');
+  const downloadPdfBtn = document.getElementById('downloadPdfBtn');
 
   let currentViewedOrderId = null;
 
@@ -3654,6 +3703,10 @@ void (async () => {
           grandTreasurer: '',
           officialAddress: '',
           operationAddress: '',
+          grandLodgeSealDataUrl: '',
+          grandLodgeSealFileName: '',
+          grandSecretarySignatureDataUrl: '',
+          grandSecretarySignatureFileName: '',
         };
       }
       const parsed = JSON.parse(raw);
@@ -3663,6 +3716,10 @@ void (async () => {
         grandTreasurer: normalizePersonName(parsed && parsed.grandTreasurer),
         officialAddress: normalizeGermanAddressMultiline(parsed && parsed.officialAddress),
         operationAddress: normalizeGermanAddressMultiline(parsed && parsed.operationAddress),
+        grandLodgeSealDataUrl: String((parsed && parsed.grandLodgeSealDataUrl) || ''),
+        grandLodgeSealFileName: String((parsed && parsed.grandLodgeSealFileName) || ''),
+        grandSecretarySignatureDataUrl: String((parsed && parsed.grandSecretarySignatureDataUrl) || ''),
+        grandSecretarySignatureFileName: String((parsed && parsed.grandSecretarySignatureFileName) || ''),
       };
     } catch {
       return {
@@ -3671,6 +3728,10 @@ void (async () => {
         grandTreasurer: '',
         officialAddress: '',
         operationAddress: '',
+        grandLodgeSealDataUrl: '',
+        grandLodgeSealFileName: '',
+        grandSecretarySignatureDataUrl: '',
+        grandSecretarySignatureFileName: '',
       };
     }
   }
@@ -3682,8 +3743,29 @@ void (async () => {
       grandTreasurer: normalizePersonName(info && info.grandTreasurer),
       officialAddress: normalizeGermanAddressMultiline(info && info.officialAddress),
       operationAddress: normalizeGermanAddressMultiline(info && info.operationAddress),
+      grandLodgeSealDataUrl: String((info && info.grandLodgeSealDataUrl) || ''),
+      grandLodgeSealFileName: String((info && info.grandLodgeSealFileName) || ''),
+      grandSecretarySignatureDataUrl: String((info && info.grandSecretarySignatureDataUrl) || ''),
+      grandSecretarySignatureFileName: String((info && info.grandSecretarySignatureFileName) || ''),
     };
     localStorage.setItem(GRAND_LODGE_INFO_KEY, JSON.stringify(payload));
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!file) {
+          resolve('');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('read_failed'));
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.readAsDataURL(file);
+      } catch (e) {
+        reject(e);
+      }
+    });
   }
 
   function loadNumberingSettings() {
@@ -4452,7 +4534,8 @@ void (async () => {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Keep the object URL alive long enough for large files to start downloading.
+    setTimeout(() => URL.revokeObjectURL(url), 2 * 60 * 1000);
   }
 
   function downloadUrl(url, fileName) {
@@ -4465,6 +4548,641 @@ void (async () => {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  function dataUrlToUint8Array(dataUrl) {
+    const s = String(dataUrl || '');
+    const m = s.match(/^data:([^;]+);base64,(.*)$/);
+    if (!m) return null;
+    const b64 = m[2] || '';
+    try {
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  function getDataUrlMime(dataUrl) {
+    const s = String(dataUrl || '');
+    const m = s.match(/^data:([^;]+);base64,/);
+    return m ? String(m[1] || '') : '';
+  }
+
+  async function fetchBinary(url) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('fetch_failed');
+    const buf = await res.arrayBuffer();
+    return new Uint8Array(buf);
+  }
+
+  function getTodayStamp() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  async function generatePaymentOrderPdfFromTemplate(options = {}) {
+    let stage = 'init';
+    const describeErr = (err) => {
+      try {
+        if (!err) return '';
+        const name = typeof err.name === 'string' ? err.name : '';
+        const msg = typeof err.message === 'string' ? err.message : String(err);
+        const head = [name, msg].filter(Boolean).join(': ');
+        return head || String(err);
+      } catch {
+        return '';
+      }
+    };
+
+    try {
+      const PDFLib = window.PDFLib;
+      if (!PDFLib || !PDFLib.PDFDocument) {
+        window.alert('PDF library not loaded.');
+        return;
+      }
+
+      const debug = Boolean(options && options.debug);
+      // Download-only behavior (no preview / new-tab navigation).
+
+      const order = options && options.order && typeof options.order === 'object' ? options.order : null;
+      if (!form && !order) {
+        window.alert('Payment Order data not found. Open an order (View) or use the request form.');
+        return;
+      }
+
+      let templateBytes;
+      try {
+        stage = 'fetch_template';
+        templateBytes = await fetchBinary('payment_order_template.pdf');
+      } catch {
+        window.alert('Missing PDF template file: payment_order_template.pdf');
+        return;
+      }
+
+      let pdfDoc;
+      try {
+        stage = 'load_template';
+        pdfDoc = await PDFLib.PDFDocument.load(templateBytes);
+      } catch (err) {
+        // If the template is encrypted/corrupt, pdf-lib throws; previously this
+        // became an unhandled rejection and the button looked like a no-op.
+        console.error('Failed to load PDF template', err);
+        window.alert('Could not load the PDF template. Ensure payment_order_template.pdf is a valid, unencrypted PDF.');
+        return;
+      }
+
+      stage = 'get_page';
+      const pages = pdfDoc.getPages();
+      const page = pages && pages.length ? pages[0] : null;
+      if (!page) {
+        window.alert('Invalid PDF template.');
+        return;
+      }
+
+      stage = 'embed_font';
+      const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+      const fontBold = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+
+      const drawTextWrapped = (textRaw, opts) => {
+        const HALF_LINE_MARKER = '__HALF_LINE__';
+        const text = String(textRaw ?? '').replace(/\r\n/g, '\n');
+        const x = Number(opts && opts.x);
+        const startY = Number(opts && opts.y);
+        const size = Number(opts && opts.size) || 10;
+        const alignRaw = String((opts && opts.align) || 'left').toLowerCase();
+        const align = (alignRaw === 'center' || alignRaw === 'right') ? alignRaw : 'left';
+        const maxWidth = Number(opts && opts.maxWidth) || 0;
+        const maxHeight = Number(opts && opts.maxHeight) || 0;
+        const lineHeight = Number(opts && opts.lineHeight) || Math.max(10, size + 2);
+        if (!Number.isFinite(x) || !Number.isFinite(startY)) return;
+        if (!text.trim()) return;
+
+        const pageSize = page.getSize();
+        const effectiveMaxWidth = maxWidth > 0 ? maxWidth : Math.max(40, pageSize.width - x - 24);
+        const effectiveMaxHeight = maxHeight > 0 ? maxHeight : 0;
+
+        const pushWrappedLine = (out, rawLine) => {
+          const line = String(rawLine ?? '');
+          if (!line) {
+            out.push('');
+            return;
+          }
+          const words = line.split(/\s+/g);
+          let cur = '';
+          for (const w of words) {
+            const next = cur ? `${cur} ${w}` : w;
+            const wNext = font.widthOfTextAtSize(next, size);
+            if (wNext <= effectiveMaxWidth || !cur) {
+              cur = next;
+              continue;
+            }
+            out.push(cur);
+            cur = w;
+          }
+          if (cur) out.push(cur);
+        };
+
+        const lines = [];
+        for (const rawLine of text.split('\n')) pushWrappedLine(lines, rawLine);
+
+        let y = startY;
+        const minY = effectiveMaxHeight > 0 ? startY - effectiveMaxHeight : -Infinity;
+        for (const line of lines) {
+          if (y < minY) break;
+          const lineText = String(line);
+          if (lineText === HALF_LINE_MARKER) {
+            y -= (lineHeight * 0.35);
+            continue;
+          }
+          if (!lineText) {
+            y -= lineHeight;
+            continue;
+          }
+          const lineWidth = font.widthOfTextAtSize(lineText, size);
+          const offset = Math.max(0, effectiveMaxWidth - lineWidth);
+          const drawX = align === 'center'
+            ? x + (offset / 2)
+            : align === 'right'
+              ? x + offset
+              : x;
+          page.drawText(lineText, { x: drawX, y, size, font });
+          y -= lineHeight;
+        }
+      };
+
+    const drawMarker = (x, y, label) => {
+      if (!debug) return;
+      const c = PDFLib.rgb(1, 0, 0);
+      page.drawLine({ start: { x: x - 6, y }, end: { x: x + 6, y }, thickness: 0.7, color: c });
+      page.drawLine({ start: { x, y: y - 6 }, end: { x, y: y + 6 }, thickness: 0.7, color: c });
+      page.drawText(String(label || ''), { x: x + 8, y: y + 2, size: 6, font, color: c });
+    };
+
+    if (debug) {
+      const { width, height } = page.getSize();
+
+      // Calibration grid (more detailed + more readable labels)
+      const step = 10;
+      const majorEvery = 50;
+      const minorEvery = 25;
+
+      const microColor = PDFLib.rgb(0.94, 0.94, 0.94);
+      const minorColor = PDFLib.rgb(0.86, 0.86, 0.86);
+      const majorColor = PDFLib.rgb(0.72, 0.72, 0.72);
+      const labelColor = PDFLib.rgb(0.35, 0.35, 0.35);
+
+      for (let x = 0; x <= width; x += step) {
+        const isMajor = x % majorEvery === 0;
+        const isMinor = !isMajor && x % minorEvery === 0;
+        const color = isMajor ? majorColor : isMinor ? minorColor : microColor;
+        const thickness = isMajor ? 0.6 : isMinor ? 0.45 : 0.25;
+        page.drawLine({ start: { x, y: 0 }, end: { x, y: height }, thickness, color });
+        if (isMajor) {
+          page.drawText(String(x), { x: x + 2, y: height - 12, size: 6, font, color: labelColor });
+        }
+      }
+
+      for (let y = 0; y <= height; y += step) {
+        const isMajor = y % majorEvery === 0;
+        const isMinor = !isMajor && y % minorEvery === 0;
+        const color = isMajor ? majorColor : isMinor ? minorColor : microColor;
+        const thickness = isMajor ? 0.6 : isMinor ? 0.45 : 0.25;
+        page.drawLine({ start: { x: 0, y }, end: { x: width, y }, thickness, color });
+        if (isMajor) {
+          page.drawText(String(y), { x: 2, y: y + 2, size: 6, font, color: labelColor });
+        }
+      }
+
+      page.drawText(`CALIBRATION MODE — page ${Math.round(width)}x${Math.round(height)}`,
+        {
+          x: 40,
+          y: height - 22,
+          size: 9,
+          font,
+          color: PDFLib.rgb(1, 0, 0),
+        });
+    }
+
+    const value = (name) => {
+      const key = String(name || '').trim();
+      if (!key) return '';
+
+      // If an order is provided (e.g., from the View modal), use it.
+      if (order) {
+        try {
+          if (key === 'euro' || key === 'usd') {
+            const n = order[key];
+            return n === null || n === undefined ? '' : String(n).trim();
+          }
+          return String(order[key] ?? '').trim();
+        } catch {
+          return '';
+        }
+      }
+
+      // Otherwise read from the request form.
+      try {
+        const el = form.elements.namedItem(key);
+        return el && typeof el.value === 'string' ? el.value.trim() : '';
+      } catch {
+        return '';
+      }
+    };
+
+    const stripPaymentOrderPrefix = (raw) => {
+      const s = String(raw ?? '').trim();
+      if (!s) return '';
+      return s.replace(/^po\s*/i, '').trim();
+    };
+
+    const formatMoneyWithSymbol = (textRaw, symbol) => {
+      const rawText = String(textRaw ?? '').trim();
+      if (!rawText) return '';
+
+      const m = rawText.match(/-?\d[\d\s.,]*/);
+      let s = String(m ? m[0] : rawText).replace(/\s+/g, '');
+
+      if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '');
+      else if (s.includes(',') && !s.includes('.')) s = s.replace(/,/g, '.');
+
+      s = s.replace(/(?!^-)[^0-9.]/g, '');
+      const parts = s.split('.');
+      if (parts.length > 2) {
+        const dec = parts.pop();
+        const intPart = parts.join('');
+        s = `${intPart}.${dec}`;
+      }
+
+      const n = Number.parseFloat(s);
+      if (!Number.isFinite(n)) return rawText;
+      const sign = n < 0 ? '-' : '';
+      const abs = Math.abs(n);
+      return `${sign}${symbol}${abs.toFixed(2)}`;
+    };
+
+    const lookupBudgetDescriptionForOutCode = (budgetNumberRaw) => {
+      const code = String(budgetNumberRaw ?? '').trim().match(/^\d{4}/)?.[0] || '';
+      if (!code) return '';
+      try {
+        const year = typeof getActiveBudgetYear === 'function' ? getActiveBudgetYear() : undefined;
+        const outMap = typeof getOutDescMapForYear === 'function' ? getOutDescMapForYear(year) : null;
+        const fromTable = outMap && typeof outMap.get === 'function' ? outMap.get(code) : '';
+        const fromStatic = (typeof BUDGET_DESC_BY_CODE !== 'undefined' && BUDGET_DESC_BY_CODE && typeof BUDGET_DESC_BY_CODE.get === 'function')
+          ? BUDGET_DESC_BY_CODE.get(code)
+          : '';
+        return String(fromTable || fromStatic || '').trim();
+      } catch {
+        return '';
+      }
+    };
+
+    // Replace the template's top-right printed date (e.g. "31-03-2024") with
+    // the current digital form version by masking the entire top-right corner
+    // above the summary stamp.
+    {
+      const { width, height } = page.getSize();
+      const versionText = 'Digital Form V1: 2026-02-28';
+      const size = 7;
+
+      // The summary stamp starts at y = (height - 32). Mask everything ABOVE it.
+      const stampStartY = height - 32;
+      const maskY = stampStartY - 2;
+
+      // Mask the full top-right corner to the page edge.
+      // (Wider than half-page because the template's printed date sits a bit
+      // left of the right margin.)
+      const maskX = Math.max(0, width - 500);
+      const maskW = Math.max(0, width - maskX);
+      // Extend beyond the computed page height to also cover any template
+      // content that sits in a CropBox/visual margin above MediaBox.
+      const maskH = Math.max(0, height - maskY + 200);
+
+      page.drawRectangle({
+        x: maskX,
+        y: maskY,
+        width: maskW,
+        height: maskH,
+        color: PDFLib.rgb(1, 1, 1),
+      });
+
+      if (debug) {
+        page.drawRectangle({
+          x: maskX,
+          y: maskY,
+          width: maskW,
+          height: maskH,
+          borderWidth: 0.7,
+          borderColor: PDFLib.rgb(1, 0, 0),
+          color: PDFLib.rgb(1, 1, 1),
+          opacity: 0,
+        });
+        drawMarker(maskX, maskY, 'formVersion_mask');
+      }
+
+      // Place replacement text at the top-right inside the masked region.
+      const textW = font.widthOfTextAtSize(versionText, size);
+      const rightMargin = 32;
+      const xText = Math.max(32, width - rightMargin - textW);
+      // Put the label as high as possible; if the visible page extends beyond
+      // `height`, this keeps it in the masked region.
+      const yText = height - 8;
+      page.drawText(versionText, { x: xText, y: yText, size, font });
+    }
+
+    // Mask and redraw the template header line "Ancient Free and Accepted Masons"
+    // using a slightly larger size and the same font style as the main header.
+    {
+      const { width } = page.getSize();
+      const headerText = 'Ancient Free and Accepted Masons';
+      const size = 12;
+
+      // Approximate y-position under the "American Canadian Grand Lodge" header.
+      // Adjust here if the template changes.
+      const y = 812;
+
+      const textW = fontBold.widthOfTextAtSize(headerText, size);
+      const x = Math.max(24, (width - textW) / 2 - 7);
+
+      // Mask the printed line behind it.
+      const padX = 18;
+      const padY = 4;
+      page.drawRectangle({
+        x: Math.max(0, x - padX),
+        y: y - padY,
+        width: Math.min(width, textW + (padX * 2)),
+        height: size + (padY * 2),
+        color: PDFLib.rgb(1, 1, 1),
+      });
+
+      page.drawText(headerText, { x, y, size, font: fontBold });
+
+      if (debug) {
+        drawMarker(x, y, 'afam_header');
+      }
+    }
+
+    // Mask the template's divider line above the BUDGET section and redraw as
+    // a bold dotted line.
+    {
+      const { width } = page.getSize();
+
+      // Approximate y-position for the divider just above the "BUDGET, FILING..." heading.
+      // Adjust here if the template changes.
+      const yLine = 268;
+      const leftX = 40;
+      const rightX = width - 40;
+
+      // Mask the original printed line.
+      page.drawRectangle({
+        x: leftX - 6,
+        y: yLine - 4,
+        width: (rightX - leftX) + 12,
+        height: 10,
+        color: PDFLib.rgb(1, 1, 1),
+      });
+
+      // Draw dotted line as circles.
+      const dotColor = PDFLib.rgb(0, 0, 0);
+      const dotRadius = 1.2;
+      const dotStep = 7;
+      const maxX = rightX - (dotStep * 7);
+      for (let x = leftX; x <= maxX; x += dotStep) {
+        page.drawCircle({ x, y: yLine, size: dotRadius, color: dotColor });
+      }
+
+      if (debug) {
+        drawMarker(leftX, yLine, 'budget_divider');
+      }
+    }
+
+    // Always write a small summary block at the top-right so the output is
+    // visibly different from the template even if field coordinates are not
+    // tuned yet.
+    {
+      const { width, height } = page.getSize();
+      const poNoRaw = value('paymentOrderNo') || 'DRAFT';
+      const poNoDisplay = poNoRaw === 'DRAFT' ? 'DRAFT' : stripPaymentOrderPrefix(poNoRaw);
+      const dateDisplay = value('date') || getTodayStamp();
+      const nameDisplay = value('name');
+      const euroDisplay = formatMoneyWithSymbol(value('euro'), '€');
+      const usdDisplay = formatMoneyWithSymbol(value('usd'), '$');
+
+      const lines = [
+        `Payment Order No: ${poNoDisplay}`,
+        `Date: ${dateDisplay}`,
+        nameDisplay ? `Name: ${nameDisplay}` : '',
+        euroDisplay ? `Euro: ${euroDisplay}` : '',
+        usdDisplay ? `USD: ${usdDisplay}` : '',
+      ].filter(Boolean);
+
+      let y = height - 32;
+      const size = 9;
+      const rightMargin = 32;
+      const rightX = width - rightMargin;
+      for (const line of lines) {
+        const s = String(line);
+        const w = font.widthOfTextAtSize(s, size);
+        const x = Math.max(32, rightX - w);
+        page.drawText(s, { x, y, size, font });
+        y -= 12;
+      }
+    }
+
+    const gl = loadGrandLodgeInfo();
+
+    // Field coordinates from calibration sheet (pdf-lib coords: x→right, y→up).
+    const textFields = [
+      { key: 'paymentOrderNo', source: 'form', x: 350, y: 721, size: 13 },
+      { key: 'date', source: 'form', x: 420, y: 687, size: 10 },
+      { key: 'name', source: 'form', x: 130, y: 585, size: 10 },
+
+      { key: 'address', source: 'form', x: 130, y: 570, size: 9, wrap: true, lineHeight: 11, maxWidth: 470, maxHeight: 70 },
+      { key: 'iban', source: 'form', x: 130, y: 540, size: 10 },
+      { key: 'bic', source: 'form', x: 130, y: 525, size: 10 },
+
+      { key: 'euro', source: 'form', x: 180, y: 615, size: 10 },
+      { key: 'usd', source: 'form', x: 280, y: 615, size: 10 },
+
+      { key: 'budgetNumber', source: 'form', x: 200, y: 226, size: 10 },
+      { key: 'specialInstructions', source: 'form', x: 60, y: 435, size: 9, wrap: true, lineHeight: 11, maxWidth: 540, maxHeight: 180 },
+      { key: 'purpose', source: 'form', x: 50, y: 210, size: 9, wrap: true, lineHeight: 11, maxWidth: 540, maxHeight: 180 },
+
+      { key: 'grandMaster', source: 'gl', x: 61, y: 765, size: 10 },
+      { key: 'grandSecretary', source: 'gl', x: 465, y: 765, size: 10, marker: 'grandSecretary_top' },
+      { key: 'grandSecretary', source: 'gl', x: 406, y: 290, size: 10, marker: 'grandSecretary_sig' },
+
+      // Operation Address box: bottom ~280, top ~810. Start from the top and wrap downward.
+      { key: 'operationAddress', source: 'gl', x: 182, y: 795, yBottom: 280, size: 9, wrap: true, align: 'center', lineHeight: 11, maxWidth: 240, marker: 'operationAddress' },
+    ];
+
+    const readFieldValue = (f) => {
+      if (!f || typeof f !== 'object') return '';
+      const addBlankLineAfterFirstLine = (textRaw) => {
+        const HALF_LINE_MARKER = '__HALF_LINE__';
+        const text = String(textRaw ?? '');
+        const lines = text.replace(/\r\n/g, '\n').split('\n');
+        if (lines.length < 2) return text;
+        if (lines[1] === '' || lines[1] === HALF_LINE_MARKER) return text;
+        lines.splice(1, 0, HALF_LINE_MARKER);
+        return lines.join('\n');
+      };
+
+      if (f.source === 'gl') {
+        try {
+          const rawGl = String((gl && gl[f.key]) || '').trim();
+          return rawGl;
+        } catch {
+          return '';
+        }
+      }
+
+      const raw = String(value(f.key) || '');
+      if (f.key === 'paymentOrderNo') return stripPaymentOrderPrefix(raw);
+      if (f.key === 'address') return addBlankLineAfterFirstLine(raw);
+      if (f.key === 'euro') return formatMoneyWithSymbol(raw, '€');
+      if (f.key === 'usd') return formatMoneyWithSymbol(raw, '$');
+      return raw;
+    };
+
+    for (const f of textFields) {
+      const v = readFieldValue(f);
+      if (f.wrap) {
+        const maxHeight = Number.isFinite(f.maxHeight) && f.maxHeight > 0
+          ? f.maxHeight
+          : (Number.isFinite(f.yBottom) ? Math.max(0, Number(f.y) - Number(f.yBottom)) : 0);
+        drawTextWrapped(v, {
+          x: f.x,
+          y: f.y,
+          size: f.size,
+          align: f.align,
+          maxWidth: f.maxWidth,
+          maxHeight,
+          lineHeight: f.lineHeight,
+        });
+      } else {
+        const useFont = f.key === 'paymentOrderNo' ? fontBold : font;
+        page.drawText(String(v), { x: f.x, y: f.y, size: f.size, font: useFont });
+      }
+
+      if (f.key === 'budgetNumber') {
+        const desc = lookupBudgetDescriptionForOutCode(v);
+        if (desc) {
+          const codeW = font.widthOfTextAtSize(String(v || ''), Number(f.size) || 10);
+          const descX = Number(f.x) + Math.max(10, codeW + 4);
+          const { width } = page.getSize();
+          const maxWidth = Math.max(120, (width - 40) - descX);
+          drawTextWrapped(` - ${desc}`, {
+            x: descX,
+            y: f.y,
+            size: f.size,
+            maxWidth,
+            maxHeight: 24,
+            lineHeight: 11,
+          });
+          drawMarker(descX, f.y, 'budget_desc');
+        }
+      }
+      drawMarker(f.x, f.y, String(f.marker || f.key));
+    }
+
+    const sealBytes = gl && gl.grandLodgeSealDataUrl ? dataUrlToUint8Array(gl.grandLodgeSealDataUrl) : null;
+    const sigBytes = gl && gl.grandSecretarySignatureDataUrl ? dataUrlToUint8Array(gl.grandSecretarySignatureDataUrl) : null;
+
+    if (sealBytes) {
+      stage = 'embed_seal';
+      const mime = getDataUrlMime(gl.grandLodgeSealDataUrl);
+      const img = mime === 'image/jpeg' ? await pdfDoc.embedJpg(sealBytes) : await pdfDoc.embedPng(sealBytes);
+      const pageSize = page.getSize();
+      const leftX = 355;
+      const bottomY = 280;
+      const topY = 330;
+      const targetH = Math.max(12, topY - bottomY);
+      const aspect = img.height ? (img.width / img.height) : 1;
+      const targetW = Math.min(pageSize.width - 8 - leftX, Math.max(12, targetH * aspect));
+      const rect = { x: leftX, y: bottomY, width: targetW, height: targetH };
+      page.drawImage(img, rect);
+      drawMarker(rect.x, rect.y, 'seal');
+      if (debug) {
+        page.drawRectangle({
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          borderWidth: 0.7,
+          borderColor: PDFLib.rgb(1, 0, 0),
+          color: PDFLib.rgb(1, 1, 1),
+          opacity: 0,
+        });
+      }
+    }
+
+    if (sigBytes) {
+      stage = 'embed_signature';
+      const mime = getDataUrlMime(gl.grandSecretarySignatureDataUrl);
+      const img = mime === 'image/jpeg' ? await pdfDoc.embedJpg(sigBytes) : await pdfDoc.embedPng(sigBytes);
+      const pageSize = page.getSize();
+      const leftX = 405;
+      const bottomY = 295;
+      const topY = 315;
+      const targetH = Math.max(10, topY - bottomY);
+      const aspect = img.height ? (img.width / img.height) : 3;
+      const targetW = Math.min(pageSize.width - 8 - leftX, Math.max(40, targetH * aspect));
+      const rect = { x: leftX, y: bottomY, width: targetW, height: targetH };
+      page.drawImage(img, rect);
+      drawMarker(rect.x, rect.y, 'signature');
+      if (debug) {
+        page.drawRectangle({
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          borderWidth: 0.7,
+          borderColor: PDFLib.rgb(1, 0, 0),
+          color: PDFLib.rgb(1, 1, 1),
+          opacity: 0,
+        });
+      }
+    }
+
+      // Set the initial view zoom to 125%.
+      // Note: not all PDF viewers honor OpenAction zoom.
+      try {
+        const zoom = 1.25;
+        const PDFName = PDFLib && PDFLib.PDFName;
+        if (PDFName && pdfDoc && pdfDoc.context && pdfDoc.catalog && page && page.ref) {
+          const openAction = pdfDoc.context.obj([page.ref, PDFName.of('XYZ'), null, null, zoom]);
+          pdfDoc.catalog.set(PDFName.of('OpenAction'), openAction);
+        }
+      } catch {
+        // ignore
+      }
+
+      stage = 'save_pdf';
+      const outBytes = await pdfDoc.save();
+      const blob = new Blob([outBytes], { type: 'application/pdf' });
+      const poNo = String(value('paymentOrderNo') || '').trim().replace(/[^a-z0-9_-]+/gi, '_');
+      const stamp = getTodayStamp();
+
+      stage = 'download';
+      const filename = debug
+        ? `payment_order_${poNo || 'draft'}_${stamp}_calibration.pdf`
+        : `payment_order_${poNo || 'draft'}_${stamp}.pdf`;
+      downloadBlob(blob, filename);
+    } catch (err) {
+      console.error('PDF generation failed', err);
+      // Provide a useful hint without requiring the console.
+      try {
+        window.alert(`Could not generate the PDF (stage: ${stage || 'unknown'}). ${describeErr(err)}`.trim());
+      } catch {
+        window.alert('Could not generate the PDF. Check the browser console for details.');
+      }
+    }
   }
 
   function openAttachmentInNewTab(att) {
@@ -17935,6 +18653,57 @@ void (async () => {
     }
   }
 
+  if (downloadPdfBtn && !downloadPdfBtn.dataset.bound) {
+    downloadPdfBtn.dataset.bound = '1';
+    downloadPdfBtn.addEventListener('click', (e) => {
+      try {
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      } catch {
+        // ignore
+      }
+      const debug = Boolean(e && e.shiftKey);
+
+      // Immediate feedback so it never feels like a no-op.
+      const prevText = String(downloadPdfBtn.textContent || 'Download PDF');
+      try {
+        downloadPdfBtn.disabled = true;
+        downloadPdfBtn.textContent = debug ? 'Generating calibration…' : 'Generating…';
+      } catch {
+        // ignore
+      }
+
+      let order = null;
+      try {
+        if (!form) {
+          const year = getActiveBudgetYear();
+          const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
+          order = id ? getOrderById(id, year) : null;
+        }
+      } catch {
+        order = null;
+      }
+
+      const p = generatePaymentOrderPdfFromTemplate({ debug, order });
+      if (p && typeof p.finally === 'function') {
+        p.finally(() => {
+          try {
+            downloadPdfBtn.disabled = false;
+            downloadPdfBtn.textContent = prevText;
+          } catch {
+            // ignore
+          }
+        });
+      } else {
+        try {
+          downloadPdfBtn.disabled = false;
+          downloadPdfBtn.textContent = prevText;
+        } catch {
+          // ignore
+        }
+      }
+    });
+  }
+
   // Ensure request form nav/hamburger always reflects auth state (even if the header auth button markup changes).
   syncRequestFormHamburgerVisibility();
 
@@ -17986,23 +18755,55 @@ void (async () => {
         if (grandTreasurerInput) grandTreasurerInput.disabled = true;
         if (officialAddressInput) officialAddressInput.disabled = true;
         if (operationAddressInput) operationAddressInput.disabled = true;
+        if (grandLodgeSealFileInput) grandLodgeSealFileInput.disabled = true;
+        if (grandSecretarySignatureFileInput) grandSecretarySignatureFileInput.disabled = true;
         const submitBtn = grandLodgeInfoForm.querySelector('button[type="submit"]');
         if (submitBtn) submitBtn.disabled = true;
       }
     }
 
-    grandLodgeInfoForm.addEventListener('submit', (e) => {
+    grandLodgeInfoForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
       if (!requireSettingsEditAccess('Settings is read only for your account.')) return;
 
-      saveGrandLodgeInfo({
-        grandMaster: grandMasterInput ? grandMasterInput.value : '',
-        grandSecretary: grandSecretaryInput ? grandSecretaryInput.value : '',
-        grandTreasurer: grandTreasurerInput ? grandTreasurerInput.value : '',
-        officialAddress: officialAddressInput ? officialAddressInput.value : '',
-        operationAddress: operationAddressInput ? operationAddressInput.value : '',
-      });
+      const submitBtn = grandLodgeInfoForm.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        const prev = loadGrandLodgeInfo();
+
+        const sealFile = grandLodgeSealFileInput && grandLodgeSealFileInput.files && grandLodgeSealFileInput.files[0]
+          ? grandLodgeSealFileInput.files[0]
+          : null;
+        const sigFile = grandSecretarySignatureFileInput
+          && grandSecretarySignatureFileInput.files
+          && grandSecretarySignatureFileInput.files[0]
+          ? grandSecretarySignatureFileInput.files[0]
+          : null;
+
+        const sealDataUrl = sealFile ? await readFileAsDataUrl(sealFile) : prev.grandLodgeSealDataUrl;
+        const sealName = sealFile ? String(sealFile.name || '') : prev.grandLodgeSealFileName;
+        const sigDataUrl = sigFile ? await readFileAsDataUrl(sigFile) : prev.grandSecretarySignatureDataUrl;
+        const sigName = sigFile ? String(sigFile.name || '') : prev.grandSecretarySignatureFileName;
+
+        saveGrandLodgeInfo({
+          grandMaster: grandMasterInput ? grandMasterInput.value : '',
+          grandSecretary: grandSecretaryInput ? grandSecretaryInput.value : '',
+          grandTreasurer: grandTreasurerInput ? grandTreasurerInput.value : '',
+          officialAddress: officialAddressInput ? officialAddressInput.value : '',
+          operationAddress: operationAddressInput ? operationAddressInput.value : '',
+          grandLodgeSealDataUrl: sealDataUrl,
+          grandLodgeSealFileName: sealName,
+          grandSecretarySignatureDataUrl: sigDataUrl,
+          grandSecretarySignatureFileName: sigName,
+        });
+      } catch {
+        window.alert('Could not read the selected file(s).');
+        return;
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
 
       // Sync normalized values back into the form.
       const next = loadGrandLodgeInfo();
@@ -19725,4 +20526,23 @@ void (async () => {
       });
     }
   }
-})();
+})().catch((err) => {
+  try {
+    console.error('App bootstrap failed', err);
+  } catch {
+    // ignore
+  }
+
+  try {
+    const h = String(window.location.hostname || '').toLowerCase();
+    const isDev = h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0';
+    if (!isDev) return;
+
+    const msg = err && typeof err === 'object'
+      ? String(err.stack || err.message || err)
+      : String(err);
+    window.alert(`App crashed during startup (dev):\n\n${msg}`);
+  } catch {
+    // ignore
+  }
+});

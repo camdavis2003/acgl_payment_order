@@ -1259,6 +1259,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   color: #000000;
   border-color: #000000;
 }
+}
 
 .budgetTable th,
 .budgetTable td {

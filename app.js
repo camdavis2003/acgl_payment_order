@@ -7438,7 +7438,7 @@
     const year = getActiveBudgetYear();
     const orders = loadOrders(year);
     if (orders.length === 0) return;
-    const ok = window.confirm('Clear all payment orders? This cannot be undone.');
+    const ok = window.confirm('Are you sure you want to clear all payment orders? This cannot be undone.');
     if (!ok) return;
     saveOrders([], year);
     applyPaymentOrdersView();
@@ -7663,7 +7663,7 @@
 
       if (action === 'delete') {
         if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
-        const ok = window.confirm('Delete this reconciliation entry?');
+        const ok = window.confirm('Are you sure you want to delete this reconciliation entry?');
         if (!ok) return;
         deleteReconciliationOrderById(id);
         return;
@@ -8645,7 +8645,7 @@
         }
 
         if (action === 'delete') {
-          const ok = window.confirm('Delete this backlog item?');
+          const ok = window.confirm('Are you sure you want to delete this backlog item?');
           if (!ok) return;
 
           const attId = current && current.attachmentId !== undefined && current.attachmentId !== null ? String(current.attachmentId).trim() : '';
@@ -8995,7 +8995,7 @@
         const editIdx = editIdxRaw !== null ? Number.parseInt(String(editIdxRaw || ''), 10) : Number.NaN;
         if (!itemId || !Number.isFinite(editIdx) || editIdx < 0) return;
 
-        const ok = window.confirm('Delete this comment?');
+        const ok = window.confirm('Are you sure you want to delete this comment?');
         if (!ok) return;
 
         const items = loadBacklogItems();
@@ -10646,7 +10646,7 @@
       }
 
       if (action === 'delete') {
-        const ok = window.confirm(`Delete user "${username}"?`);
+        const ok = window.confirm(`Are you sure you want to delete user "${username}"?`);
         if (!ok) return;
         const before = loadUsers();
         const res = deleteUser(username);
@@ -12133,7 +12133,7 @@
         if (!requireIncomeEditAccess('Income is read only for your account.')) return;
         const all = loadIncome(year);
         if (all.length === 0) return;
-        const ok = window.confirm('Clear all income entries? This cannot be undone.');
+        const ok = window.confirm('Are you sure you want to clear all income entries? This cannot be undone.');
         if (!ok) return;
 
         // Reverse any previously-applied Budget receipts impacts before clearing.
@@ -12651,7 +12651,7 @@
 
       if (action === 'delete') {
         if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        const ok = window.confirm('Delete this income entry?');
+        const ok = window.confirm('Are you sure you want to delete this income entry?');
         if (!ok) return;
 
         const all = loadIncome(year);
@@ -14203,7 +14203,7 @@
 
       if (action === 'delete') {
         if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        const ok = window.confirm('Delete this wiseEUR entry?');
+        const ok = window.confirm('Are you sure you want to delete this wiseEUR entry?');
         if (!ok) return;
         deleteWiseEurEntryById(id, year);
         applyWiseEurView();
@@ -15724,7 +15724,7 @@
 
       if (action === 'delete') {
         if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        const ok = window.confirm('Delete this wiseUSD entry?');
+        const ok = window.confirm('Are you sure you want to delete this wiseUSD entry?');
         if (!ok) return;
         deleteWiseUsdEntryById(id, year);
         applyWiseUsdView();
@@ -17475,7 +17475,7 @@
       if (!isEditing) return;
 
       const ok = window.confirm(
-        `Delete the ${budgetYear} budget?\n\nThis removes the saved budget table for ${budgetYear} from shared storage.`
+        `Are you sure you want to delete the ${budgetYear} budget?\n\nThis removes the saved budget table for ${budgetYear} from shared storage.`
       );
       if (!ok) return;
 
@@ -20611,7 +20611,7 @@
 
           if (action === 'delete') {
             if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
-            const ok = window.confirm('Remove this attachment?');
+            const ok = window.confirm('Are you sure you want to remove this attachment?');
             if (!ok) return;
             await deleteAttachmentById(id);
             await refreshAttachments(attachmentTargetKey);

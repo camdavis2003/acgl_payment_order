@@ -554,6 +554,7 @@
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
   const BUDGET_TEMPLATE_ROWS_KEY = 'payment_order_budget_template_rows_v1';
+  const PAYMENT_ORDERS_BUDGET_DEDUCTION_CLEANUP_KEY = 'payment_orders_budget_deduction_cleanup_v1';
   const USERS_KEY = 'payment_order_users_v1';
   const BACKLOG_KEY = 'payment_order_backlog_v1';
   const CURRENT_USER_KEY = 'payment_order_current_user_v1';
@@ -1495,6 +1496,72 @@
     const html = localStorage.getItem(key);
     if (!html) return [];
     return readBudgetTemplateRowsFromTbodyHtml(html);
+  }
+
+  function buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows) {
+    const normalized = Array.isArray(templateRows) ? templateRows.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
+    if (!normalized.length) return '';
+
+    const section1 = normalized.filter((r) => r.section === 1);
+    const section2 = normalized.filter((r) => r.section === 2);
+
+    const seedTbody = document.createElement('tbody');
+    for (const r of section1) {
+      seedTbody.appendChild(
+        buildDataRowFromRecord({
+          in: r.in,
+          out: r.out,
+          description: r.description,
+          approvedEuro: '0.00 €',
+          receiptsEuro: '0.00 €',
+          expendituresEuro: '0.00 €',
+          balanceEuro: '0.00 €',
+          receiptsUsd: '-',
+          expendituresUsd: '-',
+          calcReceiptsOp: r.calcReceiptsOp,
+          calcExpendituresOp: r.calcExpendituresOp,
+        })
+      );
+    }
+    seedTbody.appendChild(buildSpacerRow());
+    seedTbody.appendChild(buildTotalRow('Total Anticipated Values'));
+    seedTbody.appendChild(buildSpacerRow());
+    for (const r of section2) {
+      seedTbody.appendChild(
+        buildDataRowFromRecord({
+          in: r.in,
+          out: r.out,
+          description: r.description,
+          approvedEuro: '0.00 €',
+          receiptsEuro: '0.00 €',
+          expendituresEuro: '0.00 €',
+          balanceEuro: '0.00 €',
+          receiptsUsd: '-',
+          expendituresUsd: '-',
+          calcReceiptsOp: r.calcReceiptsOp,
+          calcExpendituresOp: r.calcExpendituresOp,
+        })
+      );
+    }
+    seedTbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
+    seedTbody.appendChild(buildRemainingRow());
+    for (const el of buildChecksumSection()) seedTbody.appendChild(el);
+    return seedTbody.innerHTML;
+  }
+
+  function ensureBudgetYearSeededFromTemplate(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return false;
+    const key = getBudgetTableKeyForYear(y);
+    if (!key) return false;
+    if (localStorage.getItem(key)) return true;
+
+    const templateRows = loadBudgetTemplateRows();
+    if (!templateRows || templateRows.length === 0) return false;
+    const seedHtml = buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows);
+    if (!seedHtml) return false;
+    ensureBudgetYearExists(y, seedHtml);
+    return Boolean(localStorage.getItem(key));
   }
 
   function migrateLegacyBudgetIfNeeded() {
@@ -2717,6 +2784,8 @@
         code: String(d && (d.inCode || d.code) ? (d.inCode || d.code) : '').trim(),
         deltaEuro: Number(d && d.deltaEuro),
         deltaUsd: Number(d && d.deltaUsd),
+        preferOut: Boolean(d && d.preferOut),
+        target: d && d.target === 'expenditures' ? 'expenditures' : 'receipts',
       }))
       .filter((d) => {
         if (!/^[0-9]{4}$/.test(d.code)) return false;
@@ -2733,31 +2802,37 @@
 
     // Validate all targets exist first (avoid partial updates).
     for (const d of normalized) {
-      const target = findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true);
+      const target = d.preferOut
+        ? (findBudgetRowForOutCode(rows, d.code, true) || findBudgetRowForInCode(rows, d.code, true))
+        : (findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true));
       if (!target) return { ok: false, reason: 'rowNotFound', code: d.code };
     }
 
-    // Apply deltas to Receipts Euro (td index 4) or Receipts USD (td index 8) then recalc totals/balances.
+    // Apply deltas to Receipts/Expenditures Euro (td index 4/5) or USD (td index 8/10) then recalc totals/balances.
     for (const d of normalized) {
-      const targetRow = findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true);
+      const targetRow = d.preferOut
+        ? (findBudgetRowForOutCode(rows, d.code, true) || findBudgetRowForInCode(rows, d.code, true))
+        : (findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true));
       if (!targetRow) return { ok: false, reason: 'rowNotFound', code: d.code };
 
       const tds = targetRow.querySelectorAll('td');
       if (tds.length < 7) return { ok: false, reason: 'invalidRow', code: d.code };
 
       if (Number.isFinite(d.deltaEuro) && d.deltaEuro !== 0) {
-        const prevRaw = parseBudgetMoney(tds[4]?.textContent);
+        const euroIndex = d.target === 'expenditures' ? 5 : 4;
+        const prevRaw = parseBudgetMoney(tds[euroIndex]?.textContent);
         const prev = prevRaw < 0 ? 0 : prevRaw;
         const next = prev + d.deltaEuro;
-        if (tds[4]) tds[4].textContent = formatBudgetEuro(next < 0 ? 0 : next);
+        if (tds[euroIndex]) tds[euroIndex].textContent = formatBudgetEuro(next < 0 ? 0 : next);
       }
 
       if (Number.isFinite(d.deltaUsd) && d.deltaUsd !== 0) {
-        if (tds.length < 9) return { ok: false, reason: 'invalidRow', code: d.code };
-        const prevUsdRaw = parseBudgetMoney(tds[8]?.textContent);
+        const usdIndex = d.target === 'expenditures' ? 10 : 8;
+        if (tds.length <= usdIndex) return { ok: false, reason: 'invalidRow', code: d.code };
+        const prevUsdRaw = parseBudgetMoney(tds[usdIndex]?.textContent);
         const prevUsd = prevUsdRaw < 0 ? 0 : prevUsdRaw;
         const nextUsd = prevUsd + d.deltaUsd;
-        if (tds[8]) tds[8].textContent = formatBudgetUsd(nextUsd < 0 ? 0 : nextUsd);
+        if (tds[usdIndex]) tds[usdIndex].textContent = formatBudgetUsd(nextUsd < 0 ? 0 : nextUsd);
       }
     }
 
@@ -2785,6 +2860,20 @@
     const euro = parseBudgetMoney(tds[4]?.textContent);
     const usd = tds.length >= 9 ? parseBudgetMoney(tds[8]?.textContent) : 0;
     return { euro, usd };
+  }
+
+  function normalizeLedgerReceiptImpact(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const inCode = String(raw.inCode || raw.budgetNumber || raw.code || '').trim();
+    if (!/^[0-9]{4}$/.test(inCode)) return null;
+    const euro = Number(raw.euro);
+    const usd = Number(raw.usd);
+    const euroAmount = Number.isFinite(euro) ? euro : 0;
+    const usdAmount = Number.isFinite(usd) ? usd : 0;
+    if (euroAmount === 0 && usdAmount === 0) return null;
+    const direction = raw.direction === 'out' ? 'out' : 'in';
+    const target = raw.target === 'expenditures' ? 'expenditures' : 'receipts';
+    return { inCode, euro: euroAmount, usd: usdAmount, direction, target };
   }
 
   function normalizeIncomeBudgetReceiptImpact(raw) {
@@ -3151,6 +3240,43 @@
     };
   }
 
+  function cleanupPaymentOrderBudgetDeductionsIfNeeded() {
+    const key = PAYMENT_ORDERS_BUDGET_DEDUCTION_CLEANUP_KEY;
+    if (localStorage.getItem(key)) return;
+
+    const years = loadBudgetYears();
+    const nowIso = new Date().toISOString();
+    let touched = false;
+
+    for (const y of years) {
+      const orders = loadOrders(y);
+      if (!Array.isArray(orders) || orders.length === 0) continue;
+
+      let changed = false;
+      const next = orders.map((o) => {
+        if (!o || !o.budgetDeduction || !o.budgetDeduction.at) return o;
+        const ded = o.budgetDeduction;
+        const outCode = String(ded.budgetNumber || o.budgetNumber || '').trim();
+        const euro = Number(ded.euro);
+        const usd = Number(ded.usd);
+        const euroAmount = Number.isFinite(euro) ? euro : 0;
+        const usdAmount = Number.isFinite(usd) ? usd : 0;
+        if (outCode && (euroAmount !== 0 || usdAmount !== 0)) {
+          applyOrderBudgetExpendituresDelta(outCode, y, -euroAmount, -usdAmount, nowIso);
+        }
+
+        const { budgetDeduction, ...rest } = o;
+        changed = true;
+        touched = true;
+        return rest;
+      });
+
+      if (changed) saveOrders(next, y);
+    }
+
+    localStorage.setItem(key, String(nowIso));
+  }
+
   function initMasonicYearSelectFromBudgets(preferredYear2) {
     if (!masonicYearInput) return;
     if (String(masonicYearInput.tagName || '').toUpperCase() !== 'SELECT') return;
@@ -3286,6 +3412,8 @@
 
   const authGateResult = renderAuthGate();
   if (authGateResult && authGateResult.blocked) return;
+
+  cleanupPaymentOrderBudgetDeductionsIfNeeded();
 
   function positionToast(el) {
     if (!el) return;
@@ -5835,58 +5963,314 @@
 
     const targetYear = 2025;
 
-    // Seed a full budget for 2025 if missing.
+    const budgetCsv2025 = `Section,IN,OUT,Description,Amount Approved Euro,Calculation,Receipts Euro,Calculation,Expenditures Euro,Calculation,Balance Euro,Receipts USD,Expenditures USD
+Anticipated,1020,2020,New Lodge Petitions & Charter fees,0.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Anticipated,1030,2030,Lodge Per Capita Dues,"67,000.00 €",subtract (-),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Anticipated,1032,2032,Lodge Dues Receipts,0.00 €,subtract (-),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Anticipated,1060,2060,Grand Lodge - Charity - Specified,0.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Anticipated,1065,2065,Grand Master's Charity,0.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Anticipated,1061,2061,Grand Lodge - Benevolent - Specified,0.00 €,subtract (-),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Anticipated,1070,2070,Interest Income,0.00 €,subtract (-),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Anticipated,1071,2071,Annual Registration Receipts,"25,000.00 €",subtract (-),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1100,2100,Expendable Supplies,"1,500.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1110,2110,Postage Account,500.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1120,2120,IT & Digitization,"3,500.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1140,2140,Publications & Printing Account (certificates),150.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1145,2145,Publications & Printing of Rituals/Codes,"1,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1150,2150,Equipment Purchases - Repair & Maintenance,"2,500.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1170,2170,Audit and Legal Fees,"2,700.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1180,2180,"Taxes/Insurances/Bonding Fees, etc.:",200.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1190,2190,Annual & Semi Annual Expenses,"30,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1200,2200,Per Diem and Travel Expenses,"7,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1201,2201,Travel Expenses to VGLvD Senate Meetings,"2,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1204,2204,Grand Master's Conference,"12,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1211,2211,Grand Secretaries salaries/liabilities,"3,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1230,2230,VGLvD Per Capita Dues,"15,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1242,2242,"Flowers, Wreaths, Memorials:","1,000.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1243,2243,Bank Charges & Fees,500.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1246,2246,Bank Transfers - $ or EURO,0.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,2249,2249,Dues and Fees Other Than VGLvD,"1,500.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1250,2250,Grand Master Expense Account,"2,500.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1280,2280,Miscellaneous Reimbursable Items,500.00 €,add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-
+Budget,1998,2998,Charity,"4,950.00 €",add (+),0.00 €,subtract (-),0.00 €,equals (=),,-,-`;
+
+    function parseBudgetCsvRows(csvText) {
+      const rows = [];
+      let row = [];
+      let field = '';
+      let inQuotes = false;
+      const s = String(csvText || '');
+      for (let i = 0; i < s.length; i += 1) {
+        const ch = s[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            const next = s[i + 1];
+            if (next === '"') {
+              field += '"';
+              i += 1;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            field += ch;
+          }
+          continue;
+        }
+        if (ch === '"') {
+          inQuotes = true;
+          continue;
+        }
+        if (ch === ',') {
+          row.push(field);
+          field = '';
+          continue;
+        }
+        if (ch === '\n') {
+          row.push(field);
+          field = '';
+          rows.push(row);
+          row = [];
+          continue;
+        }
+        if (ch === '\r') continue;
+        field += ch;
+      }
+      row.push(field);
+      rows.push(row);
+      while (rows.length > 0) {
+        const last = rows[rows.length - 1];
+        const isEmpty = last.every((c) => String(c ?? '').trim() === '');
+        if (!isEmpty) break;
+        rows.pop();
+      }
+      return rows;
+    }
+
+    function normalizeCalcToken(raw) {
+      const v = String(raw ?? '').toLowerCase();
+      if (v.includes('add') || v.includes('+')) return 'add';
+      if (v.includes('subtract') || v.includes('-')) return 'subtract';
+      return '';
+    }
+
+    function parseBudgetAmount(raw) {
+      const cleaned = String(raw ?? '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/[^0-9,\.\-]/g, '')
+        .replace(/,/g, '');
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function buildBudgetHtmlFromCsv(csvText) {
+      const rows = parseBudgetCsvRows(csvText);
+      if (!rows.length) return '';
+      const header = rows[0].map((h) => String(h ?? '').trim().toLowerCase());
+      const idx = {
+        section: header.indexOf('section'),
+        in: header.indexOf('in'),
+        out: header.indexOf('out'),
+        description: header.indexOf('description'),
+        approvedEuro: header.indexOf('amount approved euro'),
+        receiptsEuro: header.indexOf('receipts euro'),
+        expendituresEuro: header.indexOf('expenditures euro'),
+        balanceEuro: header.indexOf('balance euro'),
+      };
+
+      const calcIdx = {
+        receiptsOp: idx.approvedEuro !== -1 ? idx.approvedEuro + 1 : -1,
+        expendituresOp: idx.receiptsEuro !== -1 ? idx.receiptsEuro + 1 : -1,
+      };
+
+      const sec1 = [];
+      const sec2 = [];
+
+      for (const r of rows.slice(1)) {
+        const get = (i) => (i >= 0 ? (r[i] ?? '') : '');
+        const sectionName = String(get(idx.section)).trim().toLowerCase();
+        const inCode = String(get(idx.in)).trim();
+        const outCode = String(get(idx.out)).trim();
+        const desc = String(get(idx.description)).trim();
+        if (!inCode && !outCode && !desc) continue;
+
+        const approved = parseBudgetAmount(get(idx.approvedEuro));
+        const receipts = parseBudgetAmount(get(idx.receiptsEuro));
+        const expenditures = parseBudgetAmount(get(idx.expendituresEuro));
+        const receiptsOp = normalizeCalcToken(get(calcIdx.receiptsOp));
+        const expendituresOp = normalizeCalcToken(get(calcIdx.expendituresOp));
+        const ops = {
+          receiptsOp: receiptsOp || getBudgetCalcOpsForRow(sectionName.startsWith('a') ? 'anticipated' : 'budget', null, desc).receiptsOp,
+          expendituresOp: expendituresOp || getBudgetCalcOpsForRow(sectionName.startsWith('a') ? 'anticipated' : 'budget', null, desc).expendituresOp,
+        };
+        const balance = computeBudgetBalance(approved, receipts, expenditures, ops);
+
+        const record = {
+          inCode,
+          outCode,
+          desc,
+          approved,
+          receipts,
+          expenditures,
+          balance,
+          ops,
+        };
+
+        if (sectionName.startsWith('a')) sec1.push(record);
+        else sec2.push(record);
+      }
+
+      const sumSection = (lines) => lines.reduce((acc, line) => {
+        acc.approved += line.approved;
+        acc.receipts += line.receipts;
+        acc.expenditures += line.expenditures;
+        acc.balance += line.balance;
+        return acc;
+      }, { approved: 0, receipts: 0, expenditures: 0, balance: 0 });
+
+      const s1 = sumSection(sec1);
+      const s2 = sumSection(sec2);
+      const remaining = s2.receipts + s1.balance - s2.expenditures;
+      const receiptsChecksum = s1.receipts - s2.receipts;
+      const expendituresChecksum = s1.expenditures - s2.expenditures;
+
+      const lineRowHtml = (line) => {
+        const approvedText = `EUR ${formatEuroValue(line.approved)}`;
+        const receiptsText = `${formatEuroValue(line.receipts)} €`;
+        const expText = `${formatEuroValue(line.expenditures)} €`;
+        const balText = `${formatEuroValue(line.balance)} €`;
+        return `
+          <tr data-calc-receipts="${escapeHtml(line.ops.receiptsOp)}" data-calc-expenditures="${escapeHtml(line.ops.expendituresOp)}">
+            <td class="num">${escapeHtml(line.inCode)}</td>
+            <td class="num">${escapeHtml(line.outCode)}</td>
+            <td>${escapeHtml(line.desc)}</td>
+            <td class="num budgetTable__euro">${escapeHtml(approvedText)}</td>
+            <td class="num budgetTable__euro">${escapeHtml(receiptsText)}</td>
+            <td class="num budgetTable__euro">${escapeHtml(expText)}</td>
+            <td class="num budgetTable__bal">${escapeHtml(balText)}</td>
+            <td class="budgetTable__usdSign">$</td>
+            <td class="num budgetTable__usd">-</td>
+            <td class="budgetTable__usdSign">$</td>
+            <td class="num budgetTable__usd">-</td>
+          </tr>
+        `.trim();
+      };
+
+      const sec1Html = sec1.map(lineRowHtml).join('\n');
+      const sec2Html = sec2.map(lineRowHtml).join('\n');
+
+      const sec1TotalRow = `
+        <tr class="budgetTable__total">
+          <td></td>
+          <td></td>
+          <td><strong>Total Anticipated Values</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.approved)} €`)}</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.receipts)} €`)}</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.expenditures)} €`)}</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s1.balance)} €`)}</strong></td>
+          <td class="budgetTable__usdSign"></td>
+          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+          <td class="budgetTable__usdSign"></td>
+          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+        </tr>
+      `.trim();
+
+      const sec2TotalRow = `
+        <tr class="budgetTable__total">
+          <td></td>
+          <td></td>
+          <td><strong>Total Budget, Receipts, Expenditures</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.approved)} €`)}</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.receipts)} €`)}</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.expenditures)} €`)}</strong></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(s2.balance)} €`)}</strong></td>
+          <td class="budgetTable__usdSign"></td>
+          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+          <td class="budgetTable__usdSign"></td>
+          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
+        </tr>
+      `.trim();
+
+      const remainingRow = `
+        <tr class="budgetTable__remaining">
+          <td></td>
+          <td></td>
+          <td><strong>Remaining funds of balance</strong></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(remaining)} €`)}</strong></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      `.trim();
+
+      const checksumSpacer = `
+        <tr class="budgetTable__spacer budgetTable__checksumSpacer">
+          <td colspan="11"></td>
+        </tr>
+      `.trim();
+
+      const receiptsChecksumRow = `
+        <tr class="budgetTable__checksum" data-checksum-kind="receipts">
+          <td></td>
+          <td></td>
+          <td><strong>Receipts Checksum</strong></td>
+          <td></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(receiptsChecksum)} €`)}</strong></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      `.trim();
+
+      const expendituresChecksumRow = `
+        <tr class="budgetTable__checksum" data-checksum-kind="expenditures">
+          <td></td>
+          <td></td>
+          <td><strong>Expenditures Checksum</strong></td>
+          <td></td>
+          <td></td>
+          <td class="num"><strong>${escapeHtml(`${formatEuroValue(expendituresChecksum)} €`)}</strong></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      `.trim();
+
+      return [
+        sec1Html,
+        '<tr class="budgetTable__spacer"><td colspan="11"></td></tr>',
+        sec1TotalRow,
+        '<tr class="budgetTable__spacer"><td colspan="11"></td></tr>',
+        sec2Html,
+        sec2TotalRow,
+        remainingRow,
+        checksumSpacer,
+        receiptsChecksumRow,
+        expendituresChecksumRow,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    // Seed a full budget for 2025 from the embedded CSV (dev-only).
     const budgetKey = getBudgetTableKeyForYear(targetYear);
-    if (budgetKey && !String(localStorage.getItem(budgetKey) || '').trim()) {
-      let sourceHtml = null;
-
-      // Prefer cloning from an existing saved budget year (if any).
-      const years = migrateLegacyBudgetIfNeeded();
-      const candidates = [];
-      const active = loadActiveBudgetYear();
-      if (active && Number.isInteger(active)) candidates.push(active);
-      for (const y of years) candidates.push(y);
-
-      for (const y of Array.from(new Set(candidates))) {
-        const k = getBudgetTableKeyForYear(y);
-        const h = k ? localStorage.getItem(k) : null;
-        if (h && String(h).trim()) {
-          sourceHtml = String(h);
-          break;
+    if (budgetKey) {
+      const existingHtml = localStorage.getItem(budgetKey);
+      if (!existingHtml) {
+        const sourceHtml = buildBudgetHtmlFromCsv(budgetCsv2025);
+        if (sourceHtml) {
+          localStorage.setItem(budgetKey, sourceHtml);
+          ensureBudgetYearExists(targetYear, sourceHtml);
         }
       }
-
-      // If we happen to be on the budget page, fall back to the current template.
-      if (!sourceHtml) {
-        const existingTbody = document.querySelector('table.budgetTable tbody');
-        if (existingTbody && existingTbody.innerHTML) sourceHtml = existingTbody.innerHTML;
-      }
-
-      // Final fallback: generate a complete budget from a small curated set.
-      if (!sourceHtml) {
-        const anticipated = [
-          { inCode: '1030', outCode: '2030', desc: 'Lodge Per Capita Dues', approved: 67000, receipts: 25614, expenditures: 0 },
-          { inCode: '1060', outCode: '2060', desc: 'Grand Lodge - Charity - Specified', approved: 0, receipts: 500, expenditures: 0 },
-          { inCode: '1065', outCode: '2065', desc: "Grand Master's Charity", approved: 0, receipts: 9791.23, expenditures: 5000 },
-          { inCode: '1071', outCode: '2071', desc: 'Annual Registration Receipts', approved: 25000, receipts: 5250, expenditures: 0 },
-          { inCode: '1020', outCode: '2020', desc: 'New Lodge Petitions & Charter fees', approved: 0, receipts: 0, expenditures: 0 },
-        ];
-
-        const budget = [
-          { inCode: '1100', outCode: '2100', desc: 'Expendable Supplies', approved: 1500, receipts: 0, expenditures: 218 },
-          { inCode: '1120', outCode: '2120', desc: 'IT & Digitization', approved: 3500, receipts: 140, expenditures: 635.08 },
-          { inCode: '1200', outCode: '2200', desc: 'Per Diem and Travel Expenses', approved: 15000, receipts: 0, expenditures: 7285.75 },
-          { inCode: '2243', outCode: '2243', desc: 'Bank Charges & Fees', approved: 1200, receipts: 0, expenditures: 842.15 },
-          { inCode: '2280', outCode: '2280', desc: 'Miscellaneous Reimbursable Items', approved: 2500, receipts: 0, expenditures: 1200 },
-          { inCode: '2170', outCode: '2170', desc: 'Audit and Legal Fees', approved: 4000, receipts: 0, expenditures: 3050 },
-          { inCode: '2140', outCode: '2140', desc: 'Publications & Printing Account (certificates)', approved: 150, receipts: 971.85, expenditures: 0 },
-          { inCode: '1998', outCode: '2998', desc: 'Charity', approved: 4950, receipts: 0, expenditures: 1000 },
-        ];
-
-        sourceHtml = buildBudgetTbodyHtmlFromLines(anticipated, budget);
-      }
-
-      ensureBudgetYearExists(targetYear, sourceHtml);
     }
 
     // Seed 2025 Payment Orders (year-scoped) if missing / too few.
@@ -11712,6 +12096,8 @@
     const y = Number(year);
     if (!Number.isInteger(y)) return;
 
+    ensureBudgetYearSeededFromTemplate(y);
+
     const allowed = new Set(
       [
         ...readInAccountsFromBudgetYear(y).map((x) => (x && x.inCode ? String(x.inCode).trim() : '')),
@@ -11733,17 +12119,22 @@
     const seen = new Set();
     let changed = false;
 
-    const addDelta = (inCode, euroDelta, usdDelta) => {
+    const addDelta = (inCode, euroDelta, usdDelta, preferOut, target) => {
       if (!/^[0-9]{4}$/.test(inCode)) return;
       const euro = Number(euroDelta);
       const usd = Number(usdDelta);
       const euroAmount = Number.isFinite(euro) ? euro : 0;
       const usdAmount = Number.isFinite(usd) ? usd : 0;
       if (euroAmount === 0 && usdAmount === 0) return;
-      const current = deltas.get(inCode) || { euro: 0, usd: 0 };
-      deltas.set(inCode, {
+      const resolvedTarget = target === 'expenditures' ? 'expenditures' : 'receipts';
+      const key = `${inCode}:${resolvedTarget}`;
+      const current = deltas.get(key) || { code: inCode, target: resolvedTarget, euro: 0, usd: 0, preferOut: false };
+      deltas.set(key, {
+        code: inCode,
+        target: resolvedTarget,
         euro: current.euro + euroAmount,
         usd: current.usd + usdAmount,
+        preferOut: current.preferOut || Boolean(preferOut),
       });
     };
 
@@ -11758,9 +12149,13 @@
 
       const euro = Number(row.euro);
       const usd = Number(row.usd);
-      const euroAmount = Number.isFinite(euro) && euro > 0 ? euro : 0;
-      const usdAmount = Number.isFinite(usd) && usd > 0 ? usd : 0;
-      if (row.verified && (euroAmount > 0 || usdAmount > 0)) {
+      const euroAmount = Number.isFinite(euro) ? euro : 0;
+      const usdAmount = Number.isFinite(usd) ? usd : 0;
+      const isNegative = euroAmount < 0 || usdAmount < 0;
+      const pushEuro = Math.abs(euroAmount);
+      const pushUsd = Math.abs(usdAmount);
+      const target = isNegative ? 'expenditures' : 'receipts';
+      if (row.verified && (pushEuro > 0 || pushUsd > 0)) {
         seen.add(ledgerId);
 
         if (isIncome) {
@@ -11769,15 +12164,21 @@
           if (existingImpact) {
             if (!applied[ledgerId]
               || applied[ledgerId].inCode !== inCode
-              || applied[ledgerId].euro !== euroAmount
-              || applied[ledgerId].usd !== usdAmount) {
+              || applied[ledgerId].euro !== pushEuro
+              || applied[ledgerId].usd !== pushUsd) {
               const receipts = getBudgetReceiptsForCode(y, inCode);
               const hasReceipt = receipts
                 && Number.isFinite(receipts.euro)
                 && receipts.euro >= existingImpact.euro
                 && (!existingImpact.usd || (Number.isFinite(receipts.usd) && receipts.usd >= existingImpact.usd));
               if (hasReceipt) {
-                applied[ledgerId] = { inCode, euro: euroAmount, usd: usdAmount };
+                applied[ledgerId] = {
+                  inCode,
+                  euro: pushEuro,
+                  usd: pushUsd,
+                  direction: isNegative ? 'out' : 'in',
+                  target,
+                };
                 changed = true;
                 continue;
               }
@@ -11787,23 +12188,29 @@
           }
         }
 
-        const prev = normalizeIncomeBudgetReceiptImpact(applied[ledgerId]);
-        if (prev && prev.inCode !== inCode) {
-          addDelta(prev.inCode, -prev.euro, -prev.usd);
+        const prev = normalizeLedgerReceiptImpact(applied[ledgerId]);
+        if (prev && (prev.inCode !== inCode || prev.target !== target)) {
+          addDelta(prev.inCode, -prev.euro, -prev.usd, prev.direction === 'out', prev.target);
         }
 
-        const prevEuro = prev && prev.inCode === inCode ? prev.euro : 0;
-        const prevUsd = prev && prev.inCode === inCode ? prev.usd : 0;
-        addDelta(inCode, euroAmount - prevEuro, usdAmount - prevUsd);
+        const prevEuro = prev && prev.inCode === inCode && prev.target === target ? prev.euro : 0;
+        const prevUsd = prev && prev.inCode === inCode && prev.target === target ? prev.usd : 0;
+        addDelta(inCode, pushEuro - prevEuro, pushUsd - prevUsd, isNegative, target);
 
-        applied[ledgerId] = { inCode, euro: euroAmount, usd: usdAmount };
+        applied[ledgerId] = {
+          inCode,
+          euro: pushEuro,
+          usd: pushUsd,
+          direction: isNegative ? 'out' : 'in',
+          target,
+        };
         changed = true;
         continue;
       }
 
-      const prev = normalizeIncomeBudgetReceiptImpact(applied[ledgerId]);
+      const prev = normalizeLedgerReceiptImpact(applied[ledgerId]);
       if (prev) {
-        addDelta(prev.inCode, -prev.euro, -prev.usd);
+        addDelta(prev.inCode, -prev.euro, -prev.usd, prev.direction === 'out', prev.target);
         delete applied[ledgerId];
         changed = true;
       }
@@ -11811,17 +12218,19 @@
 
     for (const [ledgerId, prevRaw] of Object.entries(applied)) {
       if (seen.has(ledgerId)) continue;
-      const prev = normalizeIncomeBudgetReceiptImpact(prevRaw);
-      if (prev) addDelta(prev.inCode, -prev.euro, -prev.usd);
+      const prev = normalizeLedgerReceiptImpact(prevRaw);
+      if (prev) addDelta(prev.inCode, -prev.euro, -prev.usd, prev.direction === 'out', prev.target);
       delete applied[ledgerId];
       changed = true;
     }
 
     if (deltas.size > 0) {
-      const list = Array.from(deltas.entries()).map(([inCode, sum]) => ({
-        inCode,
+      const list = Array.from(deltas.values()).map((sum) => ({
+        inCode: sum.code,
         deltaEuro: sum.euro,
         deltaUsd: sum.usd,
+        preferOut: sum.preferOut,
+        target: sum.target,
       }));
       applyLedgerBudgetReceiptsDeltas(y, list);
     }
@@ -12059,10 +12468,18 @@
     return withIndex.map((x) => x.row);
   }
 
+  function getGsLedgerYear() {
+    const fromDataset = gsLedgerTbody ? Number(gsLedgerTbody.dataset.ledgerYear) : Number.NaN;
+    if (Number.isInteger(fromDataset)) return fromDataset;
+    const fromUrl = getBudgetYearFromUrl();
+    if (fromUrl) return fromUrl;
+    return getActiveBudgetYear();
+  }
+
   function renderGsLedgerRows(rows) {
     if (!gsLedgerTbody) return;
     const canVerify = Boolean(gsLedgerViewState.canVerify);
-    const year = getActiveBudgetYear();
+    const year = getGsLedgerYear();
     const html = (rows || [])
       .map((r) => {
         const ledgerId = escapeHtml(r.ledgerId);
@@ -12165,7 +12582,7 @@
     if (!gsLedgerTbody || !gsLedgerEmptyState) return;
     ensureGsLedgerDefaultEmptyText();
 
-    const year = getActiveBudgetYear();
+    const year = getGsLedgerYear();
     const all = buildGsLedgerRowsForYear(year);
     const filtered = filterGsLedgerForView(all, gsLedgerViewState.globalFilter);
     const sorted = sortGsLedgerForView(filtered, gsLedgerViewState.sortKey, gsLedgerViewState.sortDir);
@@ -12202,7 +12619,8 @@
 
   function initGsLedgerListPage() {
     if (!gsLedgerTbody || !gsLedgerEmptyState) return;
-    const year = getActiveBudgetYear();
+    const year = getBudgetYearFromUrl() || getActiveBudgetYear();
+    gsLedgerTbody.dataset.ledgerYear = String(year);
 
     const user = getCurrentUser();
     gsLedgerViewState.canVerify = Boolean(user && canWrite(user, 'ledger'));
@@ -17080,6 +17498,164 @@
       return seedTbody.innerHTML;
     }
 
+    function mergeMissingBudgetRowsFromTemplate(year, templateRows) {
+      const y = Number(year);
+      if (!Number.isInteger(y)) return false;
+      const key = getBudgetTableKeyForYear(y);
+      if (!key) return false;
+      const html = localStorage.getItem(key);
+      if (!html) return false;
+
+      const normalized = Array.isArray(templateRows) ? templateRows.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
+      if (!normalized.length) return false;
+
+      const currentTbody = document.createElement('tbody');
+      currentTbody.innerHTML = String(html || '');
+      const allRows = Array.from(currentTbody.querySelectorAll('tr'));
+      const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
+      const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
+      const secondTotalIndex = totals.length >= 2 ? allRows.indexOf(totals[1]) : -1;
+
+      const makeKey = (inVal, outVal, desc) => {
+        const a = normalizeBudgetTemplateText(inVal);
+        const b = normalizeBudgetTemplateText(outVal);
+        const d = normalizeBudgetTemplateText(desc);
+        return `${a}::${b}::${d}`;
+      };
+
+      const templateKeys = new Set(
+        normalized.map((r) => makeKey(r.in, r.out, r.description))
+      );
+
+      const existingByKey = new Map();
+      const extrasBySection = { 1: [], 2: [] };
+
+      const getSectionForRow = (rowIndex) => {
+        if (firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex) return 1;
+        if (secondTotalIndex >= 0 && rowIndex > firstTotalIndex && rowIndex < secondTotalIndex) return 2;
+        return 2;
+      };
+
+      const extractRecordFromRow = (tr) => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length < 7) return null;
+        return {
+          in: normalizeBudgetTemplateText(tds[0]?.textContent),
+          out: normalizeBudgetTemplateText(tds[1]?.textContent),
+          description: normalizeBudgetTemplateText(tds[2]?.textContent),
+          approvedEuro: normalizeBudgetTemplateText(tds[3]?.textContent) || '0.00 €',
+          receiptsEuro: normalizeBudgetTemplateText(tds[4]?.textContent) || '0.00 €',
+          expendituresEuro: normalizeBudgetTemplateText(tds[5]?.textContent) || '0.00 €',
+          balanceEuro: normalizeBudgetTemplateText(tds[6]?.textContent) || '0.00 €',
+          receiptsUsd: normalizeBudgetTemplateText(tds[8]?.textContent) || '-',
+          expendituresUsd: normalizeBudgetTemplateText(tds[10]?.textContent) || '-',
+          calcReceiptsOp: tr.dataset ? tr.dataset.calcReceipts : '',
+          calcExpendituresOp: tr.dataset ? tr.dataset.calcExpenditures : '',
+        };
+      };
+
+      allRows.forEach((tr, idx) => {
+        if (!isBudgetEditableDataRow(tr)) return;
+        const rec = extractRecordFromRow(tr);
+        if (!rec) return;
+        const keyForRow = makeKey(rec.in, rec.out, rec.description);
+        const section = getSectionForRow(idx);
+        if (templateKeys.has(keyForRow)) {
+          const list = existingByKey.get(keyForRow) || [];
+          list.push({ rec, section });
+          existingByKey.set(keyForRow, list);
+        } else {
+          extrasBySection[section].push(rec);
+        }
+      });
+
+      const takeExisting = (key) => {
+        const list = existingByKey.get(key);
+        if (!list || list.length === 0) return null;
+        const item = list.shift();
+        if (list.length === 0) existingByKey.delete(key);
+        return item && item.rec ? item.rec : null;
+      };
+
+      const newTbody = document.createElement('tbody');
+      const section1 = normalized.filter((r) => r.section === 1);
+      const section2 = normalized.filter((r) => r.section === 2);
+
+      for (const r of section1) {
+        const keyForRow = makeKey(r.in, r.out, r.description);
+        const existing = takeExisting(keyForRow);
+        if (existing) {
+          newTbody.appendChild(buildDataRowFromRecord(existing));
+        } else {
+          newTbody.appendChild(buildDataRowFromRecord({
+            in: r.in,
+            out: r.out,
+            description: r.description,
+            approvedEuro: '0.00 €',
+            receiptsEuro: '0.00 €',
+            expendituresEuro: '0.00 €',
+            balanceEuro: '0.00 €',
+            receiptsUsd: '-',
+            expendituresUsd: '-',
+            calcReceiptsOp: r.calcReceiptsOp,
+            calcExpendituresOp: r.calcExpendituresOp,
+          }));
+        }
+      }
+
+      for (const extra of extrasBySection[1]) {
+        newTbody.appendChild(buildDataRowFromRecord(extra));
+      }
+
+      newTbody.appendChild(buildSpacerRow());
+      newTbody.appendChild(buildTotalRow('Total Anticipated Values'));
+      newTbody.appendChild(buildSpacerRow());
+
+      for (const r of section2) {
+        const keyForRow = makeKey(r.in, r.out, r.description);
+        const existing = takeExisting(keyForRow);
+        if (existing) {
+          newTbody.appendChild(buildDataRowFromRecord(existing));
+        } else {
+          newTbody.appendChild(buildDataRowFromRecord({
+            in: r.in,
+            out: r.out,
+            description: r.description,
+            approvedEuro: '0.00 €',
+            receiptsEuro: '0.00 €',
+            expendituresEuro: '0.00 €',
+            balanceEuro: '0.00 €',
+            receiptsUsd: '-',
+            expendituresUsd: '-',
+            calcReceiptsOp: r.calcReceiptsOp,
+            calcExpendituresOp: r.calcExpendituresOp,
+          }));
+        }
+      }
+
+      for (const extra of extrasBySection[2]) {
+        newTbody.appendChild(buildDataRowFromRecord(extra));
+      }
+
+      newTbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
+      newTbody.appendChild(buildRemainingRow());
+      for (const el of buildChecksumSection()) newTbody.appendChild(el);
+
+      const nextHtml = newTbody.innerHTML;
+      if (nextHtml === String(html || '')) return false;
+
+      tbody.innerHTML = nextHtml;
+      ensureRemainingRowLayout();
+      ensureTotalRowsLayout();
+      ensureChecksumRowsLayout();
+      normalizeEuroCells();
+      normalizeUsdCells();
+      recalculateBudgetTotals();
+      applyNegativeNumberClasses();
+      saveEdits();
+      return true;
+    }
+
     // Page title ("YYYY Budget")
     const titleEl = document.querySelector('[data-budget-title]');
     if (titleEl) titleEl.textContent = `${budgetYear} Budget`;
@@ -17097,6 +17673,7 @@
     const seedRows = getBudgetTemplateRowsForSeeding(templateHtml);
     const seedHtml = buildSeedBudgetTbodyHtmlFromTemplateRows(seedRows) || templateHtml;
     ensureBudgetYearExists(budgetYear, seedHtml);
+    mergeMissingBudgetRowsFromTemplate(budgetYear, seedRows);
     initBudgetYearNav();
 
     function syncActiveBudgetButton() {
@@ -19075,6 +19652,8 @@
       const labelA = isOverspent ? 'Overspent' : 'Balance';
       const labelB = 'Expenditures';
 
+      if (isOverspent) card.classList.add('budgetDash__card--overspent');
+
       const { svg, total, meta } = createDonutSvg(balVal, expVal);
 
       function createMetricBlock(side, valueText, percentText) {
@@ -19101,6 +19680,7 @@
 
       const balBlock = createMetricBlock(balanceSide === 'left' ? 'left' : 'right', formatEuro(isOverspent ? -balVal : balVal), `${pct(balVal, total)}%`);
       const expBlock = createMetricBlock(expSide === 'left' ? 'left' : 'right', formatEuro(expVal), `${pct(expVal, total)}%`);
+      if (isOverspent) balBlock.el.classList.add('budgetDash__metric--overspent');
 
       function sortKeyForAngle(angleRad) {
         // Smaller y first (top). In screen coords, y = sin(angle).
@@ -20865,45 +21445,6 @@
               changes,
             }),
           };
-
-          function isBudgetImpactStatus(status) {
-            return status === 'Approved' || status === 'Paid';
-          }
-
-          const hasDeduction = Boolean(updated && updated.budgetDeduction && updated.budgetDeduction.at);
-          const entersImpact = !isBudgetImpactStatus(prevStatus) && isBudgetImpactStatus(nextStatus);
-          const leavesImpact = isBudgetImpactStatus(prevStatus) && !isBudgetImpactStatus(nextStatus);
-
-          // Leaving Approved/Paid: reverse prior deduction (if any).
-          if (leavesImpact && hasDeduction) {
-            const ded = updated.budgetDeduction;
-            const outCode = ded && ded.budgetNumber ? String(ded.budgetNumber).trim() : '';
-            const euro = ded && Number.isFinite(Number(ded.euro)) ? Number(ded.euro) : 0;
-            const usd = ded && Number.isFinite(Number(ded.usd)) ? Number(ded.usd) : 0;
-            const res = applyOrderBudgetExpendituresDelta(outCode, year, -euro, -usd, nowIso);
-            if (res && res.ok) {
-              const { budgetDeduction, ...rest } = updated;
-              updated = rest;
-            }
-          }
-
-          // Entering Approved/Paid: apply deduction once.
-          // Moving Approved -> Paid does NOT reapply because entersImpact is false.
-          if (entersImpact && !hasDeduction) {
-            const res = applyApprovedOrderBudgetDeduction(updated, year, nowIso);
-            if (res && res.ok) {
-              updated = {
-                ...updated,
-                budgetDeduction: {
-                  at: res.at,
-                  year: Number(year),
-                  budgetNumber: String(res.outCode),
-                  euro: res.euroApplied,
-                  usd: res.usdApplied,
-                },
-              };
-            }
-          }
 
           upsertOrder(updated, year);
           applyPaymentOrdersView();

@@ -533,6 +533,7 @@
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
   const BUDGET_TEMPLATE_ROWS_KEY = 'payment_order_budget_template_rows_v1';
+  const PAYMENT_ORDERS_BUDGET_DEDUCTION_CLEANUP_KEY = 'payment_orders_budget_deduction_cleanup_v1';
   const USERS_KEY = 'payment_order_users_v1';
   const BACKLOG_KEY = 'payment_order_backlog_v1';
   const CURRENT_USER_KEY = 'payment_order_current_user_v1';
@@ -1474,6 +1475,72 @@
     const html = localStorage.getItem(key);
     if (!html) return [];
     return readBudgetTemplateRowsFromTbodyHtml(html);
+  }
+
+  function buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows) {
+    const normalized = Array.isArray(templateRows) ? templateRows.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
+    if (!normalized.length) return '';
+
+    const section1 = normalized.filter((r) => r.section === 1);
+    const section2 = normalized.filter((r) => r.section === 2);
+
+    const seedTbody = document.createElement('tbody');
+    for (const r of section1) {
+      seedTbody.appendChild(
+        buildDataRowFromRecord({
+          in: r.in,
+          out: r.out,
+          description: r.description,
+          approvedEuro: '0.00 €',
+          receiptsEuro: '0.00 €',
+          expendituresEuro: '0.00 €',
+          balanceEuro: '0.00 €',
+          receiptsUsd: '-',
+          expendituresUsd: '-',
+          calcReceiptsOp: r.calcReceiptsOp,
+          calcExpendituresOp: r.calcExpendituresOp,
+        })
+      );
+    }
+    seedTbody.appendChild(buildSpacerRow());
+    seedTbody.appendChild(buildTotalRow('Total Anticipated Values'));
+    seedTbody.appendChild(buildSpacerRow());
+    for (const r of section2) {
+      seedTbody.appendChild(
+        buildDataRowFromRecord({
+          in: r.in,
+          out: r.out,
+          description: r.description,
+          approvedEuro: '0.00 €',
+          receiptsEuro: '0.00 €',
+          expendituresEuro: '0.00 €',
+          balanceEuro: '0.00 €',
+          receiptsUsd: '-',
+          expendituresUsd: '-',
+          calcReceiptsOp: r.calcReceiptsOp,
+          calcExpendituresOp: r.calcExpendituresOp,
+        })
+      );
+    }
+    seedTbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
+    seedTbody.appendChild(buildRemainingRow());
+    for (const el of buildChecksumSection()) seedTbody.appendChild(el);
+    return seedTbody.innerHTML;
+  }
+
+  function ensureBudgetYearSeededFromTemplate(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return false;
+    const key = getBudgetTableKeyForYear(y);
+    if (!key) return false;
+    if (localStorage.getItem(key)) return true;
+
+    const templateRows = loadBudgetTemplateRows();
+    if (!templateRows || templateRows.length === 0) return false;
+    const seedHtml = buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows);
+    if (!seedHtml) return false;
+    ensureBudgetYearExists(y, seedHtml);
+    return Boolean(localStorage.getItem(key));
   }
 
   function migrateLegacyBudgetIfNeeded() {
@@ -2696,6 +2763,8 @@
         code: String(d && (d.inCode || d.code) ? (d.inCode || d.code) : '').trim(),
         deltaEuro: Number(d && d.deltaEuro),
         deltaUsd: Number(d && d.deltaUsd),
+        preferOut: Boolean(d && d.preferOut),
+        target: d && d.target === 'expenditures' ? 'expenditures' : 'receipts',
       }))
       .filter((d) => {
         if (!/^[0-9]{4}$/.test(d.code)) return false;
@@ -2712,31 +2781,37 @@
 
     // Validate all targets exist first (avoid partial updates).
     for (const d of normalized) {
-      const target = findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true);
+      const target = d.preferOut
+        ? (findBudgetRowForOutCode(rows, d.code, true) || findBudgetRowForInCode(rows, d.code, true))
+        : (findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true));
       if (!target) return { ok: false, reason: 'rowNotFound', code: d.code };
     }
 
-    // Apply deltas to Receipts Euro (td index 4) or Receipts USD (td index 8) then recalc totals/balances.
+    // Apply deltas to Receipts/Expenditures Euro (td index 4/5) or USD (td index 8/10) then recalc totals/balances.
     for (const d of normalized) {
-      const targetRow = findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true);
+      const targetRow = d.preferOut
+        ? (findBudgetRowForOutCode(rows, d.code, true) || findBudgetRowForInCode(rows, d.code, true))
+        : (findBudgetRowForInCode(rows, d.code, true) || findBudgetRowForOutCode(rows, d.code, true));
       if (!targetRow) return { ok: false, reason: 'rowNotFound', code: d.code };
 
       const tds = targetRow.querySelectorAll('td');
       if (tds.length < 7) return { ok: false, reason: 'invalidRow', code: d.code };
 
       if (Number.isFinite(d.deltaEuro) && d.deltaEuro !== 0) {
-        const prevRaw = parseBudgetMoney(tds[4]?.textContent);
+        const euroIndex = d.target === 'expenditures' ? 5 : 4;
+        const prevRaw = parseBudgetMoney(tds[euroIndex]?.textContent);
         const prev = prevRaw < 0 ? 0 : prevRaw;
         const next = prev + d.deltaEuro;
-        if (tds[4]) tds[4].textContent = formatBudgetEuro(next < 0 ? 0 : next);
+        if (tds[euroIndex]) tds[euroIndex].textContent = formatBudgetEuro(next < 0 ? 0 : next);
       }
 
       if (Number.isFinite(d.deltaUsd) && d.deltaUsd !== 0) {
-        if (tds.length < 9) return { ok: false, reason: 'invalidRow', code: d.code };
-        const prevUsdRaw = parseBudgetMoney(tds[8]?.textContent);
+        const usdIndex = d.target === 'expenditures' ? 10 : 8;
+        if (tds.length <= usdIndex) return { ok: false, reason: 'invalidRow', code: d.code };
+        const prevUsdRaw = parseBudgetMoney(tds[usdIndex]?.textContent);
         const prevUsd = prevUsdRaw < 0 ? 0 : prevUsdRaw;
         const nextUsd = prevUsd + d.deltaUsd;
-        if (tds[8]) tds[8].textContent = formatBudgetUsd(nextUsd < 0 ? 0 : nextUsd);
+        if (tds[usdIndex]) tds[usdIndex].textContent = formatBudgetUsd(nextUsd < 0 ? 0 : nextUsd);
       }
     }
 
@@ -2764,6 +2839,20 @@
     const euro = parseBudgetMoney(tds[4]?.textContent);
     const usd = tds.length >= 9 ? parseBudgetMoney(tds[8]?.textContent) : 0;
     return { euro, usd };
+  }
+
+  function normalizeLedgerReceiptImpact(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const inCode = String(raw.inCode || raw.budgetNumber || raw.code || '').trim();
+    if (!/^[0-9]{4}$/.test(inCode)) return null;
+    const euro = Number(raw.euro);
+    const usd = Number(raw.usd);
+    const euroAmount = Number.isFinite(euro) ? euro : 0;
+    const usdAmount = Number.isFinite(usd) ? usd : 0;
+    if (euroAmount === 0 && usdAmount === 0) return null;
+    const direction = raw.direction === 'out' ? 'out' : 'in';
+    const target = raw.target === 'expenditures' ? 'expenditures' : 'receipts';
+    return { inCode, euro: euroAmount, usd: usdAmount, direction, target };
   }
 
   function normalizeIncomeBudgetReceiptImpact(raw) {
@@ -3130,6 +3219,43 @@
     };
   }
 
+  function cleanupPaymentOrderBudgetDeductionsIfNeeded() {
+    const key = PAYMENT_ORDERS_BUDGET_DEDUCTION_CLEANUP_KEY;
+    if (localStorage.getItem(key)) return;
+
+    const years = loadBudgetYears();
+    const nowIso = new Date().toISOString();
+    let touched = false;
+
+    for (const y of years) {
+      const orders = loadOrders(y);
+      if (!Array.isArray(orders) || orders.length === 0) continue;
+
+      let changed = false;
+      const next = orders.map((o) => {
+        if (!o || !o.budgetDeduction || !o.budgetDeduction.at) return o;
+        const ded = o.budgetDeduction;
+        const outCode = String(ded.budgetNumber || o.budgetNumber || '').trim();
+        const euro = Number(ded.euro);
+        const usd = Number(ded.usd);
+        const euroAmount = Number.isFinite(euro) ? euro : 0;
+        const usdAmount = Number.isFinite(usd) ? usd : 0;
+        if (outCode && (euroAmount !== 0 || usdAmount !== 0)) {
+          applyOrderBudgetExpendituresDelta(outCode, y, -euroAmount, -usdAmount, nowIso);
+        }
+
+        const { budgetDeduction, ...rest } = o;
+        changed = true;
+        touched = true;
+        return rest;
+      });
+
+      if (changed) saveOrders(next, y);
+    }
+
+    localStorage.setItem(key, String(nowIso));
+  }
+
   function initMasonicYearSelectFromBudgets(preferredYear2) {
     if (!masonicYearInput) return;
     if (String(masonicYearInput.tagName || '').toUpperCase() !== 'SELECT') return;
@@ -3265,6 +3391,8 @@
 
   const authGateResult = renderAuthGate();
   if (authGateResult && authGateResult.blocked) return;
+
+  cleanupPaymentOrderBudgetDeductionsIfNeeded();
 
   function positionToast(el) {
     if (!el) return;
@@ -11691,6 +11819,8 @@
     const y = Number(year);
     if (!Number.isInteger(y)) return;
 
+    ensureBudgetYearSeededFromTemplate(y);
+
     const allowed = new Set(
       [
         ...readInAccountsFromBudgetYear(y).map((x) => (x && x.inCode ? String(x.inCode).trim() : '')),
@@ -11712,17 +11842,22 @@
     const seen = new Set();
     let changed = false;
 
-    const addDelta = (inCode, euroDelta, usdDelta) => {
+    const addDelta = (inCode, euroDelta, usdDelta, preferOut, target) => {
       if (!/^[0-9]{4}$/.test(inCode)) return;
       const euro = Number(euroDelta);
       const usd = Number(usdDelta);
       const euroAmount = Number.isFinite(euro) ? euro : 0;
       const usdAmount = Number.isFinite(usd) ? usd : 0;
       if (euroAmount === 0 && usdAmount === 0) return;
-      const current = deltas.get(inCode) || { euro: 0, usd: 0 };
-      deltas.set(inCode, {
+      const resolvedTarget = target === 'expenditures' ? 'expenditures' : 'receipts';
+      const key = `${inCode}:${resolvedTarget}`;
+      const current = deltas.get(key) || { code: inCode, target: resolvedTarget, euro: 0, usd: 0, preferOut: false };
+      deltas.set(key, {
+        code: inCode,
+        target: resolvedTarget,
         euro: current.euro + euroAmount,
         usd: current.usd + usdAmount,
+        preferOut: current.preferOut || Boolean(preferOut),
       });
     };
 
@@ -11737,9 +11872,13 @@
 
       const euro = Number(row.euro);
       const usd = Number(row.usd);
-      const euroAmount = Number.isFinite(euro) && euro > 0 ? euro : 0;
-      const usdAmount = Number.isFinite(usd) && usd > 0 ? usd : 0;
-      if (row.verified && (euroAmount > 0 || usdAmount > 0)) {
+      const euroAmount = Number.isFinite(euro) ? euro : 0;
+      const usdAmount = Number.isFinite(usd) ? usd : 0;
+      const isNegative = euroAmount < 0 || usdAmount < 0;
+      const pushEuro = Math.abs(euroAmount);
+      const pushUsd = Math.abs(usdAmount);
+      const target = isNegative ? 'expenditures' : 'receipts';
+      if (row.verified && (pushEuro > 0 || pushUsd > 0)) {
         seen.add(ledgerId);
 
         if (isIncome) {
@@ -11748,15 +11887,21 @@
           if (existingImpact) {
             if (!applied[ledgerId]
               || applied[ledgerId].inCode !== inCode
-              || applied[ledgerId].euro !== euroAmount
-              || applied[ledgerId].usd !== usdAmount) {
+              || applied[ledgerId].euro !== pushEuro
+              || applied[ledgerId].usd !== pushUsd) {
               const receipts = getBudgetReceiptsForCode(y, inCode);
               const hasReceipt = receipts
                 && Number.isFinite(receipts.euro)
                 && receipts.euro >= existingImpact.euro
                 && (!existingImpact.usd || (Number.isFinite(receipts.usd) && receipts.usd >= existingImpact.usd));
               if (hasReceipt) {
-                applied[ledgerId] = { inCode, euro: euroAmount, usd: usdAmount };
+                applied[ledgerId] = {
+                  inCode,
+                  euro: pushEuro,
+                  usd: pushUsd,
+                  direction: isNegative ? 'out' : 'in',
+                  target,
+                };
                 changed = true;
                 continue;
               }
@@ -11766,23 +11911,29 @@
           }
         }
 
-        const prev = normalizeIncomeBudgetReceiptImpact(applied[ledgerId]);
-        if (prev && prev.inCode !== inCode) {
-          addDelta(prev.inCode, -prev.euro, -prev.usd);
+        const prev = normalizeLedgerReceiptImpact(applied[ledgerId]);
+        if (prev && (prev.inCode !== inCode || prev.target !== target)) {
+          addDelta(prev.inCode, -prev.euro, -prev.usd, prev.direction === 'out', prev.target);
         }
 
-        const prevEuro = prev && prev.inCode === inCode ? prev.euro : 0;
-        const prevUsd = prev && prev.inCode === inCode ? prev.usd : 0;
-        addDelta(inCode, euroAmount - prevEuro, usdAmount - prevUsd);
+        const prevEuro = prev && prev.inCode === inCode && prev.target === target ? prev.euro : 0;
+        const prevUsd = prev && prev.inCode === inCode && prev.target === target ? prev.usd : 0;
+        addDelta(inCode, pushEuro - prevEuro, pushUsd - prevUsd, isNegative, target);
 
-        applied[ledgerId] = { inCode, euro: euroAmount, usd: usdAmount };
+        applied[ledgerId] = {
+          inCode,
+          euro: pushEuro,
+          usd: pushUsd,
+          direction: isNegative ? 'out' : 'in',
+          target,
+        };
         changed = true;
         continue;
       }
 
-      const prev = normalizeIncomeBudgetReceiptImpact(applied[ledgerId]);
+      const prev = normalizeLedgerReceiptImpact(applied[ledgerId]);
       if (prev) {
-        addDelta(prev.inCode, -prev.euro, -prev.usd);
+        addDelta(prev.inCode, -prev.euro, -prev.usd, prev.direction === 'out', prev.target);
         delete applied[ledgerId];
         changed = true;
       }
@@ -11790,17 +11941,19 @@
 
     for (const [ledgerId, prevRaw] of Object.entries(applied)) {
       if (seen.has(ledgerId)) continue;
-      const prev = normalizeIncomeBudgetReceiptImpact(prevRaw);
-      if (prev) addDelta(prev.inCode, -prev.euro, -prev.usd);
+      const prev = normalizeLedgerReceiptImpact(prevRaw);
+      if (prev) addDelta(prev.inCode, -prev.euro, -prev.usd, prev.direction === 'out', prev.target);
       delete applied[ledgerId];
       changed = true;
     }
 
     if (deltas.size > 0) {
-      const list = Array.from(deltas.entries()).map(([inCode, sum]) => ({
-        inCode,
+      const list = Array.from(deltas.values()).map((sum) => ({
+        inCode: sum.code,
         deltaEuro: sum.euro,
         deltaUsd: sum.usd,
+        preferOut: sum.preferOut,
+        target: sum.target,
       }));
       applyLedgerBudgetReceiptsDeltas(y, list);
     }
@@ -12038,10 +12191,18 @@
     return withIndex.map((x) => x.row);
   }
 
+  function getGsLedgerYear() {
+    const fromDataset = gsLedgerTbody ? Number(gsLedgerTbody.dataset.ledgerYear) : Number.NaN;
+    if (Number.isInteger(fromDataset)) return fromDataset;
+    const fromUrl = getBudgetYearFromUrl();
+    if (fromUrl) return fromUrl;
+    return getActiveBudgetYear();
+  }
+
   function renderGsLedgerRows(rows) {
     if (!gsLedgerTbody) return;
     const canVerify = Boolean(gsLedgerViewState.canVerify);
-    const year = getActiveBudgetYear();
+    const year = getGsLedgerYear();
     const html = (rows || [])
       .map((r) => {
         const ledgerId = escapeHtml(r.ledgerId);
@@ -12144,7 +12305,7 @@
     if (!gsLedgerTbody || !gsLedgerEmptyState) return;
     ensureGsLedgerDefaultEmptyText();
 
-    const year = getActiveBudgetYear();
+    const year = getGsLedgerYear();
     const all = buildGsLedgerRowsForYear(year);
     const filtered = filterGsLedgerForView(all, gsLedgerViewState.globalFilter);
     const sorted = sortGsLedgerForView(filtered, gsLedgerViewState.sortKey, gsLedgerViewState.sortDir);
@@ -12181,7 +12342,8 @@
 
   function initGsLedgerListPage() {
     if (!gsLedgerTbody || !gsLedgerEmptyState) return;
-    const year = getActiveBudgetYear();
+    const year = getBudgetYearFromUrl() || getActiveBudgetYear();
+    gsLedgerTbody.dataset.ledgerYear = String(year);
 
     const user = getCurrentUser();
     gsLedgerViewState.canVerify = Boolean(user && canWrite(user, 'ledger'));
@@ -19056,6 +19218,8 @@
       const labelA = isOverspent ? 'Overspent' : 'Balance';
       const labelB = 'Expenditures';
 
+      if (isOverspent) card.classList.add('budgetDash__card--overspent');
+
       const { svg, total, meta } = createDonutSvg(balVal, expVal);
 
       function createMetricBlock(side, valueText, percentText) {
@@ -19082,6 +19246,7 @@
 
       const balBlock = createMetricBlock(balanceSide === 'left' ? 'left' : 'right', formatEuro(isOverspent ? -balVal : balVal), `${pct(balVal, total)}%`);
       const expBlock = createMetricBlock(expSide === 'left' ? 'left' : 'right', formatEuro(expVal), `${pct(expVal, total)}%`);
+      if (isOverspent) balBlock.el.classList.add('budgetDash__metric--overspent');
 
       function sortKeyForAngle(angleRad) {
         // Smaller y first (top). In screen coords, y = sin(angle).
@@ -20846,45 +21011,6 @@
               changes,
             }),
           };
-
-          function isBudgetImpactStatus(status) {
-            return status === 'Approved' || status === 'Paid';
-          }
-
-          const hasDeduction = Boolean(updated && updated.budgetDeduction && updated.budgetDeduction.at);
-          const entersImpact = !isBudgetImpactStatus(prevStatus) && isBudgetImpactStatus(nextStatus);
-          const leavesImpact = isBudgetImpactStatus(prevStatus) && !isBudgetImpactStatus(nextStatus);
-
-          // Leaving Approved/Paid: reverse prior deduction (if any).
-          if (leavesImpact && hasDeduction) {
-            const ded = updated.budgetDeduction;
-            const outCode = ded && ded.budgetNumber ? String(ded.budgetNumber).trim() : '';
-            const euro = ded && Number.isFinite(Number(ded.euro)) ? Number(ded.euro) : 0;
-            const usd = ded && Number.isFinite(Number(ded.usd)) ? Number(ded.usd) : 0;
-            const res = applyOrderBudgetExpendituresDelta(outCode, year, -euro, -usd, nowIso);
-            if (res && res.ok) {
-              const { budgetDeduction, ...rest } = updated;
-              updated = rest;
-            }
-          }
-
-          // Entering Approved/Paid: apply deduction once.
-          // Moving Approved -> Paid does NOT reapply because entersImpact is false.
-          if (entersImpact && !hasDeduction) {
-            const res = applyApprovedOrderBudgetDeduction(updated, year, nowIso);
-            if (res && res.ok) {
-              updated = {
-                ...updated,
-                budgetDeduction: {
-                  at: res.at,
-                  year: Number(year),
-                  budgetNumber: String(res.outCode),
-                  euro: res.euroApplied,
-                  usd: res.usdApplied,
-                },
-              };
-            }
-          }
 
           upsertOrder(updated, year);
           applyPaymentOrdersView();

@@ -591,6 +591,10 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   gap: 2px;
 }
 
+.budgetDash__card--overspent .budgetDash__metric--overspent .budgetDash__metricVal {
+  color: var(--danger-text);
+}
+
 .budgetDash__metric--left {
   align-items: flex-start;
   text-align: left;
@@ -635,6 +639,10 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   stroke: var(--chart-balance);
 }
 
+.budgetDash__card--overspent .budgetDash__donutSegA {
+  stroke: var(--danger);
+}
+
 .budgetDash__donutSegB {
   stroke: var(--chart-expenditures);
 }
@@ -660,6 +668,11 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
 
 .budgetDash__swatch--a {
   background: var(--chart-balance);
+}
+
+.budgetDash__card--overspent .budgetDash__swatch--a {
+  background: var(--danger);
+  border-color: var(--danger-border);
 }
 
 .budgetDash__swatch--b {

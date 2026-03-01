@@ -1123,6 +1123,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 .incomeTableWrap {
   max-height: 60vh;
   overflow: auto;
+}
 
 /* Income: highlight rows missing Budget Number */
 .incomeRow--missingBudget td {
@@ -1152,6 +1153,98 @@ input:focus, textarea:focus, select:focus, button:focus {
 .incomeRow--missingBudget .btn--editBlue:hover {
   background: var(--surface);
   filter: brightness(0.98);
+}
+
+/* wiseEUR: highlight rows missing required fields */
+.wiseEurRow--missingRequired td {
+  background: var(--danger);
+  color: var(--primary-text);
+}
+
+.wiseEurRow--missingRequired .btn--x {
+  color: var(--primary-text);
+}
+
+.wiseEurRow--missingRequired .btn--x:hover {
+  background: transparent;
+  color: var(--primary-text);
+}
+
+.wiseEurRow--missingRequired .btn--editBlue {
+  background: var(--surface);
+  border-color: var(--focus);
+  color: var(--focus);
+}
+
+.wiseEurRow--missingRequired .btn--editBlue:hover {
+  background: var(--surface);
+  filter: brightness(0.98);
+}
+
+/* wiseUSD: highlight rows missing required fields */
+.wiseUsdRow--missingRequired td {
+  background: var(--danger);
+  color: var(--primary-text);
+}
+
+.wiseUsdRow--missingRequired .btn--x {
+  color: var(--primary-text);
+}
+
+.wiseUsdRow--missingRequired .btn--x:hover {
+  background: transparent;
+  color: var(--primary-text);
+}
+
+.wiseUsdRow--missingRequired .btn--editBlue {
+  background: var(--surface);
+  border-color: var(--focus);
+  color: var(--focus);
+}
+
+.wiseUsdRow--missingRequired .btn--editBlue:hover {
+  background: var(--surface);
+  filter: brightness(0.98);
+}
+
+/* Payment Orders: highlight rows missing required fields */
+.ordersRow--missingRequired td {
+  background: var(--danger);
+  color: var(--primary-text);
+}
+
+.ordersRow--missingRequired a {
+  color: var(--primary-text);
+}
+
+.ordersRow--missingRequired td.col-delete {
+  background: var(--danger);
+}
+
+.ordersRow--missingRequired .btn {
+  color: var(--primary-text);
+  border-color: var(--primary-text);
+}
+
+.ordersRow--missingRequired .btn--x:hover {
+  background: transparent;
+  color: var(--primary-text);
+}
+
+.ordersRow--missingRequired .btn--editBlue {
+  background: var(--surface);
+  border-color: var(--focus);
+  color: var(--focus);
+}
+
+.ordersRow--missingRequired .btn--editBlue:hover {
+  background: var(--surface);
+  filter: brightness(0.98);
+}
+
+.ordersRow--missingRequired .btn--viewGrey {
+  color: #000000;
+  border-color: #000000;
 }
 }
 
@@ -2455,9 +2548,9 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
-/* Creditor/Debtor (3rd) and Details (10th) stay left-aligned */
-#gsLedgerTable th:nth-child(3),
-#gsLedgerTable td:nth-child(3),
+/* Creditor/Debtor (4th) and Details (10th) stay left-aligned */
+#gsLedgerTable th:nth-child(4),
+#gsLedgerTable td:nth-child(4),
 #gsLedgerTable th:nth-child(10),
 #gsLedgerTable td:nth-child(10) {
   text-align: left;
@@ -2640,6 +2733,63 @@ input[type='checkbox'].cb {
 
 .modal__nameLabel {
   font-size: 1.15rem;
+}
+
+.mergeNote {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.mergeGrid {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr;
+  gap: 10px 12px;
+  align-items: start;
+  justify-items: start;
+}
+
+.mergeGrid__head {
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.mergeGrid__label {
+  font-weight: 600;
+}
+
+.mergeOption {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  column-gap: 10px;
+  align-items: start;
+  justify-items: start;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+}
+
+.mergeOption input {
+  margin: 2px 0 0;
+}
+
+.mergeOption__value {
+  text-align: left;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .mergeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .mergeGrid__head {
+    display: none;
+  }
 }
 
 /* View modal timeline bar */

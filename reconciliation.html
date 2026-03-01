@@ -122,6 +122,7 @@
                     </th>
                     <th scope="col">Payment Order No.</th>
                     <th scope="col">Date</th>
+                    <th scope="col">Source</th>
                     <th scope="col">Name</th>
                     <th scope="col" class="num">Euro (€)</th>
                     <th scope="col" class="num">USD ($)</th>
@@ -138,7 +139,7 @@
                 <tfoot>
                   <tr class="ordersTotalsRow">
                     <td class="col-delete"></td>
-                    <td colspan="3" class="ordersTotalsRow__label">Total</td>
+                    <td colspan="4" class="ordersTotalsRow__label">Total</td>
                     <td class="num" id="reconcileTotalEuro"></td>
                     <td class="num" id="reconcileTotalUsd"></td>
                     <td colspan="5"></td>
@@ -156,5 +157,36 @@
     </div>
 
     <script src="app.js"></script>
+
+    <div class="modal" id="reconcileMergeModal" aria-hidden="true">
+      <div class="modal__backdrop" data-modal-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reconcileMergeTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <h3 id="reconcileMergeTitle">Resolve PO Conflicts</h3>
+            <p id="reconcileMergeSubtitle" class="modal__poDate"></p>
+          </div>
+          <button type="button" class="modal__close" data-modal-close aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div class="modal__body" id="reconcileMergeBody">
+          <!-- content inserted by app.js -->
+        </div>
+        <div class="modal__footer">
+          <button type="button" id="reconcileMergeConfirmBtn" class="btn btn--primary">
+            Merge
+          </button>
+          <button type="button" class="btn btn--ghost" data-modal-close>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

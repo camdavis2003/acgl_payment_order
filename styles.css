@@ -591,10 +591,6 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   gap: 2px;
 }
 
-.budgetDash__card--overspent .budgetDash__metric--overspent .budgetDash__metricVal {
-  color: var(--danger-text);
-}
-
 .budgetDash__metric--left {
   align-items: flex-start;
   text-align: left;
@@ -639,10 +635,6 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   stroke: var(--chart-balance);
 }
 
-.budgetDash__card--overspent .budgetDash__donutSegA {
-  stroke: var(--danger);
-}
-
 .budgetDash__donutSegB {
   stroke: var(--chart-expenditures);
 }
@@ -668,11 +660,6 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
 
 .budgetDash__swatch--a {
   background: var(--chart-balance);
-}
-
-.budgetDash__card--overspent .budgetDash__swatch--a {
-  background: var(--danger);
-  border-color: var(--danger-border);
 }
 
 .budgetDash__swatch--b {
@@ -1164,58 +1151,6 @@ input:focus, textarea:focus, select:focus, button:focus {
 }
 
 .incomeRow--missingBudget .btn--editBlue:hover {
-  background: var(--surface);
-  filter: brightness(0.98);
-}
-
-/* wiseEUR: highlight rows missing required fields */
-.wiseEurRow--missingRequired td {
-  background: var(--danger);
-  color: var(--primary-text);
-}
-
-.wiseEurRow--missingRequired .btn--x {
-  color: var(--primary-text);
-}
-
-.wiseEurRow--missingRequired .btn--x:hover {
-  background: transparent;
-  color: var(--primary-text);
-}
-
-.wiseEurRow--missingRequired .btn--editBlue {
-  background: var(--surface);
-  border-color: var(--focus);
-  color: var(--focus);
-}
-
-.wiseEurRow--missingRequired .btn--editBlue:hover {
-  background: var(--surface);
-  filter: brightness(0.98);
-}
-
-/* wiseUSD: highlight rows missing required fields */
-.wiseUsdRow--missingRequired td {
-  background: var(--danger);
-  color: var(--primary-text);
-}
-
-.wiseUsdRow--missingRequired .btn--x {
-  color: var(--primary-text);
-}
-
-.wiseUsdRow--missingRequired .btn--x:hover {
-  background: transparent;
-  color: var(--primary-text);
-}
-
-.wiseUsdRow--missingRequired .btn--editBlue {
-  background: var(--surface);
-  border-color: var(--focus);
-  color: var(--focus);
-}
-
-.wiseUsdRow--missingRequired .btn--editBlue:hover {
   background: var(--surface);
   filter: brightness(0.98);
 }

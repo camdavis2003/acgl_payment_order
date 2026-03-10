@@ -3469,6 +3469,47 @@
     localStorage.setItem(storageKey, JSON.stringify(orders));
   }
 
+  function upsertReconciliationOrderBySource(order, year) {
+    if (!order) return;
+    const source = String(order.source || '').trim();
+    const sourceEntryId = String(order.sourceEntryId || '').trim();
+    if (!source || !sourceEntryId) return;
+
+    // Reconciliation intake entries must never carry an auto-generated PO number.
+    const sanitizedOrder = {
+      ...order,
+      paymentOrderNo: '',
+    };
+
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const existing = loadReconciliationOrders(y);
+    const idx = existing.findIndex((o) => (
+      o
+      && String(o.source || '').trim() === source
+      && String(o.sourceEntryId || '').trim() === sourceEntryId
+    ));
+
+    const next = idx >= 0
+      ? existing.map((o, i) => (i === idx ? sanitizedOrder : o))
+      : [sanitizedOrder, ...existing];
+    saveReconciliationOrders(next, y);
+  }
+
+  function removeReconciliationOrderBySource(sourceRaw, sourceEntryIdRaw, year) {
+    const source = String(sourceRaw || '').trim();
+    const sourceEntryId = String(sourceEntryIdRaw || '').trim();
+    if (!source || !sourceEntryId) return;
+
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const existing = loadReconciliationOrders(y);
+    const next = existing.filter((o) => !(
+      o
+      && String(o.source || '').trim() === source
+      && String(o.sourceEntryId || '').trim() === sourceEntryId
+    ));
+    if (next.length !== existing.length) saveReconciliationOrders(next, y);
+  }
+
   /** @returns {Array<Object>} */
   function loadOrders(year) {
     const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
@@ -13595,6 +13636,47 @@
     return getWiseEurReceipts(entry) - getWiseEurDisburse(entry);
   }
 
+  function buildReconciliationOrderFromWiseEurEntry(entry, year) {
+    if (!entry || !entry.id) return null;
+    const absEuro = getWiseEurDisburse(entry);
+    if (!(Number.isFinite(absEuro) && absEuro > 0)) return null;
+
+    const date = String(entry.datePL || entry.date || '').trim();
+    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
+    const purpose = String(entry.description || entry.reference || '').trim() || 'wiseEUR disbursement';
+    const budgetNumber = String(entry.budgetNo || '').trim();
+    const itemTitle = purpose;
+
+    const po = buildPaymentOrder({
+      source: 'wiseEUR',
+      sourceEntryId: entry.id,
+      sourceEntryYear: year,
+      paymentOrderNo: '',
+      date,
+      name: party,
+      euro: absEuro,
+      usd: null,
+      items: [
+        {
+          id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          title: itemTitle,
+          euro: absEuro,
+          usd: null,
+        },
+      ],
+      address: '',
+      iban: '',
+      bic: '',
+      specialInstructions: '',
+      budgetNumber,
+      purpose,
+      with: 'Grand Secretary',
+      status: 'Submitted',
+    });
+    po.updatedAt = po.createdAt;
+    return po;
+  }
+
   function getWiseEurDisplayValueForColumn(entry, colKey) {
     if (!entry) return '';
     switch (colKey) {
@@ -14934,13 +15016,24 @@
         if (!proceed) return;
       }
 
+      const positiveImported = imported.filter((e) => computeWiseEurNet(e) > 0);
+      const negativeImported = imported.filter((e) => computeWiseEurNet(e) < 0);
+
+      if (negativeImported.length > 0) {
+        ensurePaymentOrdersReconciliationListExistsForYear(year);
+        for (const e of negativeImported) {
+          const po = buildReconciliationOrderFromWiseEurEntry(e, year);
+          if (po) upsertReconciliationOrderBySource(po, year);
+        }
+      }
+
       const existing = existingBefore;
-      const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
+      const merged = [...positiveImported, ...(Array.isArray(existing) ? existing : [])];
       saveWiseEur(merged, year);
       applyWiseEurView();
 
       if (typeof showFlashToken === 'function') {
-        showFlashToken(`Imported ${imported.length} wiseEUR row(s).`);
+        showFlashToken(`Imported ${positiveImported.length} wiseEUR row(s). Moved ${negativeImported.length} row(s) to Reconciliation.`);
       }
     }
 
@@ -15196,50 +15289,18 @@
           idTrack: existing && existing.idTrack ? existing.idTrack : '',
         };
 
-        // If creating a new wiseEUR entry that uses Disburse, also create a Reconciliation Payment Order.
-        if (!existing && getWiseEurDisburse(entry) > 0) {
-          const absEuro = getWiseEurDisburse(entry);
-          const date = String(entry.datePL || entry.date || '').trim();
-          const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
-          const purpose = String(entry.description || entry.reference || '').trim() || 'wiseEUR disbursement';
-          const budgetNumber = String(entry.budgetNo || '').trim();
-          const itemTitle = purpose;
-
-          const po = buildPaymentOrder({
-            source: 'wiseEUR',
-            sourceEntryId: entry.id,
-            sourceEntryYear: year,
-            paymentOrderNo: '',
-            date,
-            name: party,
-            euro: absEuro,
-            usd: null,
-            items: [
-              {
-                id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-                title: itemTitle,
-                euro: absEuro,
-                usd: null,
-              },
-            ],
-            address: '',
-            iban: '',
-            bic: '',
-            specialInstructions: '',
-            budgetNumber,
-            purpose,
-            with: 'Grand Secretary',
-            status: 'Submitted',
-          });
-          po.updatedAt = po.createdAt;
-
-          ensurePaymentOrdersReconciliationListExistsForYear(year);
-          const existingOrders = loadReconciliationOrders(year);
-          const mergedOrders = [po, ...(Array.isArray(existingOrders) ? existingOrders : [])];
-          saveReconciliationOrders(mergedOrders, year);
+        const net = computeWiseEurNet(entry);
+        if (net < 0) {
+          const po = buildReconciliationOrderFromWiseEurEntry(entry, year);
+          if (po) {
+            ensurePaymentOrdersReconciliationListExistsForYear(year);
+            upsertReconciliationOrderBySource(po, year);
+          }
+          if (existing) deleteWiseEurEntryById(entry.id, year);
+        } else {
+          removeReconciliationOrderBySource('wiseEUR', entry.id, year);
+          upsertWiseEurEntry(entry, year);
         }
-
-        upsertWiseEurEntry(entry, year);
         applyWiseEurView();
         closeWiseEurModal();
       });
@@ -15319,6 +15380,47 @@
 
   function computeWiseUsdNet(entry) {
     return getWiseUsdReceipts(entry) - getWiseUsdDisburse(entry);
+  }
+
+  function buildReconciliationOrderFromWiseUsdEntry(entry, year) {
+    if (!entry || !entry.id) return null;
+    const absUsd = getWiseUsdDisburse(entry);
+    if (!(Number.isFinite(absUsd) && absUsd > 0)) return null;
+
+    const date = String(entry.datePL || entry.date || '').trim();
+    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
+    const purpose = String(entry.description || entry.reference || '').trim() || 'wiseUSD disbursement';
+    const budgetNumber = String(entry.budgetNo || '').trim();
+    const itemTitle = purpose;
+
+    const po = buildPaymentOrder({
+      source: 'wiseUSD',
+      sourceEntryId: entry.id,
+      sourceEntryYear: year,
+      paymentOrderNo: '',
+      date,
+      name: party,
+      euro: null,
+      usd: absUsd,
+      items: [
+        {
+          id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          title: itemTitle,
+          euro: null,
+          usd: absUsd,
+        },
+      ],
+      address: '',
+      iban: '',
+      bic: '',
+      specialInstructions: '',
+      budgetNumber,
+      purpose,
+      with: 'Grand Secretary',
+      status: 'Submitted',
+    });
+    po.updatedAt = po.createdAt;
+    return po;
   }
 
   function getWiseUsdDisplayValueForColumn(entry, colKey) {
@@ -16459,13 +16561,24 @@
         if (!proceed) return;
       }
 
+      const positiveImported = imported.filter((e) => computeWiseUsdNet(e) > 0);
+      const negativeImported = imported.filter((e) => computeWiseUsdNet(e) < 0);
+
+      if (negativeImported.length > 0) {
+        ensurePaymentOrdersReconciliationListExistsForYear(year);
+        for (const e of negativeImported) {
+          const po = buildReconciliationOrderFromWiseUsdEntry(e, year);
+          if (po) upsertReconciliationOrderBySource(po, year);
+        }
+      }
+
       const existing = existingBefore;
-      const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
+      const merged = [...positiveImported, ...(Array.isArray(existing) ? existing : [])];
       saveWiseUsd(merged, year);
       applyWiseUsdView();
 
       if (typeof showFlashToken === 'function') {
-        showFlashToken(`Imported ${imported.length} wiseUSD row(s).`);
+        showFlashToken(`Imported ${positiveImported.length} wiseUSD row(s). Moved ${negativeImported.length} row(s) to Reconciliation.`);
       }
     }
 
@@ -16720,50 +16833,18 @@
           ...res.values,
         };
 
-        // If creating a new wiseUSD entry that uses Disburse, also create a Reconciliation Payment Order.
-        if (!existing && getWiseUsdDisburse(entry) > 0) {
-          const absUsd = getWiseUsdDisburse(entry);
-          const date = String(entry.datePL || entry.date || '').trim();
-          const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
-          const purpose = String(entry.description || entry.reference || '').trim() || 'wiseUSD disbursement';
-          const budgetNumber = String(entry.budgetNo || '').trim();
-          const itemTitle = purpose;
-
-          const po = buildPaymentOrder({
-            source: 'wiseUSD',
-            sourceEntryId: entry.id,
-            sourceEntryYear: year,
-            paymentOrderNo: '',
-            date,
-            name: party,
-            euro: null,
-            usd: absUsd,
-            items: [
-              {
-                id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-                title: itemTitle,
-                euro: null,
-                usd: absUsd,
-              },
-            ],
-            address: '',
-            iban: '',
-            bic: '',
-            specialInstructions: '',
-            budgetNumber,
-            purpose,
-            with: 'Grand Secretary',
-            status: 'Submitted',
-          });
-          po.updatedAt = po.createdAt;
-
-          ensurePaymentOrdersReconciliationListExistsForYear(year);
-          const existingOrders = loadReconciliationOrders(year);
-          const mergedOrders = [po, ...(Array.isArray(existingOrders) ? existingOrders : [])];
-          saveReconciliationOrders(mergedOrders, year);
+        const net = computeWiseUsdNet(entry);
+        if (net < 0) {
+          const po = buildReconciliationOrderFromWiseUsdEntry(entry, year);
+          if (po) {
+            ensurePaymentOrdersReconciliationListExistsForYear(year);
+            upsertReconciliationOrderBySource(po, year);
+          }
+          if (existing) deleteWiseUsdEntryById(entry.id, year);
+        } else {
+          removeReconciliationOrderBySource('wiseUSD', entry.id, year);
+          upsertWiseUsdEntry(entry, year);
         }
-
-        upsertWiseUsdEntry(entry, year);
         applyWiseUsdView();
         closeWiseUsdModal();
       });

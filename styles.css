@@ -1106,22 +1106,21 @@ input:focus, textarea:focus, select:focus, button:focus {
   table-layout: fixed;
 }
 
-/* Budget table: stable scrolling with sticky header.
-   The wrapper scrolls vertically, while the <th> cells stay pinned. */
+/* Budget table: stable scrolling with sticky header. */
 .budgetTableWrap {
-  max-height: 60vh;
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
   overflow: auto;
 }
 
 /* Payment Orders: stable scrolling with sticky header (match Budget list style) */
 .ordersTableWrap {
-  max-height: 60vh;
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
   overflow: auto;
 }
 
 /* Income: stable scrolling with sticky header (match Budget/Payment Orders style) */
 .incomeTableWrap {
-  max-height: 60vh;
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
   overflow: auto;
 }
 
@@ -2067,6 +2066,13 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
 }
 
+/* Opt-in: lock table header/footer while rows scroll inside wrapper */
+.table-wrap.fixedFooterTableWrap {
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
+  overflow: auto;
+  position: relative;
+}
+
 /* Admin Settings: avoid nested vertical scrollbars inside settings cards.
    Let the card body scroll vertically; keep table-wrap for horizontal scrolling only. */
 main.archive__grid > section.card > .settingsCardBody .table-wrap {
@@ -2076,7 +2082,8 @@ main.archive__grid > section.card > .settingsCardBody .table-wrap {
 
 .table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   min-width: 820px;
   background: var(--surface);
 }
@@ -2095,11 +2102,17 @@ main.archive__grid > section.card > .settingsCardBody .table-wrap {
   vertical-align: middle;
 }
 
-.table thead th {
+.table thead {
   position: sticky;
   top: 0;
+  z-index: 3;
   background: var(--table-head);
-  z-index: 1;
+  box-shadow: 0 8px 12px -10px rgba(0, 0, 0, 0.35);
+}
+
+.table thead th {
+  position: static;
+  background: var(--table-head);
   text-align: left;
   font-size: 0.95rem;
 }
@@ -2253,12 +2266,12 @@ body.isTableResizing {
 
 /* Payment Orders header background like Budget table */
 #ordersTable thead th {
-  background: var(--surface);
+  background: var(--table-head);
 }
 
 /* Income header background like Budget table */
 #incomeTable thead th {
-  background: var(--surface);
+  background: var(--table-head);
 }
 
 #incomeTable td.num,
@@ -2311,13 +2324,23 @@ body.isTableResizing {
   opacity: 1;
 }
 
+.table tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--table-head);
+  box-shadow: 0 -8px 12px -10px rgba(0, 0, 0, 0.35);
+}
+
 .table tfoot td {
+  position: static;
   background: var(--table-head);
   font-weight: 600;
   border-top: 2px solid var(--border);
 }
 
 .table tfoot th {
+  position: static;
   background: var(--table-head);
   font-weight: 600;
   border-top: 2px solid var(--border);
@@ -2508,6 +2531,13 @@ input[type='checkbox'].cb {
 #gsLedgerTable td.num,
 #gsLedgerTable th.num {
   text-align: center;
+}
+
+/* Keep Ledger totals visually distinct while sticky */
+#gsLedgerTable tfoot td,
+#gsLedgerTable tfoot th {
+  background: var(--surface);
+  box-shadow: 0 -1px 0 var(--border);
 }
 
 /* wiseEUR footer labels: left-align text only */

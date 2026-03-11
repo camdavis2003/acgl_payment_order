@@ -2528,7 +2528,9 @@ input[type='checkbox'].cb {
 #ordersTable th:nth-child(6),
 #ordersTable td:nth-child(6),
 #ordersTable th:nth-child(7),
-#ordersTable td:nth-child(7) {
+#ordersTable td:nth-child(7),
+#ordersTable th:nth-child(8),
+#ordersTable td:nth-child(8) {
   text-align: center;
 }
 

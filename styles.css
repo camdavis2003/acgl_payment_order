@@ -2000,7 +2000,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
   background: var(--surface);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 2px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   max-width: min(360px, calc(100vw - 40px));
   max-height: min(260px, calc(100vh - 80px));
@@ -2716,6 +2716,7 @@ input[type='checkbox'].cb {
 
 .modal__headerText {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .modal__close {
@@ -2779,6 +2780,98 @@ input[type='checkbox'].cb {
 
 .modal__nameLabel {
   font-size: 1.15rem;
+}
+
+/* Payment Orders: progress graph (view modal) */
+.poProgress {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.poProgress--header {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.poProgress__track {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+}
+
+.poProgress__node {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.poProgress__connector {
+  flex: 1 1 auto;
+  height: 2px;
+  align-self: flex-start;
+  margin-top: 16px;
+  background: var(--chart-balance);
+  border-radius: 999px;
+  min-width: 18px;
+}
+
+.poProgress__pill {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+  line-height: 1.1;
+  text-align: center;
+  flex: 0 0 auto;
+}
+
+.poProgress__node.is-done .poProgress__pill {
+  background: var(--chart-balance);
+  border-color: var(--chart-balance);
+  color: var(--primary-text);
+}
+
+.poProgress__node.is-active .poProgress__pill {
+  background: var(--caution);
+  border-color: var(--caution);
+  color: var(--text);
+}
+
+.poProgress__meta {
+  margin-top: 6px;
+  min-height: 34px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 700;
+  text-align: center;
+}
+
+.poProgress__meta--empty {
+  opacity: 0;
+}
+
+@media (max-width: 520px) {
+  .poProgress__track {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .poProgress__connector {
+    display: none;
+  }
 }
 
 .mergeNote {

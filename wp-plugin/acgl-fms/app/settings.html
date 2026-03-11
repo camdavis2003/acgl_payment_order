@@ -197,18 +197,38 @@
             data-settings-card="numbering"
           >
             <div class="list-header">
-              <h2 id="settings-title">Payment Order Numbering</h2>
-              <div class="list-actions"></div>
+              <h2 id="settings-title">
+                Payment Order &amp; Money Transfer Numbering
+              </h2>
+              <div class="list-actions">
+                <button
+                  type="submit"
+                  form="numberingForm"
+                  id="savePoNumberingBtn"
+                  data-numbering-save="po"
+                  class="btn btn--primary"
+                >
+                  Save Payment Order
+                </button>
+                <button
+                  type="submit"
+                  form="numberingForm"
+                  id="saveMtNumberingBtn"
+                  data-numbering-save="mt"
+                  class="btn btn--ghost"
+                >
+                  Save Money Transfer
+                </button>
+              </div>
             </div>
 
             <p class="subhead">
-              Set the masonic year and the first Payment Order number for the
-              year.
+              Set the budget year and the first number for each sequence.
             </p>
 
             <form id="numberingForm" novalidate>
               <div class="grid">
-                <div class="field">
+                <div class="field field--span2">
                   <label for="masonicYear">Budget Year (2 digits)</label>
                   <select id="masonicYear" name="masonicYear" required>
                     <option value="" selected disabled>Select a budget…</option>
@@ -242,12 +262,28 @@
                     aria-live="polite"
                   ></div>
                 </div>
-              </div>
 
-              <div class="actions actions--right">
-                <button type="submit" class="btn btn--primary">
-                  Save Settings
-                </button>
+                <div class="field">
+                  <label for="firstMoneyTransferNumber"
+                    >First Money Transfer No. of the Year</label
+                  >
+                  <input
+                    id="firstMoneyTransferNumber"
+                    name="firstMoneyTransferNumber"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    required
+                  />
+                  <div
+                    class="error"
+                    id="error-firstMoneyTransferNumber"
+                    role="alert"
+                    aria-live="polite"
+                  ></div>
+                </div>
               </div>
             </form>
           </section>
@@ -522,13 +558,19 @@
                 <select id="newPosition" name="newPosition">
                   <option value="" selected>Select a role…</option>
                   <option value="Grand Master">Grand Master</option>
-                  <option value="Deputy Grand Master">Deputy Grand Master</option>
+                  <option value="Deputy Grand Master">
+                    Deputy Grand Master
+                  </option>
                   <option value="Sr. Grand Warden">Sr. Grand Warden</option>
                   <option value="Jr. Grand Warden">Jr. Grand Warden</option>
                   <option value="Grand Secretary">Grand Secretary</option>
-                  <option value="Assist. Grand Secretary">Assist. Grand Secretary</option>
+                  <option value="Assist. Grand Secretary">
+                    Assist. Grand Secretary
+                  </option>
                   <option value="Grand Treasurer">Grand Treasurer</option>
-                  <option value="Assist. Grand Treasurer">Assist. Grand Treasurer</option>
+                  <option value="Assist. Grand Treasurer">
+                    Assist. Grand Treasurer
+                  </option>
                   <option value="Auditor">Auditor</option>
                 </select>
                 <div
@@ -660,7 +702,7 @@
                 >
                 <label
                   class="rolesGrid__check"
-                  data-tooltip="Allows: view Admin Settings and edit/save Payment Order Numbering settings, view Audit Log. Restricted (read-only): User Roles (no add/edit/delete users or permissions)."
+                  data-tooltip="Allows: view Admin Settings and edit/save Payment Order & Money Transfer Numbering settings, view Audit Log. Restricted (read-only): User Roles (no add/edit/delete users or permissions)."
                   ><input type="checkbox" id="permSettingsPartial" /> Partial
                   access</label
                 >

@@ -2550,6 +2550,115 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
+/* Money Transfer builder: center selected columns */
+#mtBuilderTable th:nth-child(1),
+#mtBuilderTable td:nth-child(1),
+#mtBuilderTable th:nth-child(2),
+#mtBuilderTable td:nth-child(2),
+#mtBuilderTable th:nth-child(3),
+#mtBuilderTable td:nth-child(3),
+#mtBuilderTable th:nth-child(5),
+#mtBuilderTable td:nth-child(5),
+#mtBuilderTable th:nth-child(6),
+#mtBuilderTable td:nth-child(6) {
+  text-align: center;
+}
+
+/* Money Transfer builder: center Euro / USD columns (including totals) */
+#mtBuilderTable td.num,
+#mtBuilderTable th.num {
+  text-align: center;
+}
+
+/* Money Transfer builder: keep footer label left-aligned */
+#mtBuilderTable tfoot .ordersTotalsRow__label {
+  text-align: left;
+}
+
+/* Money Transfers: center selected columns (MT No, MT Date, Verified, Names) */
+#moneyTransfersTable th:nth-child(2),
+#moneyTransfersTable td:nth-child(2),
+#moneyTransfersTable th:nth-child(3),
+#moneyTransfersTable td:nth-child(3),
+#moneyTransfersTable th:nth-child(4),
+#moneyTransfersTable td:nth-child(4),
+#moneyTransfersTable th:nth-child(5),
+#moneyTransfersTable td:nth-child(5),
+#moneyTransfersTable th:nth-child(6),
+#moneyTransfersTable td:nth-child(6),
+#moneyTransfersTable th:nth-child(7),
+#moneyTransfersTable td:nth-child(7) {
+  text-align: center;
+}
+
+/* Money Transfers: keep non-comment columns tight; give Comments the space */
+#moneyTransfersTable {
+  table-layout: fixed;
+}
+
+#moneyTransfersTable th,
+#moneyTransfersTable td {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+/* Default: keep most columns on one line */
+#moneyTransfersTable td:not(:nth-child(8)),
+#moneyTransfersTable th:not(:nth-child(8)) {
+  white-space: nowrap;
+}
+
+/* Column widths (1=delete, 8=comments, 9=actions) */
+#moneyTransfersTable th:nth-child(1),
+#moneyTransfersTable td:nth-child(1) {
+  width: 44px;
+}
+
+#moneyTransfersTable th:nth-child(2),
+#moneyTransfersTable td:nth-child(2) {
+  width: 150px;
+}
+
+#moneyTransfersTable th:nth-child(3),
+#moneyTransfersTable td:nth-child(3) {
+  width: 120px;
+}
+
+/* Verified columns (4 and 6) */
+#moneyTransfersTable th:nth-child(4),
+#moneyTransfersTable td:nth-child(4),
+#moneyTransfersTable th:nth-child(6),
+#moneyTransfersTable td:nth-child(6) {
+  width: 95px;
+}
+
+/* Name columns (5 and 7) */
+#moneyTransfersTable th:nth-child(5),
+#moneyTransfersTable td:nth-child(5),
+#moneyTransfersTable th:nth-child(7),
+#moneyTransfersTable td:nth-child(7) {
+  width: 200px;
+}
+
+#moneyTransfersTable th:nth-child(9),
+#moneyTransfersTable td:nth-child(9) {
+  width: 120px;
+}
+
+/* Comments: allow wrapping */
+#moneyTransfersTable th:nth-child(8),
+#moneyTransfersTable td:nth-child(8) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Actions far right */
+#moneyTransfersTable th:nth-child(9),
+#moneyTransfersTable td:nth-child(9),
+#moneyTransfersTable td.actions {
+  text-align: right;
+}
+
 /* Description column (7th) stays left-aligned */
 #wiseUsdTable th:nth-child(7),
 #wiseUsdTable td:nth-child(7) {

@@ -8,7 +8,8 @@
     "start": "node dev-server.js",
     "test": "node --test",
     "build:wp": "node build-wp-plugin.js",
-    "package:wp": "node package-wp-plugin.js --slug acgl-fms-wp --out acgl-fms-wp.zip"
+    "package:wp": "node package-wp-plugin.js --slug acgl-fms-wp --out acgl-fms-wp.zip",
+    "package:demo": "node package-wp-plugin-demo.js"
   },
   "devDependencies": {
     "archiver": "^7.0.1"

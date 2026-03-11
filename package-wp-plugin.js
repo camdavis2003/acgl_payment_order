@@ -38,6 +38,8 @@ function readArg(name) {
   return String(val);
 }
 
+const OUT_EXPLICIT = Boolean(readArg('--out') || process.env.WP_PLUGIN_ZIP);
+
 // Allows creating a zip that installs into a different folder name in WP,
 // which is useful when WP says "Destination folder already exists".
 const ZIP_SLUG = (readArg('--slug') || process.env.WP_PLUGIN_SLUG || 'acgl-fms').trim() || 'acgl-fms';
@@ -57,6 +59,7 @@ function rmIfExists(p) {
 }
 
 function cleanupLegacyPluginZips() {
+  if (OUT_EXPLICIT) return;
   // Avoid confusion from multiple historical zip names (e.g., acgl-fms.zip vs acgl-fms-wp.zip).
   // Keep the current OUT_ZIP and remove other acgl-fms*.zip files.
   try {

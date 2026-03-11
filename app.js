@@ -6834,6 +6834,21 @@
     return [...timeline, evt];
   }
 
+  function hasPaymentOrderGrandMasterApproval(order) {
+    const timeline = ensureOrderTimeline(order);
+    for (const evt of Array.isArray(timeline) ? timeline : []) {
+      if (!evt || typeof evt !== 'object') continue;
+      const actorWith = normalizeWith(evt.actorWith);
+      const actorStatus = normalizeOrderStatus(evt.actorStatus);
+      if (actorWith === 'Grand Master' && actorStatus === 'Approved') return true;
+
+      const withLabel = normalizeWith(evt.with);
+      const statusLabel = normalizeOrderStatus(evt.status);
+      if (withLabel === 'Grand Master' && statusLabel === 'Approved') return true;
+    }
+    return false;
+  }
+
   async function wpPublicSubmitPaymentOrder(year, values, items) {
     const url = wpJoin('acgl-fms/v1/public/submit-po');
     const body = {
@@ -12678,8 +12693,12 @@
       if (src === 'wiseEUR' && srcEntryId) linkedWiseEurEntryIds.add(srcEntryId);
       if (src === 'wiseUSD' && srcEntryId) linkedWiseUsdEntryIds.add(srcEntryId);
 
-      const statusRaw = String(o.status || '').trim().toLowerCase();
-      if (statusRaw !== 'approved' && statusRaw !== 'paid') continue;
+      const statusLabel = normalizeOrderStatus(o.status);
+      const withLabel = normalizeWith(o.with);
+      const statusRaw = String(statusLabel || '').trim().toLowerCase();
+      const isApprovedOrPaid = statusRaw === 'approved' || statusRaw === 'paid';
+      const isGtReviewWithGmApproved = statusRaw === 'review' && withLabel === 'Grand Treasurer' && hasPaymentOrderGrandMasterApproval(o);
+      if (!isApprovedOrPaid && !isGtReviewWithGmApproved) continue;
       const ledgerId = `po:${String(o.id)}`;
 
       const euroRaw = String(o.euro ?? '').trim();
@@ -12697,6 +12716,7 @@
         euro: Number.isFinite(euroNum) ? -Math.abs(euroNum) : null,
         usd: Number.isFinite(usdNum) ? -Math.abs(usdNum) : null,
         verified: Boolean(verified[ledgerId]),
+        with: withLabel,
         status: String(o.status || ''),
         details: String(o.purpose || ''),
       });
@@ -12893,7 +12913,7 @@
       .map((r) => {
         const ledgerId = escapeHtml(r.ledgerId);
         const statusLabel = String(r && r.status ? r.status : '').trim();
-        const withLabel = String(getGsLedgerDisplayValueForColumn(r, 'with') || '').trim();
+        const withLabel = normalizeWith(r && r.with ? r.with : '');
         const isApproved = statusLabel.toLowerCase() === 'approved';
         const isGtReview = statusLabel.toLowerCase() === 'review' && withLabel.toLowerCase() === 'grand treasurer';
         const trClass = isApproved ? 'gsLedgerRow--approved' : isGtReview ? 'gsLedgerRow--gtReview' : '';

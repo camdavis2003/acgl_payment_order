@@ -28,7 +28,9 @@
                   <span class="navIconBtn__lines" aria-hidden="true"></span>
                 </button>
                 <div class="headerTitleBlock">
-                  <h1 data-budget-title>Budget</h1>
+                  <div class="headerTitleRow">
+                    <h1 data-budget-title>Budget</h1>
+                  </div>
                   <p class="subhead" data-budget-subhead>
                     Budget overview table.
                   </p>
@@ -62,8 +64,27 @@
         <main class="container container--wide">
           <section class="card" aria-label="Budget table">
             <div class="list-header">
-              <h2 id="budget-list-title" data-budget-list-title>Budget</h2>
+              <div class="list-titleRow">
+                <h2 id="budget-list-title" data-budget-list-title>Budget</h2>
+              </div>
               <div class="list-actions">
+                <div class="headerTitleRow__toggle" aria-label="Checksums">
+                  <span class="headerTitleRow__toggleLabel">Checksums</span>
+                  <label class="switch" for="budgetChecksumsToggle">
+                    <input
+                      id="budgetChecksumsToggle"
+                      name="budgetChecksumsToggle"
+                      type="checkbox"
+                      class="switch__input"
+                      role="switch"
+                      aria-label="Show"
+                    />
+                    <span class="switch__track" aria-hidden="true"></span>
+                    <span class="switch__text" id="budgetChecksumsModeText"
+                      >Show</span
+                    >
+                  </label>
+                </div>
                 <button
                   type="button"
                   id="budgetSetActiveBtn"
@@ -213,7 +234,7 @@
             </div>
 
             <div
-              class="table-wrap budgetTableWrap"
+              class="table-wrap fixedFooterTableWrap budgetTableWrap"
               role="region"
               aria-label="Budget table"
               tabindex="0"

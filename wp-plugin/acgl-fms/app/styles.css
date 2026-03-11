@@ -7,6 +7,7 @@
   --border: #e5e7eb;
   --focus: #2563eb;
   --danger: #b91c1c;
+  --caution: #ffed29;
   --primary-bg: #111827;
   --primary-text: #ffffff;
   --table-head: #f9fafb;
@@ -26,6 +27,7 @@ html[data-theme="dark"] {
   --border: #263244;
   --focus: #60a5fa;
   --danger: #f87171;
+  --caution: #ffed29;
   --primary-bg: #111827;
   --primary-text: #ffffff;
   --table-head: #0b1324;
@@ -805,6 +807,29 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
   margin-bottom: 2px;
 }
 
+.headerTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.headerTitleRow .switch {
+  margin-top: 0;
+}
+
+.headerTitleRow__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.headerTitleRow__toggleLabel {
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .subhead {
   margin: 0 0 8px;
   color: var(--muted);
@@ -1193,6 +1218,15 @@ input:focus, textarea:focus, select:focus, button:focus {
   color: #000000;
   border-color: #000000;
 }
+
+/* Payment Orders: highlight Approved rows */
+#ordersTable tr.ordersRow--approved td {
+  background: var(--caution) !important;
+  color: var(--primary-bg) !important;
+}
+
+#ordersTable tr.ordersRow--approved a {
+  color: var(--primary-bg) !important;
 }
 
 .budgetTable th,
@@ -2001,11 +2035,30 @@ input:focus, textarea:focus, select:focus, button:focus {
   margin-bottom: 8px;
 }
 
+.list-titleRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.list-titleRow > h2 {
+  margin: 0;
+}
+
+.list-titleRow .switch {
+  margin-top: 0;
+}
+
 .list-actions {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.list-actions .switch {
+  margin-top: 0;
 }
 
 /* Itemize: a bit more space below Add Item/Add Milage buttons */
@@ -2533,11 +2586,26 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
+/* Ledger: highlight Approved Payment Orders */
+#gsLedgerTable tr.gsLedgerRow--approved td {
+  background: var(--caution);
+  color: var(--primary-bg);
+}
+
+#gsLedgerTable tr.gsLedgerRow--approved a {
+  color: var(--primary-bg);
+}
+
 /* Keep Ledger totals visually distinct while sticky */
 #gsLedgerTable tfoot td,
 #gsLedgerTable tfoot th {
   background: var(--surface);
   box-shadow: 0 -1px 0 var(--border);
+}
+
+/* Ledger footer label: left-align text only */
+#gsLedgerTable .ordersTotalsRow__label {
+  text-align: left;
 }
 
 /* wiseEUR footer labels: left-align text only */

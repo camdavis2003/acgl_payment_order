@@ -3071,7 +3071,6 @@ input[type='checkbox'].cb {
   padding-top: 8px;
   max-height: 220px;
   overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 /* Income (Edit) modal: keep the Save button visible even with long timelines */

@@ -7173,9 +7173,14 @@
         const isMissingRequired = hasOrderMissingRequiredValues(o);
         const statusLabel = getOrderStatusLabel(o);
         const isApproved = String(statusLabel || '').trim().toLowerCase() === 'approved';
+        const withLabel = getOrderWithLabel(o);
+        const isGtReview =
+          String(statusLabel || '').trim().toLowerCase() === 'review' &&
+          String(withLabel || '').trim().toLowerCase() === 'grand treasurer';
         const rowClasses = [];
         if (isMissingRequired) rowClasses.push('ordersRow--missingRequired');
         if (isApproved) rowClasses.push('ordersRow--approved');
+        if (isGtReview) rowClasses.push('ordersRow--gtReview');
         const rowClass = rowClasses.length ? ` class="${rowClasses.join(' ')}"` : '';
         return `
           <tr${rowClass} data-id="${escapeHtml(o.id)}">
@@ -12871,8 +12876,11 @@
     const html = (rows || [])
       .map((r) => {
         const ledgerId = escapeHtml(r.ledgerId);
-        const isApproved = String(r && r.status ? r.status : '').trim().toLowerCase() === 'approved';
-        const trClass = isApproved ? 'gsLedgerRow--approved' : '';
+        const statusLabel = String(r && r.status ? r.status : '').trim();
+        const withLabel = String(getGsLedgerDisplayValueForColumn(r, 'with') || '').trim();
+        const isApproved = statusLabel.toLowerCase() === 'approved';
+        const isGtReview = statusLabel.toLowerCase() === 'review' && withLabel.toLowerCase() === 'grand treasurer';
+        const trClass = isApproved ? 'gsLedgerRow--approved' : isGtReview ? 'gsLedgerRow--gtReview' : '';
         const date = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'date'));
         const budgetCode = getGsLedgerDisplayValueForColumn(r, 'budgetNumber');
         const code = extractInCodeFromBudgetNumberText(budgetCode);

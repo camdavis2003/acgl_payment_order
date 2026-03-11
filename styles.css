@@ -2530,6 +2530,16 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
+/* Payment Orders: keep Date on one line */
+#ordersTable th:nth-child(3) {
+  width: 128px;
+}
+
+#ordersTable th:nth-child(3),
+#ordersTable td:nth-child(3) {
+  white-space: nowrap;
+}
+
 /* wiseUSD: center all columns except Description */
 #wiseUsdTable th,
 #wiseUsdTable td {

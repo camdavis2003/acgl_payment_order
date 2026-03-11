@@ -1645,15 +1645,6 @@
         ],
       },
       {
-        key: 'income',
-        label: 'Income',
-        href: `income.html?year=${encodeURIComponent(String(resolvedYear))}`,
-        children: navYears.map((year) => ({
-          label: String(year),
-          href: `income.html?year=${encodeURIComponent(String(year))}`,
-        })),
-      },
-      {
         key: 'orders',
         label: 'Payment Orders',
         href: `menu.html?year=${encodeURIComponent(String(resolvedYear))}`,
@@ -1664,20 +1655,20 @@
       },
       {
         key: 'ledger',
-        label: 'Ledger',
-        href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
-        children: navYears.map((year) => ({
-          label: String(year),
-          href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
-        })),
-      },
-      {
-        key: 'ledger',
         label: 'Money Transfers',
         href: `money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`,
         children: navYears.map((year) => ({
           label: String(year),
           href: `money_transfers.html?year=${encodeURIComponent(String(year))}`,
+        })),
+      },
+      {
+        key: 'ledger',
+        label: 'Ledger',
+        href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: navYears.map((year) => ({
+          label: String(year),
+          href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
       { key: null, label: 'Archive', href: 'archive.html' },
@@ -13169,10 +13160,23 @@
     gsLedgerViewState.canVerify = Boolean(user && canWrite(user, 'ledger'));
 
     const exportCsvLink = document.getElementById('gsLedgerExportCsvLink');
+    const gsLedgerBankEurBtn = document.getElementById('gsLedgerBankEurBtn');
     const gsLedgerWiseEurBtn = document.getElementById('gsLedgerWiseEurBtn');
     const gsLedgerWiseUsdBtn = document.getElementById('gsLedgerWiseUsdBtn');
     const menuBtn = document.getElementById('gsLedgerActionsMenuBtn');
     const menuPanel = document.getElementById('gsLedgerActionsMenu');
+
+    if (gsLedgerBankEurBtn && !gsLedgerBankEurBtn.dataset.bound) {
+      gsLedgerBankEurBtn.dataset.bound = '1';
+      gsLedgerBankEurBtn.addEventListener('click', () => {
+        window.location.href = `income.html?year=${encodeURIComponent(String(year))}`;
+      });
+    }
+
+    if (gsLedgerBankEurBtn) {
+      gsLedgerBankEurBtn.textContent = `${year} BankEUR`;
+      gsLedgerBankEurBtn.title = `Open the ${year} BankEUR grid`;
+    }
 
     if (gsLedgerWiseEurBtn && !gsLedgerWiseEurBtn.dataset.bound) {
       gsLedgerWiseEurBtn.dataset.bound = '1';

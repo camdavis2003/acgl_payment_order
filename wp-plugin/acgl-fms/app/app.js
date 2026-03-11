@@ -3624,6 +3624,7 @@
   const downloadPdfBtn = document.getElementById('downloadPdfBtn');
 
   let currentViewedOrderId = null;
+  let hidePoProgressTooltip = () => {};
 
   // Request form CAPTCHA (client-side human check)
   let requestCaptchaExpected = null;
@@ -6749,8 +6750,8 @@
       createdAt,
       ...values,
       source,
-      status: normalizeOrderStatus(values && values.status),
-      with: normalizeWith(values && values.with),
+      status: 'Submitted',
+      with: 'Requestor',
     };
     return {
       ...built,
@@ -6759,6 +6760,8 @@
           at: createdAt,
           with: getOrderWithLabel(built),
           status: getOrderStatusLabel(built),
+          actorWith: getOrderWithLabel(built),
+          actorStatus: getOrderStatusLabel(built),
           user: getTimelineUsername(),
           action: 'Created',
           changes: computeOrderAuditChanges(null, built),
@@ -7104,9 +7107,15 @@
     const eventsHtml = timelineForDisplay
       .map((e) => {
         const t = formatIsoDateTimeShort(e.at);
+        const user = e.user !== undefined ? String(e.user || '—') : '—';
         const w = e.with !== undefined ? normalizeWith(e.with) : '—';
         const s = e.status !== undefined ? normalizeOrderStatus(e.status) : '—';
-        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>With: <strong>${escapeHtml(w)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Status: <strong>${escapeHtml(s)}</strong></span></div>`;
+        const commentRaw = e.comment !== undefined ? String(e.comment || '') : '';
+        const comment = commentRaw.trim();
+        const commentHtml = comment
+          ? `<span class="timelinegraph__eventSep">•</span><span>Comment: <strong>${escapeHtml(comment).replace(/\n/g, '<br>')}</strong></span>`
+          : '';
+        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>Modified by: <strong>${escapeHtml(user)}</strong></span><span class="timelinegraph__eventSep">•</span><span>With: <strong>${escapeHtml(w)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Status: <strong>${escapeHtml(s)}</strong></span>${commentHtml}</div>`;
       })
       .join('');
 
@@ -7507,6 +7516,268 @@
     updatePaymentOrdersHeaderIndicators();
   }
 
+  const PAYMENT_ORDER_PROGRESS_WITH_STEPS = ['Requestor', 'Grand Secretary', 'Grand Master', 'Grand Treasurer', 'Archives'];
+
+  function getPaymentOrderProgressLastTouchedEvent(order, withLabel) {
+    const effectiveWith = normalizeWith(withLabel);
+    const tl = Array.isArray(order && order.timeline) ? order.timeline : [];
+
+    for (let i = tl.length - 1; i >= 0; i -= 1) {
+      const evt = tl[i];
+      if (!evt) continue;
+      const actorWith = normalizeWith(evt.actorWith);
+      if (actorWith && actorWith === effectiveWith) {
+        return {
+          at: String(evt.at || ''),
+          status: normalizeOrderStatus(evt.actorStatus),
+          comment: String(evt.comment || ''),
+          user: String(evt.user || ''),
+          actorWith,
+          with: normalizeWith(evt.with),
+        };
+      }
+
+      const evtWith = normalizeWith(evt.with);
+      if (evtWith === effectiveWith) {
+        return {
+          at: String(evt.at || ''),
+          status: normalizeOrderStatus(evt.status),
+          comment: String(evt.comment || ''),
+          user: String(evt.user || ''),
+          actorWith: normalizeWith(evt.actorWith),
+          with: evtWith,
+        };
+      }
+    }
+
+    return {
+      at: String((order && order.updatedAt) || (order && order.createdAt) || ''),
+      status: normalizeOrderStatus(order && order.status),
+      comment: '',
+      user: '',
+      actorWith: '',
+      with: effectiveWith,
+    };
+  }
+
+  function initPoProgressStatusTooltips(progressRoot) {
+    if (!progressRoot || progressRoot.dataset.poProgressTooltipBound) return;
+    progressRoot.dataset.poProgressTooltipBound = '1';
+
+    const TOOLTIP_SELECTOR = '[data-po-tooltip]';
+    const margin = 12;
+    const gap = 10;
+    let tooltipEl = null;
+    let activeTarget = null;
+    let rafId = 0;
+
+    const ensureTooltipEl = () => {
+      if (tooltipEl) return tooltipEl;
+      tooltipEl = document.createElement('div');
+      tooltipEl.className = 'floatingTooltip';
+      tooltipEl.setAttribute('role', 'tooltip');
+      tooltipEl.style.display = 'none';
+      document.body.appendChild(tooltipEl);
+      return tooltipEl;
+    };
+
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+    const positionTooltipFor = (target) => {
+      if (!target || !document.contains(target)) return;
+      const text = String(target.getAttribute('data-po-tooltip') || '').trim();
+      if (!text) return;
+
+      const el = ensureTooltipEl();
+      el.textContent = text;
+      el.style.display = 'block';
+      el.style.visibility = 'hidden';
+      el.style.left = '0px';
+      el.style.top = '0px';
+
+      const targetRect = target.getBoundingClientRect();
+
+      // Measure tooltip with the new content
+      const tipRect = el.getBoundingClientRect();
+      const maxLeft = window.innerWidth - margin - tipRect.width;
+      const idealLeft = targetRect.left + (targetRect.width / 2) - (tipRect.width / 2);
+      const left = clamp(idealLeft, margin, maxLeft);
+
+      const belowTop = targetRect.bottom + gap;
+      const aboveTop = targetRect.top - gap - tipRect.height;
+      const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
+      const fitsAbove = aboveTop >= margin;
+
+      let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
+      top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
+
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+      el.style.visibility = 'visible';
+    };
+
+    const scheduleReposition = () => {
+      if (!activeTarget) return;
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        positionTooltipFor(activeTarget);
+      });
+    };
+
+    const hide = () => {
+      activeTarget = null;
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      if (tooltipEl) {
+        tooltipEl.style.display = 'none';
+        tooltipEl.textContent = '';
+      }
+    };
+
+    hidePoProgressTooltip = hide;
+
+    const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
+
+    progressRoot.addEventListener('mouseover', (e) => {
+      const t = findTarget(e.target);
+      if (!t) return;
+      if (activeTarget === t) return;
+      activeTarget = t;
+      positionTooltipFor(activeTarget);
+    });
+
+    progressRoot.addEventListener('mouseout', (e) => {
+      if (!activeTarget) return;
+      const from = findTarget(e.target);
+      if (!from || from !== activeTarget) return;
+      const to = e.relatedTarget;
+      if (to && from.contains && from.contains(to)) return;
+      hide();
+    });
+
+    progressRoot.addEventListener('focusin', (e) => {
+      const t = findTarget(e.target);
+      if (!t) return;
+      activeTarget = t;
+      positionTooltipFor(activeTarget);
+    });
+
+    progressRoot.addEventListener('focusout', (e) => {
+      const from = findTarget(e.target);
+      if (!from) return;
+      hide();
+    });
+
+    if (!window.__acglPoProgressTooltipResizeBound) {
+      window.__acglPoProgressTooltipResizeBound = true;
+      window.addEventListener('resize', scheduleReposition);
+      window.addEventListener('scroll', scheduleReposition, { passive: true });
+    }
+  }
+
+  function getPaymentOrderProgressStepAbbrev(step) {
+    const s = normalizeWith(step);
+    if (s === 'Grand Secretary') return 'GS';
+    if (s === 'Grand Master') return 'GM';
+    if (s === 'Grand Treasurer') return 'GT';
+    if (s === 'Requestor') return 'REQ';
+    if (s === 'Archives') return 'ARC';
+    return String(step || '').trim().slice(0, 3).toUpperCase();
+  }
+
+  function renderPaymentOrderProgressGraphHtml({ order, withLabel, statusLabel, actorOverride }) {
+    const effectiveWith = normalizeWith(withLabel);
+    const idxRaw = PAYMENT_ORDER_PROGRESS_WITH_STEPS.findIndex((w) => w === effectiveWith);
+    const activeIdx = idxRaw >= 0 ? idxRaw : 0;
+    const activeStatus = normalizeOrderStatus(statusLabel);
+
+    const tl = Array.isArray(order && order.timeline) ? order.timeline : [];
+    let maxReachedIdx = activeIdx;
+    for (let i = 0; i < tl.length; i += 1) {
+      const evt = tl[i];
+      if (!evt) continue;
+      const labels = [evt.with, evt.actorWith];
+      for (const lbl of labels) {
+        const w = normalizeWith(lbl);
+        const idx = PAYMENT_ORDER_PROGRESS_WITH_STEPS.findIndex((x) => x === w);
+        if (idx > maxReachedIdx) maxReachedIdx = idx;
+      }
+    }
+
+    // Progressive + monotonic: show steps up to the farthest stage ever reached.
+    // If the PO is Returned, do not remove later bubbles.
+    const occurred = PAYMENT_ORDER_PROGRESS_WITH_STEPS.slice(0, maxReachedIdx + 1);
+
+    const pieces = [];
+    for (let i = 0; i < occurred.length; i += 1) {
+      const step = occurred[i];
+      const state = i === activeIdx ? 'is-active' : 'is-done';
+
+      const touched = getPaymentOrderProgressLastTouchedEvent(order, step);
+      const overrideForStep = actorOverride
+        && normalizeWith(actorOverride.with) === normalizeWith(step)
+        && String(actorOverride.status || '').trim()
+        ? actorOverride
+        : null;
+
+      const metaStatus = i === activeIdx
+        ? activeStatus
+        : (overrideForStep ? normalizeOrderStatus(overrideForStep.status) : (touched.status || '—'));
+      const metaDate = formatIsoDateOnly(overrideForStep ? overrideForStep.at : touched.at);
+
+      const statusTooltipText = (() => {
+        const st = normalizeOrderStatus(metaStatus);
+        if (st !== 'Returned' && st !== 'Rejected') return '';
+
+        const who = normalizeWith(touched && touched.actorWith);
+        const whoUser = String((touched && touched.user) || '').trim();
+        const whoLabel = who ? (whoUser ? `${who} (${whoUser})` : who) : (whoUser || '');
+
+        if (st === 'Returned') {
+          const returnedTo = normalizeWith(touched && touched.with) || normalizeWith(step) || '—';
+          const returnedBy = who || '—';
+          const comment = String((touched && touched.comment) || '').replace(/\s+/g, ' ').trim() || '—';
+          return `Returned to the ${returnedTo} by the ${returnedBy} for the following reason: ${comment}`;
+        }
+
+        if (st === 'Rejected') {
+          const comment = String((touched && touched.comment) || '').replace(/\s+/g, ' ').trim();
+          const base = whoLabel ? `Rejected by ${whoLabel}` : 'Rejected';
+          return comment ? `${base}: ${comment}` : base;
+        }
+
+        return '';
+      })();
+
+      const statusText = escapeHtml(metaStatus || '—');
+      const statusHtml = statusTooltipText
+        ? `<span class="poProgress__status" data-po-tooltip="${escapeHtml(statusTooltipText)}" tabindex="0">${statusText}</span>`
+        : statusText;
+
+      const meta = `<div class="poProgress__meta"><div>${statusHtml}</div><div>${escapeHtml(metaDate || '—')}</div></div>`;
+
+      pieces.push(`
+        <div class="poProgress__node ${state}" role="listitem">
+          <div class="poProgress__pill" title="${escapeHtml(step)}" aria-label="${escapeHtml(step)}">${escapeHtml(getPaymentOrderProgressStepAbbrev(step))}</div>
+          ${meta}
+        </div>
+      `);
+
+      if (i !== occurred.length - 1) {
+        pieces.push('<div class="poProgress__connector" aria-hidden="true"></div>');
+      }
+    }
+
+    return `
+      <div class="poProgress__track" role="list" aria-label="Payment Order workflow progress">
+        ${pieces.join('')}
+      </div>
+    `;
+  }
+
   function updatePaymentOrdersHeaderIndicators() {
     const menus = Array.from(document.querySelectorAll('[data-th-menu][data-col-key]'));
     for (const menu of menus) {
@@ -7885,10 +8156,14 @@
     }).join('');
 
     const currentWith = getOrderWithLabel(orderForView);
-    const withOptions = WITH_OPTIONS.map((w) => {
-      const selected = w === currentWith ? ' selected' : '';
-      return `<option value="${escapeHtml(w)}"${selected}>${escapeHtml(w)}</option>`;
-    }).join('');
+    const withPlaceholderSelected = !String(currentWith || '').trim() ? ' selected' : '';
+    const withOptions = [
+      `<option value=""${withPlaceholderSelected}>— Select —</option>`,
+      ...WITH_OPTIONS.map((w) => {
+        const selected = w === currentWith ? ' selected' : '';
+        return `<option value="${escapeHtml(w)}"${selected}>${escapeHtml(w)}</option>`;
+      }),
+    ].join('');
 
     const currentSourceRaw = String(orderForView.source || '').trim();
     const hasSource = currentSourceRaw !== '';
@@ -7950,9 +8225,25 @@
           </div>
         </dd>
         <dt>Created</dt><dd>${escapeHtml(orderForView.createdAt)}</dd>
+        <dt class="kv__gapTop">Comments</dt>
+        <dd class="kv__gapTop">
+          <textarea id="modalComments" rows="4" aria-label="Comments"></textarea>
+          <div class="error" id="error-modalComments" role="alert" aria-live="polite"></div>
+        </dd>
       </dl>
       ${renderTimelineGraph(orderForView)}
     `.trim();
+
+    const progressHost = modal.querySelector('#modalPoProgress');
+    if (progressHost) {
+      progressHost.innerHTML = renderPaymentOrderProgressGraphHtml({
+        order: orderForView,
+        withLabel: (currentStatus === 'Paid') ? 'Archives' : currentWith,
+        statusLabel: currentStatus,
+        actorOverride: null,
+      });
+      initPoProgressStatusTooltips(progressHost);
+    }
 
     // Populate attachments asynchronously.
     (async () => {
@@ -7992,10 +8283,85 @@
     modal.setAttribute('data-original-status', currentStatus);
     if (!hasSource) modal.setAttribute('data-original-source', currentSource);
 
+    const commentsEl = modalBody.querySelector('#modalComments');
+    const commentsErrEl = modalBody.querySelector('#error-modalComments');
+
+    const updateCommentsRequirement = () => {
+      const ss = modalBody.querySelector('#modalStatusSelect');
+      const statusNow = ss ? normalizeOrderStatus(ss.value) : currentStatus;
+      const required = statusNow === 'Returned' || statusNow === 'Rejected';
+      if (!commentsEl) return;
+
+      if (required) {
+        commentsEl.setAttribute('required', 'required');
+        commentsEl.setAttribute('aria-required', 'true');
+      } else {
+        commentsEl.removeAttribute('required');
+        commentsEl.setAttribute('aria-required', 'false');
+        if (commentsErrEl) commentsErrEl.textContent = '';
+      }
+    };
+
+    if (commentsEl) {
+      commentsEl.addEventListener('input', () => {
+        if (!commentsErrEl) return;
+        const ss = modalBody.querySelector('#modalStatusSelect');
+        const statusNow = ss ? normalizeOrderStatus(ss.value) : currentStatus;
+        const required = statusNow === 'Returned' || statusNow === 'Rejected';
+        if (!required) {
+          commentsErrEl.textContent = '';
+          return;
+        }
+        const comment = String(commentsEl.value || '').trim();
+        if (comment) commentsErrEl.textContent = '';
+      });
+    }
+
+    updateCommentsRequirement();
+
+    const refreshPoProgress = () => {
+      const progressEl = modal.querySelector('#modalPoProgress');
+      if (!progressEl) return;
+
+      const ss = modalBody.querySelector('#modalStatusSelect');
+      const ws = modalBody.querySelector('#modalWithSelect');
+      const statusNow = ss ? normalizeOrderStatus(ss.value) : currentStatus;
+
+      let withNow = ws ? normalizeWith(ws.value) : currentWith;
+      if (!String(withNow || '').trim() && statusNow === 'Returned') {
+        withNow = normalizeWith(modal.getAttribute('data-original-with') || currentWith);
+      }
+      if (statusNow === 'Rejected') withNow = 'Requestor';
+      if (statusNow === 'Paid') withNow = 'Archives';
+
+      const actorOverride = (() => {
+        const ow = normalizeWith(modal.getAttribute('data-pending-actor-with') || '');
+        const os = normalizeOrderStatus(modal.getAttribute('data-pending-actor-status') || '');
+        const at = String(modal.getAttribute('data-pending-actor-at') || '').trim();
+        if (!ow || !os) return null;
+        return { with: ow, status: os, at: at || new Date().toISOString() };
+      })();
+
+      progressEl.innerHTML = renderPaymentOrderProgressGraphHtml({
+        order: orderForView,
+        withLabel: withNow,
+        statusLabel: statusNow,
+        actorOverride,
+      });
+      initPoProgressStatusTooltips(progressEl);
+    };
+
     const statusSelect = modalBody.querySelector('#modalStatusSelect');
     if (statusSelect) {
       statusSelect.addEventListener('change', () => {
         const nextStatus = normalizeOrderStatus(statusSelect.value);
+
+        // Capture what the current "With" selected BEFORE workflow auto-changes.
+        const wsEarly = modalBody.querySelector('#modalWithSelect');
+        const actorWithEarly = wsEarly ? normalizeWith(wsEarly.value) : currentWith;
+        modal.setAttribute('data-pending-actor-with', actorWithEarly);
+        modal.setAttribute('data-pending-actor-status', nextStatus);
+        modal.setAttribute('data-pending-actor-at', new Date().toISOString());
 
         // Guardrail: cannot set Approved/Paid unless a valid Budget Number exists.
         const outCode = extractOutCodeFromBudgetNumberText(orderForView.budgetNumber);
@@ -8009,15 +8375,117 @@
 
         statusSelect.value = nextStatus;
         modal.setAttribute('data-pending-status', nextStatus);
+  updateCommentsRequirement();
+
+        const ws = modalBody.querySelector('#modalWithSelect');
+        if (!ws) return;
+
+        if (nextStatus === 'Rejected') {
+          ws.value = 'Requestor';
+          modal.setAttribute('data-pending-with', 'Requestor');
+          refreshPoProgress();
+          return;
+        }
+
+        if (nextStatus === 'Returned') {
+          ws.value = '';
+          modal.setAttribute('data-pending-with', '');
+          try {
+            ws.focus();
+          } catch {
+            // ignore
+          }
+          refreshPoProgress();
+          return;
+        }
+
+        if (nextStatus === 'Paid') {
+          ws.value = 'Archives';
+          modal.setAttribute('data-pending-with', 'Archives');
+          refreshPoProgress();
+          return;
+        }
+
+        if (nextStatus === 'Approved') {
+          const currentWithNow = normalizeWith(ws.value);
+          if (currentWithNow === 'Grand Secretary') {
+            ws.value = 'Grand Master';
+            modal.setAttribute('data-pending-with', 'Grand Master');
+            statusSelect.value = 'Review';
+            modal.setAttribute('data-pending-status', 'Review');
+            refreshPoProgress();
+            return;
+          }
+          if (currentWithNow === 'Grand Master') {
+            ws.value = 'Grand Treasurer';
+            modal.setAttribute('data-pending-with', 'Grand Treasurer');
+            statusSelect.value = 'Review';
+            modal.setAttribute('data-pending-status', 'Review');
+          }
+        }
+
+        refreshPoProgress();
       });
     }
 
     const withSelect = modalBody.querySelector('#modalWithSelect');
     if (withSelect) {
       withSelect.addEventListener('change', () => {
-        const nextWith = normalizeWith(withSelect.value);
+        // Capture the user's pre-workflow intent for the bubble corresponding to who currently has it.
+        const actorWithEarly = normalizeWith(modal.getAttribute('data-original-with') || withSelect.value);
+        const actorStatusEarly = statusSelect ? normalizeOrderStatus(statusSelect.value) : currentStatus;
+        modal.setAttribute('data-pending-actor-with', actorWithEarly);
+        modal.setAttribute('data-pending-actor-status', actorStatusEarly);
+        modal.setAttribute('data-pending-actor-at', new Date().toISOString());
+
+        const raw = String(withSelect.value || '').trim();
+        const nextWith = raw ? normalizeWith(raw) : '';
         withSelect.value = nextWith;
         modal.setAttribute('data-pending-with', nextWith);
+
+        updateCommentsRequirement();
+
+        if (!statusSelect) {
+          refreshPoProgress();
+          return;
+        }
+
+        const currentStatus = normalizeOrderStatus(statusSelect.value);
+
+        // Status-driven workflow rules should always win.
+        if (currentStatus === 'Rejected') {
+          withSelect.value = 'Requestor';
+          modal.setAttribute('data-pending-with', 'Requestor');
+          refreshPoProgress();
+          return;
+        }
+
+        if (currentStatus === 'Paid') {
+          withSelect.value = 'Archives';
+          modal.setAttribute('data-pending-with', 'Archives');
+          refreshPoProgress();
+          return;
+        }
+
+        // With-driven workflow rules
+        if (nextWith === 'Grand Secretary' && currentStatus !== 'Returned') {
+          if (currentStatus === 'Approved') {
+            withSelect.value = 'Grand Master';
+            modal.setAttribute('data-pending-with', 'Grand Master');
+            statusSelect.value = 'Review';
+            modal.setAttribute('data-pending-status', 'Review');
+          } else if (currentStatus !== 'Review') {
+            statusSelect.value = 'Review';
+            modal.setAttribute('data-pending-status', 'Review');
+          }
+        } else if (nextWith === 'Grand Master' && currentStatus === 'Approved') {
+          withSelect.value = 'Grand Treasurer';
+          modal.setAttribute('data-pending-with', 'Grand Treasurer');
+          statusSelect.value = 'Review';
+          modal.setAttribute('data-pending-status', 'Review');
+        }
+
+        refreshPoProgress();
       });
     }
 
@@ -8062,6 +8530,7 @@
 
   function closeModal() {
     if (!modal || !modalBody) return;
+    hidePoProgressTooltip();
     modal.classList.remove('is-open');
     modal.setAttribute('aria-hidden', 'true');
     modalBody.innerHTML = '';
@@ -8071,6 +8540,8 @@
     if (modalHeaderBudget) modalHeaderBudget.textContent = '';
     const modalHeaderDate = modal.querySelector('#modalHeaderDate');
     if (modalHeaderDate) modalHeaderDate.textContent = '';
+    const modalPoProgress = modal.querySelector('#modalPoProgress');
+    if (modalPoProgress) modalPoProgress.innerHTML = '';
     currentViewedOrderId = null;
     modal.removeAttribute('data-order-id');
     modal.removeAttribute('data-pending-with');
@@ -8079,6 +8550,9 @@
     modal.removeAttribute('data-original-with');
     modal.removeAttribute('data-original-status');
     modal.removeAttribute('data-original-source');
+    modal.removeAttribute('data-pending-actor-with');
+    modal.removeAttribute('data-pending-actor-status');
+    modal.removeAttribute('data-pending-actor-at');
   }
 
   function beginEditingOrder(order) {
@@ -21412,14 +21886,65 @@
       const withSelect = modalBody ? modalBody.querySelector('#modalWithSelect') : null;
       const statusSelect = modalBody ? modalBody.querySelector('#modalStatusSelect') : null;
       const sourceSelect = modalBody ? modalBody.querySelector('#modalSourceSelect') : null;
+      const commentsEl = modalBody ? modalBody.querySelector('#modalComments') : null;
+      const commentsErrEl = modalBody ? modalBody.querySelector('#error-modalComments') : null;
 
       if (latest && withSelect && statusSelect) {
-        const nextWith = normalizeWith(withSelect.value);
-        const nextStatus = normalizeOrderStatus(statusSelect.value);
+        const comment = commentsEl ? String(commentsEl.value || '').trim() : '';
+        if (commentsErrEl) commentsErrEl.textContent = '';
+
+        const prevWith = getOrderWithLabel(latest);
+        const prevStatus = normalizeOrderStatus(getOrderStatusLabel(latest));
+
+        const rawWith = String(withSelect.value || '').trim();
+        const requestedWith = rawWith ? normalizeWith(rawWith) : '';
+        const requestedStatus = normalizeOrderStatus(statusSelect.value);
+
+        let nextWith = requestedWith;
+        let nextStatus = requestedStatus;
+
+        if (!nextWith && nextStatus !== 'Returned') nextWith = prevWith;
+
+        if (nextStatus === 'Rejected') {
+          nextWith = 'Requestor';
+        } else if (nextStatus === 'Returned') {
+          // With must be selected explicitly (who it is returned to).
+        } else if (nextStatus === 'Paid') {
+          nextWith = 'Archives';
+        } else {
+          if (nextWith === 'Grand Secretary' && nextStatus === 'Approved') {
+            nextWith = 'Grand Master';
+            nextStatus = 'Review';
+          } else if (nextWith === 'Grand Secretary' && nextStatus !== 'Review') {
+            nextStatus = 'Review';
+          } else if (nextWith === 'Grand Master' && nextStatus === 'Approved') {
+            nextWith = 'Grand Treasurer';
+            nextStatus = 'Review';
+          }
+        }
+
+        if (nextStatus === 'Returned' && !String(nextWith || '').trim()) {
+          window.alert('Select who this request is returned to.');
+          try {
+            withSelect.focus();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
+        const commentRequired = nextStatus === 'Returned' || nextStatus === 'Rejected';
+        if (commentRequired && !comment) {
+          if (commentsErrEl) commentsErrEl.textContent = 'Comments are required for Returned or Rejected.';
+          try {
+            if (commentsEl) commentsEl.focus();
+          } catch {
+            // ignore
+          }
+          return;
+        }
         const prevSource = normalizeOrderSource(latest.source);
         const nextSource = sourceSelect ? (normalizeOrderSource(sourceSelect.value) || prevSource) : prevSource;
-
-        const prevStatus = normalizeOrderStatus(getOrderStatusLabel(latest));
 
         // Guardrail: cannot change Status to Approved/Paid unless Budget Number is set.
         const changingToImpact = (nextStatus === 'Approved' || nextStatus === 'Paid') && nextStatus !== getOrderStatusLabel(latest);
@@ -21436,7 +21961,8 @@
         const changed =
           nextWith !== getOrderWithLabel(latest) ||
           nextStatus !== getOrderStatusLabel(latest) ||
-          nextSource !== prevSource;
+          nextSource !== prevSource ||
+          Boolean(comment);
         if (changed) {
           const nowIso = new Date().toISOString();
           const draftNext = {
@@ -21447,15 +21973,21 @@
             updatedAt: nowIso,
           };
           const changes = computeOrderAuditChanges(latest, draftNext);
+          if (comment) {
+            changes.push({ field: 'Comments', from: '—', to: comment });
+          }
           let updated = {
             ...draftNext,
             timeline: appendTimelineEvent(latest, {
               at: nowIso,
               with: nextWith,
               status: nextStatus,
+              actorWith: prevWith,
+              actorStatus: requestedStatus,
               user: getTimelineUsername(),
               action: 'Edited',
               changes,
+              comment: comment || undefined,
             }),
           };
 

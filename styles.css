@@ -1106,23 +1106,23 @@ input:focus, textarea:focus, select:focus, button:focus {
   table-layout: fixed;
 }
 
-/* Budget table: stable scrolling with sticky header.
-   The wrapper scrolls vertically, while the <th> cells stay pinned. */
+/* Budget table: stable scrolling with sticky header. */
 .budgetTableWrap {
-  max-height: 60vh;
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
   overflow: auto;
 }
 
 /* Payment Orders: stable scrolling with sticky header (match Budget list style) */
 .ordersTableWrap {
-  max-height: 60vh;
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
   overflow: auto;
 }
 
 /* Income: stable scrolling with sticky header (match Budget/Payment Orders style) */
 .incomeTableWrap {
-  max-height: 60vh;
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
   overflow: auto;
+}
 
 /* Income: highlight rows missing Budget Number */
 .incomeRow--missingBudget td {
@@ -1152,6 +1152,46 @@ input:focus, textarea:focus, select:focus, button:focus {
 .incomeRow--missingBudget .btn--editBlue:hover {
   background: var(--surface);
   filter: brightness(0.98);
+}
+
+/* Payment Orders: highlight rows missing required fields */
+.ordersRow--missingRequired td {
+  background: var(--danger);
+  color: var(--primary-text);
+}
+
+.ordersRow--missingRequired a {
+  color: var(--primary-text);
+}
+
+.ordersRow--missingRequired td.col-delete {
+  background: var(--danger);
+}
+
+.ordersRow--missingRequired .btn {
+  color: var(--primary-text);
+  border-color: var(--primary-text);
+}
+
+.ordersRow--missingRequired .btn--x:hover {
+  background: transparent;
+  color: var(--primary-text);
+}
+
+.ordersRow--missingRequired .btn--editBlue {
+  background: var(--surface);
+  border-color: var(--focus);
+  color: var(--focus);
+}
+
+.ordersRow--missingRequired .btn--editBlue:hover {
+  background: var(--surface);
+  filter: brightness(0.98);
+}
+
+.ordersRow--missingRequired .btn--viewGrey {
+  color: #000000;
+  border-color: #000000;
 }
 }
 
@@ -2026,6 +2066,13 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
 }
 
+/* Opt-in: lock table header/footer while rows scroll inside wrapper */
+.table-wrap.fixedFooterTableWrap {
+  max-height: clamp(260px, calc(100dvh - 280px), 78vh);
+  overflow: auto;
+  position: relative;
+}
+
 /* Admin Settings: avoid nested vertical scrollbars inside settings cards.
    Let the card body scroll vertically; keep table-wrap for horizontal scrolling only. */
 main.archive__grid > section.card > .settingsCardBody .table-wrap {
@@ -2035,7 +2082,8 @@ main.archive__grid > section.card > .settingsCardBody .table-wrap {
 
 .table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   min-width: 820px;
   background: var(--surface);
 }
@@ -2054,11 +2102,17 @@ main.archive__grid > section.card > .settingsCardBody .table-wrap {
   vertical-align: middle;
 }
 
-.table thead th {
+.table thead {
   position: sticky;
   top: 0;
+  z-index: 3;
   background: var(--table-head);
-  z-index: 1;
+  box-shadow: 0 8px 12px -10px rgba(0, 0, 0, 0.35);
+}
+
+.table thead th {
+  position: static;
+  background: var(--table-head);
   text-align: left;
   font-size: 0.95rem;
 }
@@ -2212,12 +2266,12 @@ body.isTableResizing {
 
 /* Payment Orders header background like Budget table */
 #ordersTable thead th {
-  background: var(--surface);
+  background: var(--table-head);
 }
 
 /* Income header background like Budget table */
 #incomeTable thead th {
-  background: var(--surface);
+  background: var(--table-head);
 }
 
 #incomeTable td.num,
@@ -2270,13 +2324,23 @@ body.isTableResizing {
   opacity: 1;
 }
 
+.table tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--table-head);
+  box-shadow: 0 -8px 12px -10px rgba(0, 0, 0, 0.35);
+}
+
 .table tfoot td {
+  position: static;
   background: var(--table-head);
   font-weight: 600;
   border-top: 2px solid var(--border);
 }
 
 .table tfoot th {
+  position: static;
   background: var(--table-head);
   font-weight: 600;
   border-top: 2px solid var(--border);
@@ -2455,9 +2519,9 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
-/* Creditor/Debtor (3rd) and Details (10th) stay left-aligned */
-#gsLedgerTable th:nth-child(3),
-#gsLedgerTable td:nth-child(3),
+/* Creditor/Debtor (4th) and Details (10th) stay left-aligned */
+#gsLedgerTable th:nth-child(4),
+#gsLedgerTable td:nth-child(4),
 #gsLedgerTable th:nth-child(10),
 #gsLedgerTable td:nth-child(10) {
   text-align: left;
@@ -2467,6 +2531,13 @@ input[type='checkbox'].cb {
 #gsLedgerTable td.num,
 #gsLedgerTable th.num {
   text-align: center;
+}
+
+/* Keep Ledger totals visually distinct while sticky */
+#gsLedgerTable tfoot td,
+#gsLedgerTable tfoot th {
+  background: var(--surface);
+  box-shadow: 0 -1px 0 var(--border);
 }
 
 /* wiseEUR footer labels: left-align text only */
@@ -2640,6 +2711,63 @@ input[type='checkbox'].cb {
 
 .modal__nameLabel {
   font-size: 1.15rem;
+}
+
+.mergeNote {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.mergeGrid {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr;
+  gap: 10px 12px;
+  align-items: start;
+  justify-items: start;
+}
+
+.mergeGrid__head {
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.mergeGrid__label {
+  font-weight: 600;
+}
+
+.mergeOption {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  column-gap: 10px;
+  align-items: start;
+  justify-items: start;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+}
+
+.mergeOption input {
+  margin: 2px 0 0;
+}
+
+.mergeOption__value {
+  text-align: left;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .mergeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .mergeGrid__head {
+    display: none;
+  }
 }
 
 /* View modal timeline bar */

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=0df6aa8-20260228170133" />
+    <link rel="stylesheet" href="styles.css?v=f4c42ca-20260311084352" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -116,7 +116,7 @@
             </div>
 
             <div
-              class="table-wrap ordersTableWrap"
+              class="table-wrap ordersTableWrap fixedFooterTableWrap"
               role="region"
               aria-label="Payment orders table"
               tabindex="0"
@@ -153,6 +153,15 @@
                       data-sort-key="date"
                     >
                       Date
+                    </th>
+                    <th
+                      scope="col"
+                      class="is-sortable"
+                      tabindex="0"
+                      aria-sort="none"
+                      data-sort-key="source"
+                    >
+                      Source
                     </th>
                     <th
                       scope="col"
@@ -226,7 +235,7 @@
                 <tfoot>
                   <tr class="ordersTotalsRow">
                     <td class="col-delete"></td>
-                    <td colspan="3" class="ordersTotalsRow__label">
+                    <td colspan="4" class="ordersTotalsRow__label">
                       Unapproved Total
                     </td>
                     <td class="num" id="ordersTotalUnapprovedEuro"></td>
@@ -235,7 +244,7 @@
                   </tr>
                   <tr class="ordersTotalsRow">
                     <td class="col-delete"></td>
-                    <td colspan="3" class="ordersTotalsRow__label">
+                    <td colspan="4" class="ordersTotalsRow__label">
                       Approved Total
                     </td>
                     <td class="num" id="ordersTotalApprovedEuro"></td>
@@ -244,7 +253,7 @@
                   </tr>
                   <tr class="ordersTotalsRow">
                     <td class="col-delete"></td>
-                    <td colspan="3" class="ordersTotalsRow__label">
+                    <td colspan="4" class="ordersTotalsRow__label">
                       Grand Total
                     </td>
                     <td class="num" id="ordersTotalGrandEuro"></td>
@@ -305,7 +314,7 @@
       </div>
     </div>
 
-    <script src="pdf-lib.min.js?v=0df6aa8-20260228170133" defer></script>
-    <script src="app.js?v=0df6aa8-20260228170133" defer></script>
+    <script src="pdf-lib.min.js?v=f4c42ca-20260311084352" defer></script>
+    <script src="app.js?v=f4c42ca-20260311084352" defer></script>
   </body>
 </html>

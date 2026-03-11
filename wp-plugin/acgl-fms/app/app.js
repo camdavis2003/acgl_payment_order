@@ -3566,22 +3566,6 @@
   const gsLedgerEmptyState = document.getElementById('gsLedgerEmptyState');
   const gsLedgerClearSearchBtn = document.getElementById('gsLedgerClearSearchBtn');
 
-  // Money Transfers page
-  const moneyTransfersTbody = document.getElementById('moneyTransfersTbody');
-  const moneyTransfersEmptyState = document.getElementById('moneyTransfersEmptyState');
-  const moneyTransfersClearSearchBtn = document.getElementById('moneyTransfersClearSearchBtn');
-
-  const mtRangeModal = document.getElementById('mtRangeModal');
-  const mtRangeStartInput = document.getElementById('mtRangeStart');
-  const mtRangeEndInput = document.getElementById('mtRangeEnd');
-  const mtRangeErrorEl = document.getElementById('mtRangeError');
-  const mtRangeSubmitBtn = document.getElementById('mtRangeSubmitBtn');
-
-  // Money Transfer builder page
-  const mtBuilderTbody = document.getElementById('mtBuilderTbody');
-  const mtBuilderEmptyState = document.getElementById('mtBuilderEmptyState');
-  const mtBuilderClearSearchBtn = document.getElementById('mtBuilderClearSearchBtn');
-
   const themeToggle = document.getElementById('themeToggle');
 
   // Request form (index.html) header auth button
@@ -3703,6 +3687,22 @@
 
   let currentViewedOrderId = null;
   let hidePoProgressTooltip = () => {};
+
+  // Money Transfers page
+  const moneyTransfersTbody = document.getElementById('moneyTransfersTbody');
+  const moneyTransfersEmptyState = document.getElementById('moneyTransfersEmptyState');
+  const moneyTransfersClearSearchBtn = document.getElementById('moneyTransfersClearSearchBtn');
+
+  const mtRangeModal = document.getElementById('mtRangeModal');
+  const mtRangeStartInput = document.getElementById('mtRangeStart');
+  const mtRangeEndInput = document.getElementById('mtRangeEnd');
+  const mtRangeErrorEl = document.getElementById('mtRangeError');
+  const mtRangeSubmitBtn = document.getElementById('mtRangeSubmitBtn');
+
+  // Money Transfer builder page
+  const mtBuilderTbody = document.getElementById('mtBuilderTbody');
+  const mtBuilderEmptyState = document.getElementById('mtBuilderEmptyState');
+  const mtBuilderClearSearchBtn = document.getElementById('mtBuilderClearSearchBtn');
 
   // Request form CAPTCHA (client-side human check)
   let requestCaptchaExpected = null;
@@ -14911,6 +14911,7 @@
     const incomeImportCsvLink = document.getElementById('incomeImportCsvLink');
     const incomeMenuBtn = document.getElementById('incomeActionsMenuBtn');
     const incomeMenuPanel = document.getElementById('incomeActionsMenu');
+    const incomeBackToLedgerLink = document.getElementById('incomeBackToLedgerLink');
 
     function setLinkDisabled(linkEl, disabled) {
       if (!linkEl) return;
@@ -14937,6 +14938,10 @@
     if (titleEl) titleEl.textContent = `${year} Income`;
     const listTitleEl = document.querySelector('[data-income-list-title]');
     if (listTitleEl) listTitleEl.textContent = `${year} Income`;
+    if (incomeBackToLedgerLink) {
+      incomeBackToLedgerLink.href = `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`;
+      incomeBackToLedgerLink.textContent = `← Back to ${year} Ledger`;
+    }
     applyAppTabTitle();
 
     initIncomeColumnSorting();

@@ -1699,10 +1699,28 @@
         key: 'ledger',
         label: 'Ledger',
         href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
-        children: navYears.map((year) => ({
-          label: String(year),
-          href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
-        })),
+        children: [
+          ...(hasPermission(currentUser, 'income')
+            ? [
+              {
+                label: 'BankEUR',
+                href: `income.html?year=${encodeURIComponent(String(resolvedYear))}`,
+              },
+            ]
+            : []),
+          {
+            label: 'wiseEUR',
+            href: `wise_eur.html?year=${encodeURIComponent(String(resolvedYear))}`,
+          },
+          {
+            label: 'wiseUSD',
+            href: `wise_usd.html?year=${encodeURIComponent(String(resolvedYear))}`,
+          },
+          ...navYears.map((year) => ({
+            label: String(year),
+            href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
+          })),
+        ],
       },
       {
         key: 'orders',
@@ -3670,6 +3688,8 @@
   const operationAddressInput = document.getElementById('operationAddress');
   const grandLodgeSealFileInput = document.getElementById('grandLodgeSealFile');
   const grandSecretarySignatureFileInput = document.getElementById('grandSecretarySignatureFile');
+  const grandLodgeSealSavedMeta = document.getElementById('grandLodgeSealSavedMeta');
+  const grandSecretarySignatureSavedMeta = document.getElementById('grandSecretarySignatureSavedMeta');
 
   // Settings page (roles)
   const createUserForm = document.getElementById('createUserForm');
@@ -22320,12 +22340,32 @@
   initArchivePage();
 
   if (grandLodgeInfoForm) {
+    const syncGrandLodgeImageMeta = (info) => {
+      const sealSaved = Boolean(info && info.grandLodgeSealDataUrl);
+      const sigSaved = Boolean(info && info.grandSecretarySignatureDataUrl);
+
+      if (grandLodgeSealSavedMeta) {
+        grandLodgeSealSavedMeta.hidden = !sealSaved;
+        grandLodgeSealSavedMeta.textContent = sealSaved
+          ? `Saved: ${String((info && info.grandLodgeSealFileName) || 'Grand Lodge Seal')}`
+          : '';
+      }
+
+      if (grandSecretarySignatureSavedMeta) {
+        grandSecretarySignatureSavedMeta.hidden = !sigSaved;
+        grandSecretarySignatureSavedMeta.textContent = sigSaved
+          ? `Saved: ${String((info && info.grandSecretarySignatureFileName) || "Grand Secretary's Signature")}`
+          : '';
+      }
+    };
+
     const current = loadGrandLodgeInfo();
     if (grandMasterInput) grandMasterInput.value = current.grandMaster;
     if (grandSecretaryInput) grandSecretaryInput.value = current.grandSecretary;
     if (grandTreasurerInput) grandTreasurerInput.value = current.grandTreasurer;
     if (officialAddressInput) officialAddressInput.value = current.officialAddress;
     if (operationAddressInput) operationAddressInput.value = current.operationAddress;
+    syncGrandLodgeImageMeta(current);
 
     {
       const hasAnyUsers = loadUsers().length > 0;
@@ -22380,8 +22420,18 @@
           grandSecretarySignatureDataUrl: sigDataUrl,
           grandSecretarySignatureFileName: sigName,
         });
+
+        // In WP shared mode, writes are queued and may not be persisted yet.
+        // Flush immediately so a quick refresh doesn't "lose" recently saved images.
+        if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
+          try {
+            await window.acglFmsWpFlushNow();
+          } catch {
+            // ignore
+          }
+        }
       } catch {
-        window.alert('Could not read the selected file(s).');
+        window.alert('Could not save the selected file(s). If the image is large, try a smaller file and save again.');
         return;
       } finally {
         if (submitBtn) submitBtn.disabled = false;
@@ -22394,6 +22444,7 @@
       if (grandTreasurerInput) grandTreasurerInput.value = next.grandTreasurer;
       if (officialAddressInput) officialAddressInput.value = next.officialAddress;
       if (operationAddressInput) operationAddressInput.value = next.operationAddress;
+      syncGrandLodgeImageMeta(next);
     });
   }
 

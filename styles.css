@@ -2575,15 +2575,19 @@ input[type='checkbox'].cb {
   text-align: left;
 }
 
-/* Money Transfers: center selected columns (MT No, MT Date, GS Verified, GT Verified) */
+/* Money Transfers: center selected columns (MT No, MT Date, Verified, Names) */
 #moneyTransfersTable th:nth-child(2),
 #moneyTransfersTable td:nth-child(2),
 #moneyTransfersTable th:nth-child(3),
 #moneyTransfersTable td:nth-child(3),
 #moneyTransfersTable th:nth-child(4),
 #moneyTransfersTable td:nth-child(4),
+#moneyTransfersTable th:nth-child(5),
+#moneyTransfersTable td:nth-child(5),
 #moneyTransfersTable th:nth-child(6),
-#moneyTransfersTable td:nth-child(6) {
+#moneyTransfersTable td:nth-child(6),
+#moneyTransfersTable th:nth-child(7),
+#moneyTransfersTable td:nth-child(7) {
   text-align: center;
 }
 

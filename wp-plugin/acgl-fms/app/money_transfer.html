@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ACGL - FMS</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <div class="headerTitleBlock">
+                  <h1 data-mt-builder-title>Money Transfer</h1>
+                  <p class="subhead" data-mt-builder-subhead>
+                    Money Transfer entries for the selected date range.
+                  </p>
+                </div>
+              </div>
+              <div class="header-actions">
+                <div class="headerThemeBlock">
+                  <img
+                    class="headerThemeBlock__seal"
+                    src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+                    alt="ACGL"
+                    loading="lazy"
+                  />
+                  <label class="switch" for="themeToggle">
+                    <input
+                      type="checkbox"
+                      id="themeToggle"
+                      class="switch__input"
+                      role="switch"
+                      aria-label="Dark mode"
+                    />
+                    <span class="switch__track" aria-hidden="true"></span>
+                    <span class="switch__text">Dark mode</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main class="container container--wide">
+          <section class="card" aria-labelledby="mt-builder-list-title">
+            <div class="list-header">
+              <h2 id="mt-builder-list-title" data-mt-builder-list-title>
+                Money Transfer
+              </h2>
+              <div class="list-actions">
+                <div class="list-search">
+                  <label class="sr-only" for="mtBuilderGlobalSearch"
+                    >Search all columns</label
+                  >
+                  <input
+                    id="mtBuilderGlobalSearch"
+                    type="text"
+                    inputmode="search"
+                    placeholder="Search all columns…"
+                    autocomplete="off"
+                  />
+                  <button
+                    type="button"
+                    id="mtBuilderClearSearchBtn"
+                    class="searchClearBtn"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    hidden
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  id="mtBuilderSaveBtn"
+                >
+                  Save
+                </button>
+
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  id="mtBuilderCancelBtn"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            <div
+              class="table-wrap ordersTableWrap fixedFooterTableWrap"
+              role="region"
+              aria-label="Money Transfer table"
+              tabindex="0"
+            >
+              <table
+                id="mtBuilderTable"
+                class="table"
+                aria-describedby="mt-builder-help"
+              >
+                <caption id="mt-builder-help" class="sr-only">
+                  Ledger-like list filtered to the selected date range. Only
+                  positive income entries are shown.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Budget Number</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Creditor</th>
+                    <th scope="col" class="num">Euro (€)</th>
+                    <th scope="col" class="num">USD ($)</th>
+                    <th scope="col">Details</th>
+                  </tr>
+                </thead>
+                <tbody id="mtBuilderTbody">
+                  <!-- rows inserted by app.js -->
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="4" class="ordersTotalsRow__label">Total</td>
+                    <td class="num" id="mtBuilderTotalEuro"></td>
+                    <td class="num" id="mtBuilderTotalUsd"></td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div id="mtBuilderEmptyState" class="empty" hidden>
+              No ledger entries for this date range.
+            </div>
+
+            <div class="field field--span2">
+              <label for="mtBuilderComments">Comments</label>
+              <textarea id="mtBuilderComments" rows="4"></textarea>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

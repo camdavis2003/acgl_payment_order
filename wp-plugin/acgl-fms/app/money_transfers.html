@@ -62,11 +62,11 @@
         <main class="container container--wide">
           <section class="card" aria-labelledby="money-transfers-list-title">
             <div class="list-header">
-              <h2
-                id="money-transfers-list-title"
-                data-money-transfers-list-title
-              >
-                Money Transfers
+              <h2 id="money-transfers-list-title">
+                <span data-money-transfers-list-title>Money Transfers</span>
+                <span class="muted">
+                  (Total: <span id="moneyTransfersTotalCount">0</span>)</span
+                >
               </h2>
               <div class="list-actions">
                 <div class="list-search">
@@ -123,12 +123,13 @@
                 </caption>
                 <thead>
                   <tr>
+                    <th scope="col" aria-label="Delete"></th>
                     <th scope="col">Money Transfer No.</th>
                     <th scope="col">MT Date</th>
-                    <th scope="col">Grand Secretary Name</th>
                     <th scope="col">GS Verified</th>
-                    <th scope="col">Grand Treasurer Name</th>
+                    <th scope="col">Grand Secretary Name</th>
                     <th scope="col">GT Verified</th>
+                    <th scope="col">Grand Treasurer Name</th>
                     <th scope="col">Comments</th>
                     <th scope="col">Actions</th>
                   </tr>
@@ -140,6 +141,55 @@
             </div>
           </section>
         </main>
+      </div>
+    </div>
+
+    <!-- Date range modal for New/Edit Money Transfer -->
+    <div class="modal" id="mtRangeModal" aria-hidden="true">
+      <div class="modal__backdrop" data-mt-range-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mtRangeModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <h2 id="mtRangeModalTitle" class="modal__poHeader">
+              New Money Transfer
+            </h2>
+            <p id="mtRangeModalSubhead" class="modal__poDate">
+              Select the date range to include in this Money Transfer.
+            </p>
+          </div>
+        </div>
+
+        <div class="modal__body">
+          <div class="field">
+            <label for="mtRangeStart">Start Date</label>
+            <input id="mtRangeStart" type="date" />
+          </div>
+          <div class="field">
+            <label for="mtRangeEnd">End Date</label>
+            <input id="mtRangeEnd" type="date" />
+          </div>
+
+          <div
+            class="error"
+            id="mtRangeError"
+            role="alert"
+            aria-live="polite"
+          ></div>
+        </div>
+
+        <div class="modal__footer">
+          <button type="button" id="mtRangeSubmitBtn" class="btn btn--primary">
+            Submit
+          </button>
+          <button type="button" class="btn btn--ghost" data-mt-range-close>
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
 

@@ -7128,7 +7128,7 @@
         const actorStatus = e.actorStatus !== undefined ? normalizeOrderStatus(e.actorStatus) : '';
         const hasActor = (actorWith && actorWith !== w) || (actorStatus && actorStatus !== s);
         const actorHtml = hasActor
-          ? `${actorWith ? `<span class=\"timelinegraph__eventSep\">•</span><span>Actor: <strong>${escapeHtml(actorWith)}</strong></span>` : ''}${actorStatus ? `<span class=\"timelinegraph__eventSep\">•</span><span>Actor Status: <strong>${escapeHtml(actorStatus)}</strong></span>` : ''}`
+          ? `${actorWith ? `<span class="timelinegraph__eventSep">•</span><span>Actor: <strong>${escapeHtml(actorWith)}</strong></span>` : ''}${actorStatus ? `<span class="timelinegraph__eventSep">•</span><span>Actor Status: <strong>${escapeHtml(actorStatus)}</strong></span>` : ''}`
           : '';
         const commentRaw = e.comment !== undefined ? String(e.comment || '') : '';
         const comment = commentRaw.trim();

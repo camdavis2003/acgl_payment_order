@@ -5914,6 +5914,27 @@
         existing = [];
       }
 
+      // Backfill missing Source for the seeded 2025 mock Payment Orders (PO 25-01..PO 25-10).
+      // This keeps old dev data consistent without requiring localStorage resets.
+      const targetYear2 = String(targetYear % 100).padStart(2, '0');
+      const seededPoCanons = new Set(
+        Array.from({ length: 10 }, (_, idx) => `PO${targetYear2}-${String(idx + 1).padStart(2, '0')}`)
+      );
+      let patchedExisting = false;
+      existing = existing.map((o) => {
+        if (!o || typeof o !== 'object') return o;
+        if (!isMockOrder(o)) return o;
+        const canon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (!seededPoCanons.has(canon)) return o;
+        const src = String(o.source || '').trim();
+        if (src) return o;
+        patchedExisting = true;
+        return { ...o, source: 'Form Submission' };
+      });
+      if (patchedExisting) {
+        localStorage.setItem(ordersKey, JSON.stringify(existing));
+      }
+
       const existingCanon = new Set(existing.map((o) => canonicalizePaymentOrderNo(o && o.paymentOrderNo)));
 
       const year2 = String(targetYear % 100).padStart(2, '0');
@@ -6069,6 +6090,7 @@
             id: `mock_${targetYear}_${idx + 1}_${baseMs}`,
             createdAt,
             updatedAt,
+            source: 'Form Submission',
             status: normalizeOrderStatus(t.status),
             with: normalizeWith(t.with),
             paymentOrderNo,
@@ -6105,6 +6127,7 @@
             id: `mock_${targetYear}_topup_${seq}_${baseMs}`,
             createdAt,
             updatedAt: createdAt,
+            source: 'Form Submission',
             status: 'Submitted',
             with: 'Requestor',
             paymentOrderNo,
@@ -6839,8 +6862,12 @@
     const date = String(order.date || '').trim();
     const name = String(order.name || '').trim();
     const address = String(order.address || '').trim();
+    const budgetNumberRaw = String(order.budgetNumber || '').trim();
     const purpose = String(order.purpose || '').trim();
-    if (!paymentOrderNo || !date || !name || !address || !purpose) return true;
+
+    // Budget Number must be present and parse to a 4-digit OUT code.
+    const outCode = extractOutCodeFromBudgetNumberText(budgetNumberRaw);
+    if (!paymentOrderNo || !date || !name || !address || !purpose || !outCode) return true;
 
     const bankMode = String(order.bankDetailsMode || '').trim().toUpperCase();
     const iban = String(order.iban || '').trim();
@@ -8070,8 +8097,10 @@
 
     const rowsHtml = orders
       .map((o) => {
+        const isMissingRequired = hasOrderMissingRequiredValues(o);
+        const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
         return `
-          <tr data-id="${escapeHtml(o.id)}">
+          <tr${rowClass} data-id="${escapeHtml(o.id)}">
             <td class="col-delete">
               <button
                 type="button"
@@ -11754,19 +11783,30 @@
     const verified = loadGsLedgerVerifiedMap(year);
     const rows = [];
 
+    const linkedWiseEurEntryIds = new Set();
+    const linkedWiseUsdEntryIds = new Set();
+    const paymentOrderNos = new Set();
+
     // Income rows
     const incomeEntries = loadIncome(year);
     for (const inc of Array.isArray(incomeEntries) ? incomeEntries : []) {
       if (!inc || !inc.id) continue;
+
+      const euroNum = Number(inc.euro);
+      if (!(Number.isFinite(euroNum) && euroNum > 0)) continue;
+
+      const budgetCode = extractInCodeFromBudgetNumberText(inc.budgetNumber);
+      if (!/^[0-9]{4}$/.test(String(budgetCode || ''))) continue;
+
       const ledgerId = `inc:${String(inc.id)}`;
       rows.push({
         ledgerId,
         date: String(inc.date || ''),
-        budgetNumber: extractInCodeFromBudgetNumberText(inc.budgetNumber),
+        budgetNumber: budgetCode,
         source: 'Commerzbank',
         creditorDebtor: String(inc.remitter || ''),
         paymentOrderNo: '',
-        euro: inc.euro,
+        euro: euroNum,
         usd: null,
         verified: Boolean(verified[ledgerId]),
         with: '',
@@ -11779,6 +11819,15 @@
     const orders = loadOrders(year);
     for (const o of Array.isArray(orders) ? orders : []) {
       if (!o || !o.id) continue;
+
+      const poNoKey = String(o.paymentOrderNo || '').trim();
+      if (poNoKey) paymentOrderNos.add(poNoKey);
+
+      const src = String(o.source || '').trim();
+      const srcEntryId = String(o.sourceEntryId || '').trim();
+      if (src === 'wiseEUR' && srcEntryId) linkedWiseEurEntryIds.add(srcEntryId);
+      if (src === 'wiseUSD' && srcEntryId) linkedWiseUsdEntryIds.add(srcEntryId);
+
       const statusRaw = String(o.status || '').trim().toLowerCase();
       if (statusRaw !== 'approved' && statusRaw !== 'paid') continue;
       const ledgerId = `po:${String(o.id)}`;
@@ -11800,6 +11849,82 @@
         verified: Boolean(verified[ledgerId]),
         status: String(o.status || ''),
         details: String(o.purpose || ''),
+      });
+    }
+
+    // wiseEUR rows (Receipts only; requires Budget #; exclude items already moved/reconciled into Payment Orders)
+    const wiseEurEntries = loadWiseEur(year);
+    for (const e of Array.isArray(wiseEurEntries) ? wiseEurEntries : []) {
+      if (!e || !e.id) continue;
+
+      const entryId = String(e.id).trim();
+      if (!entryId) continue;
+      if (linkedWiseEurEntryIds.has(entryId)) continue;
+
+      const idTrack = String(e.idTrack || '').trim();
+      if (idTrack && paymentOrderNos.has(idTrack)) continue;
+
+      const receipts = getWiseEurReceipts(e);
+      const disburse = getWiseEurDisburse(e);
+      // Only positive items should be surfaced directly in the Ledger.
+      // Disbursements are expected to flow through Reconciliation -> Payment Orders.
+      if (!(Number.isFinite(receipts) && receipts > 0)) continue;
+      if (Number.isFinite(disburse) && disburse > 0) continue;
+
+      const budgetCode = extractInCodeFromBudgetNumberText(e.budgetNo);
+      if (!/^[0-9]{4}$/.test(String(budgetCode || ''))) continue;
+
+      const ledgerId = `weur:${entryId}`;
+      rows.push({
+        ledgerId,
+        date: String(e.datePL || e.date || ''),
+        budgetNumber: budgetCode,
+        source: 'wiseEUR',
+        creditorDebtor: String(e.receivedFromDisbursedTo || e.party || ''),
+        paymentOrderNo: idTrack ? formatPaymentOrderNoForDisplay(idTrack) : '',
+        euro: receipts,
+        usd: null,
+        verified: Boolean(verified[ledgerId]),
+        with: '',
+        status: '',
+        details: String(e.description || e.reference || ''),
+      });
+    }
+
+    // wiseUSD rows (Receipts only; requires Budget #; exclude items already moved/reconciled into Payment Orders)
+    const wiseUsdEntries = loadWiseUsd(year);
+    for (const e of Array.isArray(wiseUsdEntries) ? wiseUsdEntries : []) {
+      if (!e || !e.id) continue;
+
+      const entryId = String(e.id).trim();
+      if (!entryId) continue;
+      if (linkedWiseUsdEntryIds.has(entryId)) continue;
+
+      const idTrack = String(e.idTrack || '').trim();
+      if (idTrack && paymentOrderNos.has(idTrack)) continue;
+
+      const receipts = getWiseUsdReceipts(e);
+      const disburse = getWiseUsdDisburse(e);
+      if (!(Number.isFinite(receipts) && receipts > 0)) continue;
+      if (Number.isFinite(disburse) && disburse > 0) continue;
+
+      const budgetCode = extractInCodeFromBudgetNumberText(e.budgetNo);
+      if (!/^[0-9]{4}$/.test(String(budgetCode || ''))) continue;
+
+      const ledgerId = `wusd:${entryId}`;
+      rows.push({
+        ledgerId,
+        date: String(e.datePL || e.date || ''),
+        budgetNumber: budgetCode,
+        source: 'wiseUSD',
+        creditorDebtor: String(e.receivedFromDisbursedTo || e.party || ''),
+        paymentOrderNo: idTrack ? formatPaymentOrderNoForDisplay(idTrack) : '',
+        euro: null,
+        usd: receipts,
+        verified: Boolean(verified[ledgerId]),
+        with: '',
+        status: '',
+        details: String(e.description || e.reference || ''),
       });
     }
 
@@ -12168,6 +12293,7 @@
         }
         const ledgerId = String(input.getAttribute('data-ledger-id') || '').trim();
         if (!ledgerId) return;
+
         const map = loadGsLedgerVerifiedMap(year);
         map[ledgerId] = Boolean(input.checked);
         saveGsLedgerVerifiedMap(map, year);
@@ -12338,7 +12464,13 @@
       window.addEventListener('storage', (e) => {
         const key = e && typeof e.key === 'string' ? e.key : '';
         if (!key) return;
-        if (key.startsWith('payment_orders_') || key.startsWith('payment_order_income_') || key.startsWith('payment_order_gs_ledger_verified_')) {
+        if (
+          key.startsWith('payment_orders_')
+          || key.startsWith('payment_order_income_')
+          || key.startsWith('payment_order_gs_ledger_verified_')
+          || key.startsWith('payment_order_wise_eur_')
+          || key.startsWith('payment_order_wise_usd_')
+        ) {
           applyGsLedgerView();
         }
       });
@@ -13636,6 +13768,29 @@
     return getWiseEurReceipts(entry) - getWiseEurDisburse(entry);
   }
 
+  function hasWiseEurMissingRequiredValues(entry) {
+    if (!entry) return true;
+    const date = String(entry.datePL || entry.date || '').trim();
+    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
+    const description = String(entry.description || entry.reference || '').trim();
+
+    const receipts = getWiseEurReceipts(entry);
+    const disburse = getWiseEurDisburse(entry);
+    const hasReceipts = Number.isFinite(receipts) && receipts > 0;
+    const hasDisburse = Number.isFinite(disburse) && disburse > 0;
+    const hasOneAmount = (hasReceipts && !hasDisburse) || (!hasReceipts && hasDisburse);
+
+    const rawBudgetNo = String(entry.budgetNo || '').trim();
+    const hasBudget = Boolean(extractInCodeFromBudgetNumberText(rawBudgetNo) || extractOutCodeFromBudgetNumberText(rawBudgetNo));
+
+    if (!date) return true;
+    if (!party) return true;
+    if (!description) return true;
+    if (!hasOneAmount) return true;
+    if (!hasBudget) return true;
+    return false;
+  }
+
   function buildReconciliationOrderFromWiseEurEntry(entry, year) {
     if (!entry || !entry.id) return null;
     const absEuro = getWiseEurDisburse(entry);
@@ -13780,6 +13935,8 @@
     const html = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
+        const isMissingRequired = hasWiseEurMissingRequiredValues(e);
+        const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
         const rawBudgetNo = getWiseEurDisplayValueForColumn(e, 'budgetNo');
         const receiptsAmt = getWiseEurReceipts(e);
         const disburseAmt = getWiseEurDisburse(e);
@@ -13817,7 +13974,7 @@
         const bankStatements = escapeHtml(getWiseEurDisplayValueForColumn(e, 'bankStatements'));
 
         return `
-          <tr data-wise-eur-id="${id}">
+          <tr data-wise-eur-id="${id}"${rowClass}>
             <td>${budgetNo}</td>
             <td>${datePL}</td>
             <td>${idTrack}</td>
@@ -15382,6 +15539,29 @@
     return getWiseUsdReceipts(entry) - getWiseUsdDisburse(entry);
   }
 
+  function hasWiseUsdMissingRequiredValues(entry) {
+    if (!entry) return true;
+    const date = String(entry.datePL || entry.date || '').trim();
+    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
+    const description = String(entry.description || entry.reference || '').trim();
+
+    const receipts = getWiseUsdReceipts(entry);
+    const disburse = getWiseUsdDisburse(entry);
+    const hasReceipts = Number.isFinite(receipts) && receipts > 0;
+    const hasDisburse = Number.isFinite(disburse) && disburse > 0;
+    const hasOneAmount = (hasReceipts && !hasDisburse) || (!hasReceipts && hasDisburse);
+
+    const rawBudgetNo = String(entry.budgetNo || '').trim();
+    const hasBudget = Boolean(extractInCodeFromBudgetNumberText(rawBudgetNo) || extractOutCodeFromBudgetNumberText(rawBudgetNo));
+
+    if (!date) return true;
+    if (!party) return true;
+    if (!description) return true;
+    if (!hasOneAmount) return true;
+    if (!hasBudget) return true;
+    return false;
+  }
+
   function buildReconciliationOrderFromWiseUsdEntry(entry, year) {
     if (!entry || !entry.id) return null;
     const absUsd = getWiseUsdDisburse(entry);
@@ -15526,6 +15706,8 @@
     const html = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
+        const isMissingRequired = hasWiseUsdMissingRequiredValues(e);
+        const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
         const rawBudgetNo = getWiseUsdDisplayValueForColumn(e, 'budgetNo');
         const receiptsAmt = getWiseUsdReceipts(e);
         const disburseAmt = getWiseUsdDisburse(e);
@@ -15563,7 +15745,7 @@
         const bankStatements = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'bankStatements'));
 
         return `
-          <tr data-wise-usd-id="${id}">
+          <tr data-wise-usd-id="${id}"${rowClass}>
             <td>${budgetNo}</td>
             <td>${datePL}</td>
             <td>${idTrack}</td>

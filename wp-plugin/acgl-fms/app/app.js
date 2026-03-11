@@ -3304,13 +3304,19 @@
       }
 
       const receiptsUsdText = String(tds[8]?.textContent || '').trim();
-      if (receiptsUsdText !== '-') {
+      if (receiptsUsdText && receiptsUsdText !== '-' && Math.abs(parseBudgetMoney(receiptsUsdText)) > 0.0001) {
+        if (tds[8]) tds[8].textContent = '-';
+        changed = true;
+      } else if (receiptsUsdText !== '-') {
         if (tds[8]) tds[8].textContent = '-';
         changed = true;
       }
 
       const expendituresUsdText = String(tds[10]?.textContent || '').trim();
-      if (expendituresUsdText !== '-') {
+      if (expendituresUsdText && expendituresUsdText !== '-' && Math.abs(parseBudgetMoney(expendituresUsdText)) > 0.0001) {
+        if (tds[10]) tds[10].textContent = '-';
+        changed = true;
+      } else if (expendituresUsdText !== '-') {
         if (tds[10]) tds[10].textContent = '-';
         changed = true;
       }
@@ -17357,15 +17363,15 @@
     const budgetChecksumsToggle = document.getElementById('budgetChecksumsToggle');
     const budgetChecksumsModeText = document.getElementById('budgetChecksumsModeText');
     const budgetChecksumsVisibleKey = `payment_order_budget_checksums_visible_${Number(budgetYear)}_v1`;
-    let budgetChecksumsVisible = true;
+    let budgetChecksumsVisible = false;
 
     function loadBudgetChecksumsVisible() {
       try {
         const raw = localStorage.getItem(budgetChecksumsVisibleKey);
-        if (raw === null || raw === undefined || raw === '') return true;
+        if (raw === null || raw === undefined || raw === '') return false;
         return raw === '1' || raw === 'true' || raw === 'show' || raw === 'Show';
       } catch {
-        return true;
+        return false;
       }
     }
 

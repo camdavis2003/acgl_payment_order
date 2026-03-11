@@ -17363,15 +17363,15 @@
     const budgetChecksumsToggle = document.getElementById('budgetChecksumsToggle');
     const budgetChecksumsModeText = document.getElementById('budgetChecksumsModeText');
     const budgetChecksumsVisibleKey = `payment_order_budget_checksums_visible_${Number(budgetYear)}_v1`;
-    let budgetChecksumsVisible = true;
+    let budgetChecksumsVisible = false;
 
     function loadBudgetChecksumsVisible() {
       try {
         const raw = localStorage.getItem(budgetChecksumsVisibleKey);
-        if (raw === null || raw === undefined || raw === '') return true;
+        if (raw === null || raw === undefined || raw === '') return false;
         return raw === '1' || raw === 'true' || raw === 'show' || raw === 'Show';
       } catch {
-        return true;
+        return false;
       }
     }
 

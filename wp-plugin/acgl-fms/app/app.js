@@ -6974,7 +6974,6 @@
     const u = getCurrentUser && getCurrentUser();
     const name = u && u.username ? String(u.username).trim() : '';
     if (!name) return 'Unknown';
-    if (isHardcodedAdminUsername(name)) return '—';
     return name;
   }
 
@@ -7110,12 +7109,18 @@
         const user = e.user !== undefined ? String(e.user || '—') : '—';
         const w = e.with !== undefined ? normalizeWith(e.with) : '—';
         const s = e.status !== undefined ? normalizeOrderStatus(e.status) : '—';
+        const actorWith = e.actorWith !== undefined ? normalizeWith(e.actorWith) : '';
+        const actorStatus = e.actorStatus !== undefined ? normalizeOrderStatus(e.actorStatus) : '';
+        const hasActor = (actorWith && actorWith !== w) || (actorStatus && actorStatus !== s);
+        const actorHtml = hasActor
+          ? `${actorWith ? `<span class=\"timelinegraph__eventSep\">•</span><span>Actor: <strong>${escapeHtml(actorWith)}</strong></span>` : ''}${actorStatus ? `<span class=\"timelinegraph__eventSep\">•</span><span>Actor Status: <strong>${escapeHtml(actorStatus)}</strong></span>` : ''}`
+          : '';
         const commentRaw = e.comment !== undefined ? String(e.comment || '') : '';
         const comment = commentRaw.trim();
         const commentHtml = comment
           ? `<span class="timelinegraph__eventSep">•</span><span>Comment: <strong>${escapeHtml(comment).replace(/\n/g, '<br>')}</strong></span>`
           : '';
-        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>Modified by: <strong>${escapeHtml(user)}</strong></span><span class="timelinegraph__eventSep">•</span><span>With: <strong>${escapeHtml(w)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Status: <strong>${escapeHtml(s)}</strong></span>${commentHtml}</div>`;
+        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>Modified by: <strong>${escapeHtml(user)}</strong></span><span class="timelinegraph__eventSep">•</span><span>With: <strong>${escapeHtml(w)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Status: <strong>${escapeHtml(s)}</strong></span>${actorHtml}${commentHtml}</div>`;
       })
       .join('');
 
@@ -11077,11 +11082,24 @@
           if (!e || typeof e !== 'object' || !e.at) continue;
           const ms = toTimeMs(e.at) ?? 0;
           const user = e.user !== undefined ? String(e.user || '—') : '—';
-          if (isHardcodedAdminUsername(user)) continue;
           const action = e.action !== undefined ? String(e.action || '—') : (i === 0 ? 'Created' : 'Edited');
           const isCreated = String(action).trim().toLowerCase() === 'created';
           let changes = Array.isArray(e.changes) ? e.changes : [];
           if (isCreated) changes = [];
+
+          // If workflow auto-changed With/Status, preserve the actor's original action in the log.
+          const withFinal = e.with !== undefined ? normalizeWith(e.with) : '—';
+          const statusFinal = e.status !== undefined ? normalizeOrderStatus(e.status) : '—';
+          const actorWith = e.actorWith !== undefined ? normalizeWith(e.actorWith) : '';
+          const actorStatus = e.actorStatus !== undefined ? normalizeOrderStatus(e.actorStatus) : '';
+          const actorDiffers = (actorWith && actorWith !== withFinal) || (actorStatus && actorStatus !== statusFinal);
+          if (actorDiffers) {
+            const actorRows = [];
+            if (actorWith && actorWith !== withFinal) actorRows.push({ field: 'Actor With', from: '', to: actorWith });
+            if (actorStatus && actorStatus !== statusFinal) actorRows.push({ field: 'Actor Status', from: '', to: actorStatus });
+            changes = [...actorRows, ...changes];
+          }
+
           events.push({ ms, at: String(e.at), module: `Payment Orders (${year})`, record, user, action, changes });
         }
       }
@@ -11107,7 +11125,6 @@
           if (!e || typeof e !== 'object' || !e.at) continue;
           const ms = toTimeMs(e.at) ?? 0;
           const user = e.user !== undefined ? String(e.user || '—') : '—';
-          if (isHardcodedAdminUsername(user)) continue;
           const action = e.action !== undefined ? String(e.action || '—') : (i === 0 ? 'Created' : 'Edited');
           const isCreated = String(action).trim().toLowerCase() === 'created';
           let changes = Array.isArray(e.changes) ? e.changes : [];
@@ -11130,7 +11147,6 @@
           const action = e.action !== undefined ? String(e.action || '—') : 'Event';
           return { ms, at, module, record, user, action };
         })
-        .filter((e) => !isHardcodedAdminUsername(e.user))
         .sort((a, b) => a.ms - b.ms);
 
       const openLoginByUser = new Map();
@@ -21908,6 +21924,20 @@
         const requestedWith = rawWith ? normalizeWith(rawWith) : '';
         const requestedStatus = normalizeOrderStatus(statusSelect.value);
 
+        // IMPORTANT: capture what the user selected BEFORE any workflow auto-changes.
+        // The modal stores these as attributes when the user changes Status/With.
+        const actorWithPreWorkflow = modal ? normalizeWith(modal.getAttribute('data-pending-actor-with') || '') : '';
+        const actorStatusPreWorkflow = modal ? normalizeOrderStatus(modal.getAttribute('data-pending-actor-status') || '') : '';
+
+        const originalWith = modal ? normalizeWith(modal.getAttribute('data-original-with') || '') : '';
+        const originalStatus = modal ? normalizeOrderStatus(modal.getAttribute('data-original-status') || '') : '';
+
+        const actorWithForLog = actorWithPreWorkflow || originalWith || prevWith || requestedWith;
+
+        // If With-driven workflow changes Status, the UI select may already show the post-workflow value.
+        // To match the progress-bubble behavior, prefer the pre-workflow status captured by the modal.
+        const actorStatusForLog = actorStatusPreWorkflow || originalStatus || prevStatus || requestedStatus;
+
         let nextWith = requestedWith;
         let nextStatus = requestedStatus;
 
@@ -21996,8 +22026,8 @@
               at: nowIso,
               with: nextWith,
               status: nextStatus,
-              actorWith: prevWith,
-              actorStatus: requestedStatus,
+              actorWith: actorWithForLog,
+              actorStatus: actorStatusForLog,
               user: getTimelineUsername(),
               action: 'Edited',
               changes,

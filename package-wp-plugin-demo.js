@@ -38,7 +38,9 @@ const ROOT = __dirname;
 const PLUGIN_DIR = path.join(ROOT, 'wp-plugin', 'acgl-fms');
 const DIST_DIR = path.join(ROOT, 'dist');
 
-const ZIP_SLUG = 'acgl-fms-demo';
+// Folder name *inside* the zip (i.e. wp-content/plugins/<this>/...).
+// Keep this distinct from production to avoid WP "replace existing" behavior.
+const ZIP_SLUG = 'acgl-fms-demo-plugin';
 const OUT_NAME = 'acgl-fms-demo.zip';
 const OUT_ZIP = path.join(DIST_DIR, OUT_NAME);
 

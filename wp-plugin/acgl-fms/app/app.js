@@ -45,7 +45,7 @@
   }
 
   const APP_TAB_TITLE = 'ACGL - FMS';
-  const APP_VERSION = '0.1.1';
+  const APP_VERSION = '0.1.2';
 
   function applyAppTabTitle() {
     setBrowserTabTitle(APP_TAB_TITLE);
@@ -21903,8 +21903,11 @@
         let nextWith = requestedWith;
         let nextStatus = requestedStatus;
 
+        // If the user selects the placeholder (blank), keep the previous value
+        // except for Returned where the selection is mandatory.
         if (!nextWith && nextStatus !== 'Returned') nextWith = prevWith;
 
+        // ---- With workflow rules ----
         if (nextStatus === 'Rejected') {
           nextWith = 'Requestor';
         } else if (nextStatus === 'Returned') {
@@ -21923,6 +21926,7 @@
           }
         }
 
+        // Enforce Returned selection
         if (nextStatus === 'Returned' && !String(nextWith || '').trim()) {
           window.alert('Select who this request is returned to.');
           try {
@@ -21933,6 +21937,7 @@
           return;
         }
 
+        // Require comments for Returned/Rejected
         const commentRequired = nextStatus === 'Returned' || nextStatus === 'Rejected';
         if (commentRequired && !comment) {
           if (commentsErrEl) commentsErrEl.textContent = 'Comments are required for Returned or Rejected.';
@@ -21943,6 +21948,7 @@
           }
           return;
         }
+
         const prevSource = normalizeOrderSource(latest.source);
         const nextSource = sourceSelect ? (normalizeOrderSource(sourceSelect.value) || prevSource) : prevSource;
 

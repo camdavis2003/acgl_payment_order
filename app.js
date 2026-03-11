@@ -45,7 +45,7 @@
   }
 
   const APP_TAB_TITLE = 'ACGL - FMS';
-  const APP_VERSION = '0.1.1';
+  const APP_VERSION = '0.1.2';
 
   function applyAppTabTitle() {
     setBrowserTabTitle(APP_TAB_TITLE);

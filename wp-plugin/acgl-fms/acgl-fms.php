@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ACGL Financial Management System (FMS)
  * Description: Embeds the ACGL FMS app and provides shared storage via WordPress (custom DB tables + REST API).
- * Version: 0.1.1
+ * Version: 0.1.2
  * Author: Cameron Davis
  */
 

@@ -1645,6 +1645,15 @@
         ],
       },
       {
+        key: 'ledger',
+        label: 'Ledger',
+        href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: navYears.map((year) => ({
+          label: String(year),
+          href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
+        })),
+      },
+      {
         key: 'orders',
         label: 'Payment Orders',
         href: `menu.html?year=${encodeURIComponent(String(resolvedYear))}`,
@@ -1660,15 +1669,6 @@
         children: navYears.map((year) => ({
           label: String(year),
           href: `money_transfers.html?year=${encodeURIComponent(String(year))}`,
-        })),
-      },
-      {
-        key: 'ledger',
-        label: 'Ledger',
-        href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
-        children: navYears.map((year) => ({
-          label: String(year),
-          href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
       { key: null, label: 'Archive', href: 'archive.html' },

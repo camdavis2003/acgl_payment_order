@@ -1085,6 +1085,7 @@
     if (base === 'wise_usd.html') return 'ledger';
     if (base === 'menu.html' || base === 'reconciliation.html') return 'orders';
     if (base === 'grand_secretary_ledger.html') return 'ledger';
+    if (base === 'money_transfers.html') return 'ledger';
     if (base === 'settings.html') return 'settings';
     return null;
   }
@@ -1294,6 +1295,13 @@
     if (!Number.isInteger(y)) return null;
     if (y < 1900 || y > 3000) return null;
     return `payment_orders_reconciliation_${y}_v1`;
+  }
+
+  function getMoneyTransfersKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    if (y < 1900 || y > 3000) return null;
+    return `money_transfers_${y}_v1`;
   }
 
   function migrateLegacyOrdersIfNeeded(targetYear) {
@@ -1661,6 +1669,15 @@
         children: navYears.map((year) => ({
           label: String(year),
           href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`,
+        })),
+      },
+      {
+        key: 'ledger',
+        label: 'Money Transfers',
+        href: `money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`,
+        children: navYears.map((year) => ({
+          label: String(year),
+          href: `money_transfers.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
       { key: null, label: 'Archive', href: 'archive.html' },
@@ -3598,6 +3615,9 @@
   const numberingForm = document.getElementById('numberingForm');
   const masonicYearInput = document.getElementById('masonicYear');
   const firstNumberInput = document.getElementById('firstNumber');
+  const firstMoneyTransferNumberInput = document.getElementById('firstMoneyTransferNumber');
+  const savePoNumberingBtn = document.getElementById('savePoNumberingBtn');
+  const saveMtNumberingBtn = document.getElementById('saveMtNumberingBtn');
 
   // Settings page (Grand Lodge Information)
   const grandLodgeInfoForm = document.getElementById('grandLodgeInfoForm');
@@ -3625,6 +3645,11 @@
 
   let currentViewedOrderId = null;
   let hidePoProgressTooltip = () => {};
+
+  // Money Transfers page
+  const moneyTransfersTbody = document.getElementById('moneyTransfersTbody');
+  const moneyTransfersEmptyState = document.getElementById('moneyTransfersEmptyState');
+  const moneyTransfersClearSearchBtn = document.getElementById('moneyTransfersClearSearchBtn');
 
   // Request form CAPTCHA (client-side human check)
   let requestCaptchaExpected = null;
@@ -3786,6 +3811,45 @@
     } catch {
       return { ok: false, created: false };
     }
+  }
+
+  function ensureMoneyTransfersListExistsForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return { ok: false, created: false };
+    const storageKey = getMoneyTransfersKeyForYear(y);
+    if (!storageKey) return { ok: false, created: false };
+
+    try {
+      const existing = localStorage.getItem(storageKey);
+      if (existing !== null) return { ok: true, created: false };
+      localStorage.setItem(storageKey, JSON.stringify([]));
+      return { ok: true, created: true };
+    } catch {
+      return { ok: false, created: false };
+    }
+  }
+
+  /** @returns {Array<Object>} */
+  function loadMoneyTransfers(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const storageKey = getMoneyTransfersKeyForYear(resolvedYear);
+    if (!storageKey) return [];
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** @param {Array<Object>} transfers */
+  function saveMoneyTransfers(transfers, year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const storageKey = getMoneyTransfersKeyForYear(resolvedYear);
+    if (!storageKey) return;
+    localStorage.setItem(storageKey, JSON.stringify(transfers || []));
   }
 
   /** @returns {Array<Object>} */
@@ -4152,21 +4216,27 @@
   function loadNumberingSettings() {
     try {
       const raw = localStorage.getItem(NUMBERING_KEY);
-      if (!raw) return { year2: getDefaultMasonicYear2(), nextSeq: 1 };
+      if (!raw) return { year2: getDefaultMasonicYear2(), nextSeq: 1, mtNextSeq: 1 };
       const parsed = JSON.parse(raw);
       return {
         year2: normalizeMasonicYear2(parsed && parsed.year2),
         nextSeq: normalizeSequence(parsed && parsed.nextSeq),
+        mtNextSeq: normalizeSequence(parsed && parsed.mtNextSeq),
       };
     } catch {
-      return { year2: getDefaultMasonicYear2(), nextSeq: 1 };
+      return { year2: getDefaultMasonicYear2(), nextSeq: 1, mtNextSeq: 1 };
     }
   }
 
   function saveNumberingSettings(settings) {
-    const year2 = normalizeMasonicYear2(settings && settings.year2);
-    const nextSeq = normalizeSequence(settings && settings.nextSeq);
-    localStorage.setItem(NUMBERING_KEY, JSON.stringify({ year2, nextSeq }));
+    const prev = loadNumberingSettings();
+    const year2 = normalizeMasonicYear2((settings && settings.year2) ?? prev.year2);
+    const yearChanged = normalizeMasonicYear2(prev.year2) !== year2;
+    const hasNextSeq = Boolean(settings && Object.prototype.hasOwnProperty.call(settings, 'nextSeq'));
+    const hasMtNextSeq = Boolean(settings && Object.prototype.hasOwnProperty.call(settings, 'mtNextSeq'));
+    const nextSeq = normalizeSequence(hasNextSeq ? settings.nextSeq : (yearChanged ? 1 : prev.nextSeq));
+    const mtNextSeq = normalizeSequence(hasMtNextSeq ? settings.mtNextSeq : (yearChanged ? 1 : prev.mtNextSeq));
+    localStorage.setItem(NUMBERING_KEY, JSON.stringify({ year2, nextSeq, mtNextSeq }));
   }
 
   function canonicalizePaymentOrderNo(value) {
@@ -4222,6 +4292,13 @@
     return `PO ${y}-${seqText}`;
   }
 
+  function formatMoneyTransferNo(year2, seq) {
+    const y = normalizeMasonicYear2(year2);
+    const n = normalizeSequence(seq);
+    const seqText = n < 100 ? String(n).padStart(2, '0') : String(n);
+    return `MT ${y}-${seqText}`;
+  }
+
   function getYear2ForBudgetYear(year) {
     const y = Number(year);
     if (!Number.isInteger(y)) return null;
@@ -4256,8 +4333,11 @@
     const isSameYear2 = normalizeMasonicYear2(current.year2) === year2;
     const nextSeq = isSameYear2 ? Math.max(normalizeSequence(current.nextSeq), nextFromOrders) : nextFromOrders;
 
-    if (isSameYear2 && normalizeSequence(current.nextSeq) === nextSeq) return false;
-    saveNumberingSettings({ year2, nextSeq });
+    // Money Transfer numbering defaults to restarting at 1 each year.
+    const mtNextSeq = isSameYear2 ? normalizeSequence(current.mtNextSeq) : 1;
+
+    if (isSameYear2 && normalizeSequence(current.nextSeq) === nextSeq && normalizeSequence(current.mtNextSeq) === mtNextSeq) return false;
+    saveNumberingSettings({ year2, nextSeq, mtNextSeq });
     return true;
   }
 
@@ -4266,11 +4346,24 @@
     return formatPaymentOrderNo(s.year2, s.nextSeq);
   }
 
+  function getNextMoneyTransferNo() {
+    const s = loadNumberingSettings();
+    return formatMoneyTransferNo(s.year2, s.mtNextSeq);
+  }
+
   function advancePaymentOrderSequence() {
     const s = loadNumberingSettings();
     const current = normalizeSequence(s.nextSeq);
     const next = current + 1;
     saveNumberingSettings({ year2: s.year2, nextSeq: next });
+    return true;
+  }
+
+  function advanceMoneyTransferSequence() {
+    const s = loadNumberingSettings();
+    const current = normalizeSequence(s.mtNextSeq);
+    const next = current + 1;
+    saveNumberingSettings({ year2: s.year2, mtNextSeq: next });
     return true;
   }
 
@@ -13366,6 +13459,225 @@
     applyGsLedgerView();
   }
 
+  // ---- Money Transfers list page ----
+
+  const moneyTransfersViewState = {
+    globalFilter: '',
+    defaultEmptyText: null,
+    canVerify: false,
+  };
+
+  function ensureMoneyTransfersDefaultEmptyText() {
+    if (!moneyTransfersEmptyState) return;
+    if (moneyTransfersViewState.defaultEmptyText !== null) return;
+    moneyTransfersViewState.defaultEmptyText = moneyTransfersEmptyState.textContent || 'No money transfers yet.';
+  }
+
+  function getMoneyTransfersDisplayValueForColumn(row, colKey) {
+    if (!row) return '';
+    switch (colKey) {
+      case 'moneyTransferNo':
+        return row.moneyTransferNo || row.mtNo || row.no || '';
+      case 'mtDate':
+        return formatDate(row.mtDate || row.date);
+      case 'grandSecretaryName':
+        return row.grandSecretaryName || row.gsName || '';
+      case 'gsVerified':
+        return row.gsVerified ? 'Yes' : '';
+      case 'grandTreasurerName':
+        return row.grandTreasurerName || row.gtName || '';
+      case 'gtVerified':
+        return row.gtVerified ? 'Yes' : '';
+      case 'comments':
+        return row.comments || row.comment || '';
+      default:
+        return '';
+    }
+  }
+
+  function filterMoneyTransfersForView(withIndexRows, globalFilter) {
+    const needle = normalizeTextForSearch(globalFilter);
+    if (!needle) return withIndexRows || [];
+
+    const cols = [
+      'moneyTransferNo',
+      'mtDate',
+      'grandSecretaryName',
+      'gsVerified',
+      'grandTreasurerName',
+      'gtVerified',
+      'comments',
+    ];
+
+    return (withIndexRows || []).filter(({ row }) => {
+      return cols.some((k) => normalizeTextForSearch(getMoneyTransfersDisplayValueForColumn(row, k)).includes(needle));
+    });
+  }
+
+  function renderMoneyTransfersRows(withIndexRows) {
+    if (!moneyTransfersTbody) return;
+    const canVerify = Boolean(moneyTransfersViewState.canVerify);
+
+    const html = (withIndexRows || [])
+      .map(({ row, index }) => {
+        const mtNo = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'moneyTransferNo'));
+        const mtDate = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'mtDate'));
+        const gsName = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'grandSecretaryName'));
+        const gtName = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'grandTreasurerName'));
+        const comments = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'comments'));
+
+        const gsChecked = row && row.gsVerified ? 'checked' : '';
+        const gtChecked = row && row.gtVerified ? 'checked' : '';
+        const verifyDisabled = canVerify ? '' : 'disabled';
+
+        return `
+          <tr data-mt-index="${escapeHtml(String(index))}">
+            <td>${mtNo}</td>
+            <td>${mtDate}</td>
+            <td>${gsName}</td>
+            <td class="num">
+              <input type="checkbox" data-mt-verify="1" data-verify-field="gsVerified" data-mt-index="${escapeHtml(String(index))}" aria-label="GS Verified" ${gsChecked} ${verifyDisabled} />
+            </td>
+            <td>${gtName}</td>
+            <td class="num">
+              <input type="checkbox" data-mt-verify="1" data-verify-field="gtVerified" data-mt-index="${escapeHtml(String(index))}" aria-label="GT Verified" ${gtChecked} ${verifyDisabled} />
+            </td>
+            <td>${comments}</td>
+            <td class="actions">—</td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    moneyTransfersTbody.innerHTML = html;
+  }
+
+  function applyMoneyTransfersView() {
+    if (!moneyTransfersTbody || !moneyTransfersEmptyState) return;
+    ensureMoneyTransfersDefaultEmptyText();
+
+    const year = getActiveBudgetYear();
+    const all = loadMoneyTransfers(year);
+    const withIndex = (all || []).map((row, index) => ({ row, index }));
+    const filtered = filterMoneyTransfersForView(withIndex, moneyTransfersViewState.globalFilter);
+
+    if (normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '' && all.length > 0 && filtered.length === 0) {
+      moneyTransfersEmptyState.textContent = 'No money transfers match your search.';
+    } else {
+      moneyTransfersEmptyState.textContent = moneyTransfersViewState.defaultEmptyText;
+    }
+
+    moneyTransfersEmptyState.hidden = filtered.length > 0;
+    renderMoneyTransfersRows(filtered);
+  }
+
+  function initMoneyTransfersListPage() {
+    if (!moneyTransfersTbody || !moneyTransfersEmptyState) return;
+
+    const year = getActiveBudgetYear();
+    const user = getCurrentUser();
+    moneyTransfersViewState.canVerify = Boolean(user && canWrite(user, 'ledger'));
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'money_transfers.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(year));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    ensureMoneyTransfersListExistsForYear(year);
+
+    const titleEl = document.querySelector('[data-money-transfers-title]');
+    if (titleEl) titleEl.textContent = `${year} Money Transfers`;
+    const listTitleEl = document.querySelector('[data-money-transfers-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${year} Money Transfers`;
+    const subheadEl = document.querySelector('[data-money-transfers-subhead]');
+    if (subheadEl) subheadEl.textContent = `Money transfer tracking for ${year}.`;
+    applyAppTabTitle();
+
+    const globalInput = document.getElementById('moneyTransfersGlobalSearch');
+    if (globalInput) {
+      globalInput.value = moneyTransfersViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        moneyTransfersViewState.globalFilter = globalInput.value;
+        if (moneyTransfersClearSearchBtn) {
+          const hasSearch = normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '';
+          moneyTransfersClearSearchBtn.hidden = !hasSearch;
+          moneyTransfersClearSearchBtn.disabled = !hasSearch;
+        }
+        applyMoneyTransfersView();
+      });
+    }
+
+    if (moneyTransfersClearSearchBtn && globalInput) {
+      const hasSearch = normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '';
+      moneyTransfersClearSearchBtn.hidden = !hasSearch;
+      moneyTransfersClearSearchBtn.disabled = !hasSearch;
+      if (!moneyTransfersClearSearchBtn.dataset.bound) {
+        moneyTransfersClearSearchBtn.dataset.bound = 'true';
+        moneyTransfersClearSearchBtn.addEventListener('click', () => {
+          globalInput.value = '';
+          moneyTransfersViewState.globalFilter = '';
+          moneyTransfersClearSearchBtn.hidden = true;
+          moneyTransfersClearSearchBtn.disabled = true;
+          applyMoneyTransfersView();
+          if (globalInput.focus) globalInput.focus();
+        });
+      }
+    }
+
+    if (!moneyTransfersTbody.dataset.verifiedBound) {
+      moneyTransfersTbody.dataset.verifiedBound = '1';
+      moneyTransfersTbody.addEventListener('change', (e) => {
+        const input = e.target && e.target.matches
+          ? (e.target.matches('input[type="checkbox"][data-mt-verify][data-verify-field][data-mt-index]') ? e.target : null)
+          : null;
+        if (!input) return;
+
+        if (!moneyTransfersViewState.canVerify) {
+          input.checked = !input.checked;
+          return;
+        }
+
+        if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) {
+          input.checked = !input.checked;
+          return;
+        }
+
+        const idx = Number(input.getAttribute('data-mt-index'));
+        const field = String(input.getAttribute('data-verify-field') || '').trim();
+        if (!Number.isInteger(idx) || (field !== 'gsVerified' && field !== 'gtVerified')) return;
+
+        const all = loadMoneyTransfers(year);
+        if (!Array.isArray(all) || idx < 0 || idx >= all.length) return;
+
+        const prev = all[idx] && typeof all[idx] === 'object' ? all[idx] : {};
+        all[idx] = { ...prev, [field]: Boolean(input.checked) };
+        saveMoneyTransfers(all, year);
+        applyMoneyTransfersView();
+      });
+    }
+
+    // Keep the list in sync across tabs/windows.
+    if (!moneyTransfersTbody.dataset.storageBound) {
+      moneyTransfersTbody.dataset.storageBound = '1';
+      window.addEventListener('storage', (e) => {
+        const key = e && typeof e.key === 'string' ? e.key : '';
+        if (!key) return;
+        if (key.startsWith('money_transfers_')) {
+          applyMoneyTransfersView();
+        }
+      });
+    }
+
+    applyMoneyTransfersView();
+  }
+
   /** @returns {Array<Object>} */
   function loadIncome(year) {
     const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
@@ -18224,6 +18536,9 @@
         // Income: create the year list on first activation (if missing).
         ensureIncomeListExistsForYear(budgetYear);
 
+        // Money Transfers: create the year list on first activation (if missing).
+        ensureMoneyTransfersListExistsForYear(budgetYear);
+
         // Grand Secretary Ledger: initialize Verified store on first activation (if missing).
         ensureGsLedgerVerifiedStoreExistsForYear(budgetYear);
 
@@ -21311,6 +21626,19 @@
     initMasonicYearSelectFromBudgets(settings.year2);
     if (masonicYearInput) masonicYearInput.value = String(Number(settings.year2));
     if (firstNumberInput) firstNumberInput.value = String(settings.nextSeq);
+    if (firstMoneyTransferNumberInput) firstMoneyTransferNumberInput.value = String(settings.mtNextSeq);
+
+    let numberingSaveMode = 'po';
+    if (savePoNumberingBtn) {
+      savePoNumberingBtn.addEventListener('click', () => {
+        numberingSaveMode = 'po';
+      });
+    }
+    if (saveMtNumberingBtn) {
+      saveMtNumberingBtn.addEventListener('click', () => {
+        numberingSaveMode = 'mt';
+      });
+    }
 
     {
       const hasAnyUsers = loadUsers().length > 0;
@@ -21319,8 +21647,9 @@
       if (hasAnyUsers && !canEdit) {
         if (masonicYearInput) masonicYearInput.disabled = true;
         if (firstNumberInput) firstNumberInput.disabled = true;
-        const submitBtn = numberingForm.querySelector('button[type="submit"]');
-        if (submitBtn) submitBtn.disabled = true;
+        if (firstMoneyTransferNumberInput) firstMoneyTransferNumberInput.disabled = true;
+        const submitBtns = numberingForm.querySelectorAll('button[type="submit"]');
+        submitBtns.forEach((b) => { b.disabled = true; });
       }
     }
 
@@ -21331,11 +21660,19 @@
 
       const yearErr = document.getElementById('error-masonicYear');
       const seqErr = document.getElementById('error-firstNumber');
+      const mtSeqErr = document.getElementById('error-firstMoneyTransferNumber');
       if (yearErr) yearErr.textContent = '';
       if (seqErr) seqErr.textContent = '';
+      if (mtSeqErr) mtSeqErr.textContent = '';
+
+      const submitter = e.submitter;
+      const submitMode = submitter && submitter.dataset && submitter.dataset.numberingSave
+        ? String(submitter.dataset.numberingSave)
+        : numberingSaveMode;
 
       const yearRaw = masonicYearInput ? masonicYearInput.value : '';
       const seqRaw = firstNumberInput ? firstNumberInput.value : '';
+      const mtSeqRaw = firstMoneyTransferNumberInput ? firstMoneyTransferNumberInput.value : '';
 
       const yearNum = Number(yearRaw);
       if (!Number.isFinite(yearNum) || yearNum < 0 || yearNum > 99) {
@@ -21343,19 +21680,33 @@
         return;
       }
 
-      const seqNum = Number(seqRaw);
-      if (!Number.isFinite(seqNum) || seqNum < 1) {
-        if (seqErr) seqErr.textContent = 'Enter a number of 1 or more.';
-        return;
+      const year2 = normalizeMasonicYear2(yearRaw);
+
+      if (submitMode === 'mt') {
+        const mtSeqNum = Number(mtSeqRaw);
+        if (!Number.isFinite(mtSeqNum) || mtSeqNum < 1) {
+          if (mtSeqErr) mtSeqErr.textContent = 'Enter a number of 1 or more.';
+          return;
+        }
+        const mtNextSeq = normalizeSequence(mtSeqRaw);
+        saveNumberingSettings({ year2, mtNextSeq });
+      } else {
+        const seqNum = Number(seqRaw);
+        if (!Number.isFinite(seqNum) || seqNum < 1) {
+          if (seqErr) seqErr.textContent = 'Enter a number of 1 or more.';
+          return;
+        }
+        const nextSeq = normalizeSequence(seqRaw);
+        saveNumberingSettings({ year2, nextSeq });
       }
 
-      const year2 = normalizeMasonicYear2(yearRaw);
-      const nextSeq = normalizeSequence(seqRaw);
-      saveNumberingSettings({ year2, nextSeq });
-
       // Normalize field display after saving
-      if (masonicYearInput) masonicYearInput.value = String(Number(year2));
-      if (firstNumberInput) firstNumberInput.value = String(nextSeq);
+      {
+        const next = loadNumberingSettings();
+        if (masonicYearInput) masonicYearInput.value = String(Number(next.year2));
+        if (firstNumberInput) firstNumberInput.value = String(next.nextSeq);
+        if (firstMoneyTransferNumberInput) firstMoneyTransferNumberInput.value = String(next.mtNextSeq);
+      }
 
       // Close settings after save
       {
@@ -22204,6 +22555,10 @@
 
   if (gsLedgerTbody) {
     initGsLedgerListPage();
+  }
+
+  if (moneyTransfersTbody) {
+    initMoneyTransfersListPage();
   }
 
   // ---- Itemize page logic ----

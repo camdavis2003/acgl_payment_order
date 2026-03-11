@@ -105,6 +105,9 @@ function transformPhp(srcText) {
   out = replaceAll(out, 'ACGL_FMS_', 'ACGL_FMS_DEMO_');
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
 
+  // Make the full-page wrapper tab title clearly DEMO.
+  out = replaceAll(out, ' — FMS</title>', ' — FMS (DEMO)</title>');
+
   // Shortcode tag and other exact matches without trailing underscore.
   out = replaceAll(out, "'acgl_fms'", "'acgl_fms_demo'");
   out = replaceAll(out, '"acgl_fms"', '"acgl_fms_demo"');
@@ -114,6 +117,13 @@ function transformPhp(srcText) {
   // and we don't accidentally turn it into "acgl-fms-demo-demo/v1".
   out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
 
+  return out;
+}
+
+function transformHtml(srcText) {
+  let out = String(srcText);
+  // Update the in-app tab title when the HTML is opened directly.
+  out = out.replace(/<title>\s*ACGL\s*-\s*FMS\s*<\/title>/i, '<title>ACGL - FMS (DEMO)</title>');
   return out;
 }
 
@@ -163,6 +173,13 @@ async function zipDemoPlugin() {
     if (entryRel.endsWith('.php')) {
       const raw = fs.readFileSync(abs, 'utf8');
       const transformed = transformPhp(raw);
+      archive.append(transformed, { name: entryName });
+      continue;
+    }
+
+    if (entryRel.endsWith('.html')) {
+      const raw = fs.readFileSync(abs, 'utf8');
+      const transformed = transformHtml(raw);
       archive.append(transformed, { name: entryName });
       continue;
     }

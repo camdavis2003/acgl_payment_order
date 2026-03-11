@@ -14911,6 +14911,7 @@
     const incomeImportCsvLink = document.getElementById('incomeImportCsvLink');
     const incomeMenuBtn = document.getElementById('incomeActionsMenuBtn');
     const incomeMenuPanel = document.getElementById('incomeActionsMenu');
+    const incomeBackToLedgerLink = document.getElementById('incomeBackToLedgerLink');
 
     function setLinkDisabled(linkEl, disabled) {
       if (!linkEl) return;
@@ -14937,6 +14938,10 @@
     if (titleEl) titleEl.textContent = `${year} Income`;
     const listTitleEl = document.querySelector('[data-income-list-title]');
     if (listTitleEl) listTitleEl.textContent = `${year} Income`;
+    if (incomeBackToLedgerLink) {
+      incomeBackToLedgerLink.href = `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`;
+      incomeBackToLedgerLink.textContent = `← Back to ${year} Ledger`;
+    }
     applyAppTabTitle();
 
     initIncomeColumnSorting();

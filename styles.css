@@ -1220,12 +1220,14 @@ input:focus, textarea:focus, select:focus, button:focus {
 }
 
 /* Payment Orders: highlight Approved rows */
-#ordersTable tr.ordersRow--approved td {
+#ordersTable tr.ordersRow--approved td,
+#ordersTable tr.ordersRow--gtReview td {
   background: var(--caution) !important;
   color: var(--primary-bg) !important;
 }
 
-#ordersTable tr.ordersRow--approved a {
+#ordersTable tr.ordersRow--approved a,
+#ordersTable tr.ordersRow--gtReview a {
   color: var(--primary-bg) !important;
 }
 
@@ -2526,8 +2528,20 @@ input[type='checkbox'].cb {
 #ordersTable th:nth-child(6),
 #ordersTable td:nth-child(6),
 #ordersTable th:nth-child(7),
-#ordersTable td:nth-child(7) {
+#ordersTable td:nth-child(7),
+#ordersTable th:nth-child(8),
+#ordersTable td:nth-child(8) {
   text-align: center;
+}
+
+/* Payment Orders: keep Date on one line */
+#ordersTable th:nth-child(3) {
+  width: 128px;
+}
+
+#ordersTable th:nth-child(3),
+#ordersTable td:nth-child(3) {
+  white-space: nowrap;
 }
 
 /* wiseUSD: center all columns except Description */
@@ -2587,12 +2601,14 @@ input[type='checkbox'].cb {
 }
 
 /* Ledger: highlight Approved Payment Orders */
-#gsLedgerTable tr.gsLedgerRow--approved td {
+#gsLedgerTable tr.gsLedgerRow--approved td,
+#gsLedgerTable tr.gsLedgerRow--gtReview td {
   background: var(--caution);
   color: var(--primary-bg);
 }
 
-#gsLedgerTable tr.gsLedgerRow--approved a {
+#gsLedgerTable tr.gsLedgerRow--approved a,
+#gsLedgerTable tr.gsLedgerRow--gtReview a {
   color: var(--primary-bg);
 }
 
@@ -3071,7 +3087,6 @@ input[type='checkbox'].cb {
   padding-top: 8px;
   max-height: 220px;
   overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 /* Income (Edit) modal: keep the Save button visible even with long timelines */

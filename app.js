@@ -6834,6 +6834,21 @@
     return [...timeline, evt];
   }
 
+  function hasPaymentOrderGrandMasterApproval(order) {
+    const timeline = ensureOrderTimeline(order);
+    for (const evt of Array.isArray(timeline) ? timeline : []) {
+      if (!evt || typeof evt !== 'object') continue;
+      const actorWith = normalizeWith(evt.actorWith);
+      const actorStatus = normalizeOrderStatus(evt.actorStatus);
+      if (actorWith === 'Grand Master' && actorStatus === 'Approved') return true;
+
+      const withLabel = normalizeWith(evt.with);
+      const statusLabel = normalizeOrderStatus(evt.status);
+      if (withLabel === 'Grand Master' && statusLabel === 'Approved') return true;
+    }
+    return false;
+  }
+
   async function wpPublicSubmitPaymentOrder(year, values, items) {
     const url = wpJoin('acgl-fms/v1/public/submit-po');
     const body = {
@@ -6974,7 +6989,6 @@
     const u = getCurrentUser && getCurrentUser();
     const name = u && u.username ? String(u.username).trim() : '';
     if (!name) return 'Unknown';
-    if (isHardcodedAdminUsername(name)) return '—';
     return name;
   }
 
@@ -7110,12 +7124,18 @@
         const user = e.user !== undefined ? String(e.user || '—') : '—';
         const w = e.with !== undefined ? normalizeWith(e.with) : '—';
         const s = e.status !== undefined ? normalizeOrderStatus(e.status) : '—';
+        const actorWith = e.actorWith !== undefined ? normalizeWith(e.actorWith) : '';
+        const actorStatus = e.actorStatus !== undefined ? normalizeOrderStatus(e.actorStatus) : '';
+        const hasActor = (actorWith && actorWith !== w) || (actorStatus && actorStatus !== s);
+        const actorHtml = hasActor
+          ? `${actorWith ? `<span class="timelinegraph__eventSep">•</span><span>Actor: <strong>${escapeHtml(actorWith)}</strong></span>` : ''}${actorStatus ? `<span class="timelinegraph__eventSep">•</span><span>Actor Status: <strong>${escapeHtml(actorStatus)}</strong></span>` : ''}`
+          : '';
         const commentRaw = e.comment !== undefined ? String(e.comment || '') : '';
         const comment = commentRaw.trim();
         const commentHtml = comment
           ? `<span class="timelinegraph__eventSep">•</span><span>Comment: <strong>${escapeHtml(comment).replace(/\n/g, '<br>')}</strong></span>`
           : '';
-        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>Modified by: <strong>${escapeHtml(user)}</strong></span><span class="timelinegraph__eventSep">•</span><span>With: <strong>${escapeHtml(w)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Status: <strong>${escapeHtml(s)}</strong></span>${commentHtml}</div>`;
+        return `<div class="timelinegraph__event"><span class="timelinegraph__eventTime">${escapeHtml(t)}</span><span class="timelinegraph__eventSep">•</span><span>Modified by: <strong>${escapeHtml(user)}</strong></span><span class="timelinegraph__eventSep">•</span><span>With: <strong>${escapeHtml(w)}</strong></span><span class="timelinegraph__eventSep">•</span><span>Status: <strong>${escapeHtml(s)}</strong></span>${actorHtml}${commentHtml}</div>`;
       })
       .join('');
 
@@ -7173,9 +7193,14 @@
         const isMissingRequired = hasOrderMissingRequiredValues(o);
         const statusLabel = getOrderStatusLabel(o);
         const isApproved = String(statusLabel || '').trim().toLowerCase() === 'approved';
+        const withLabel = getOrderWithLabel(o);
+        const isGtReview =
+          String(statusLabel || '').trim().toLowerCase() === 'review' &&
+          String(withLabel || '').trim().toLowerCase() === 'grand treasurer';
         const rowClasses = [];
         if (isMissingRequired) rowClasses.push('ordersRow--missingRequired');
         if (isApproved) rowClasses.push('ordersRow--approved');
+        if (isGtReview) rowClasses.push('ordersRow--gtReview');
         const rowClass = rowClasses.length ? ` class="${rowClasses.join(' ')}"` : '';
         return `
           <tr${rowClass} data-id="${escapeHtml(o.id)}">
@@ -11072,11 +11097,24 @@
           if (!e || typeof e !== 'object' || !e.at) continue;
           const ms = toTimeMs(e.at) ?? 0;
           const user = e.user !== undefined ? String(e.user || '—') : '—';
-          if (isHardcodedAdminUsername(user)) continue;
           const action = e.action !== undefined ? String(e.action || '—') : (i === 0 ? 'Created' : 'Edited');
           const isCreated = String(action).trim().toLowerCase() === 'created';
           let changes = Array.isArray(e.changes) ? e.changes : [];
           if (isCreated) changes = [];
+
+          // If workflow auto-changed With/Status, preserve the actor's original action in the log.
+          const withFinal = e.with !== undefined ? normalizeWith(e.with) : '—';
+          const statusFinal = e.status !== undefined ? normalizeOrderStatus(e.status) : '—';
+          const actorWith = e.actorWith !== undefined ? normalizeWith(e.actorWith) : '';
+          const actorStatus = e.actorStatus !== undefined ? normalizeOrderStatus(e.actorStatus) : '';
+          const actorDiffers = (actorWith && actorWith !== withFinal) || (actorStatus && actorStatus !== statusFinal);
+          if (actorDiffers) {
+            const actorRows = [];
+            if (actorWith && actorWith !== withFinal) actorRows.push({ field: 'Actor With', from: '', to: actorWith });
+            if (actorStatus && actorStatus !== statusFinal) actorRows.push({ field: 'Actor Status', from: '', to: actorStatus });
+            changes = [...actorRows, ...changes];
+          }
+
           events.push({ ms, at: String(e.at), module: `Payment Orders (${year})`, record, user, action, changes });
         }
       }
@@ -11102,7 +11140,6 @@
           if (!e || typeof e !== 'object' || !e.at) continue;
           const ms = toTimeMs(e.at) ?? 0;
           const user = e.user !== undefined ? String(e.user || '—') : '—';
-          if (isHardcodedAdminUsername(user)) continue;
           const action = e.action !== undefined ? String(e.action || '—') : (i === 0 ? 'Created' : 'Edited');
           const isCreated = String(action).trim().toLowerCase() === 'created';
           let changes = Array.isArray(e.changes) ? e.changes : [];
@@ -11125,7 +11162,6 @@
           const action = e.action !== undefined ? String(e.action || '—') : 'Event';
           return { ms, at, module, record, user, action };
         })
-        .filter((e) => !isHardcodedAdminUsername(e.user))
         .sort((a, b) => a.ms - b.ms);
 
       const openLoginByUser = new Map();
@@ -12657,8 +12693,12 @@
       if (src === 'wiseEUR' && srcEntryId) linkedWiseEurEntryIds.add(srcEntryId);
       if (src === 'wiseUSD' && srcEntryId) linkedWiseUsdEntryIds.add(srcEntryId);
 
-      const statusRaw = String(o.status || '').trim().toLowerCase();
-      if (statusRaw !== 'approved' && statusRaw !== 'paid') continue;
+      const statusLabel = normalizeOrderStatus(o.status);
+      const withLabel = normalizeWith(o.with);
+      const statusRaw = String(statusLabel || '').trim().toLowerCase();
+      const isApprovedOrPaid = statusRaw === 'approved' || statusRaw === 'paid';
+      const isGtReviewWithGmApproved = statusRaw === 'review' && withLabel === 'Grand Treasurer' && hasPaymentOrderGrandMasterApproval(o);
+      if (!isApprovedOrPaid && !isGtReviewWithGmApproved) continue;
       const ledgerId = `po:${String(o.id)}`;
 
       const euroRaw = String(o.euro ?? '').trim();
@@ -12676,6 +12716,7 @@
         euro: Number.isFinite(euroNum) ? -Math.abs(euroNum) : null,
         usd: Number.isFinite(usdNum) ? -Math.abs(usdNum) : null,
         verified: Boolean(verified[ledgerId]),
+        with: withLabel,
         status: String(o.status || ''),
         details: String(o.purpose || ''),
       });
@@ -12871,8 +12912,11 @@
     const html = (rows || [])
       .map((r) => {
         const ledgerId = escapeHtml(r.ledgerId);
-        const isApproved = String(r && r.status ? r.status : '').trim().toLowerCase() === 'approved';
-        const trClass = isApproved ? 'gsLedgerRow--approved' : '';
+        const statusLabel = String(r && r.status ? r.status : '').trim();
+        const withLabel = normalizeWith(r && r.with ? r.with : '');
+        const isApproved = statusLabel.toLowerCase() === 'approved';
+        const isGtReview = statusLabel.toLowerCase() === 'review' && withLabel.toLowerCase() === 'grand treasurer';
+        const trClass = isApproved ? 'gsLedgerRow--approved' : isGtReview ? 'gsLedgerRow--gtReview' : '';
         const date = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'date'));
         const budgetCode = getGsLedgerDisplayValueForColumn(r, 'budgetNumber');
         const code = extractInCodeFromBudgetNumberText(budgetCode);
@@ -12885,7 +12929,12 @@
         const poNo = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'paymentOrderNo'));
         const euro = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'euro'));
         const usd = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'usd'));
-        const status = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'status'));
+        const statusRaw = String(getGsLedgerDisplayValueForColumn(r, 'status') || '').trim();
+        const statusNorm = normalizeOrderStatus(statusRaw);
+        const statusText = escapeHtml(statusRaw);
+        const statusHtml = statusNorm === 'Review'
+          ? `<span class="poProgress__status" data-po-tooltip="Approved by the Grand Master" tabindex="0">${statusText}</span>`
+          : statusText;
         const details = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'details'));
         const orderIdRaw = String(r && r.ledgerId ? r.ledgerId : '').startsWith('po:') ? String(r.ledgerId).slice(3) : '';
         const orderId = escapeHtml(orderIdRaw);
@@ -12907,7 +12956,7 @@
             <td class="num">
               <input type="checkbox" data-ledger-verify="1" data-ledger-id="${ledgerId}" aria-label="Verified" ${checked} ${verifyDisabled} />
             </td>
-            <td>${status}</td>
+            <td>${statusHtml}</td>
             <td>${details}</td>
           </tr>
         `.trim();
@@ -12915,6 +12964,7 @@
       .join('');
 
     gsLedgerTbody.innerHTML = html;
+    initPoProgressStatusTooltips(gsLedgerTbody);
   }
 
   function updateGsLedgerSortIndicators() {
@@ -21900,6 +21950,20 @@
         const requestedWith = rawWith ? normalizeWith(rawWith) : '';
         const requestedStatus = normalizeOrderStatus(statusSelect.value);
 
+        // IMPORTANT: capture what the user selected BEFORE any workflow auto-changes.
+        // The modal stores these as attributes when the user changes Status/With.
+        const actorWithPreWorkflow = modal ? normalizeWith(modal.getAttribute('data-pending-actor-with') || '') : '';
+        const actorStatusPreWorkflow = modal ? normalizeOrderStatus(modal.getAttribute('data-pending-actor-status') || '') : '';
+
+        const originalWith = modal ? normalizeWith(modal.getAttribute('data-original-with') || '') : '';
+        const originalStatus = modal ? normalizeOrderStatus(modal.getAttribute('data-original-status') || '') : '';
+
+        const actorWithForLog = actorWithPreWorkflow || originalWith || prevWith || requestedWith;
+
+        // If With-driven workflow changes Status, the UI select may already show the post-workflow value.
+        // To match the progress-bubble behavior, prefer the pre-workflow status captured by the modal.
+        const actorStatusForLog = actorStatusPreWorkflow || originalStatus || prevStatus || requestedStatus;
+
         let nextWith = requestedWith;
         let nextStatus = requestedStatus;
 
@@ -21988,8 +22052,8 @@
               at: nowIso,
               with: nextWith,
               status: nextStatus,
-              actorWith: prevWith,
-              actorStatus: requestedStatus,
+              actorWith: actorWithForLog,
+              actorStatus: actorStatusForLog,
               user: getTimelineUsername(),
               action: 'Edited',
               changes,

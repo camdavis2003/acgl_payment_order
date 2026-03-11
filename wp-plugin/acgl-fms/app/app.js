@@ -12929,7 +12929,12 @@
         const poNo = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'paymentOrderNo'));
         const euro = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'euro'));
         const usd = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'usd'));
-        const status = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'status'));
+        const statusRaw = String(getGsLedgerDisplayValueForColumn(r, 'status') || '').trim();
+        const statusNorm = normalizeOrderStatus(statusRaw);
+        const statusText = escapeHtml(statusRaw);
+        const statusHtml = statusNorm === 'Review'
+          ? `<span class="poProgress__status" data-po-tooltip="Approved by the Grand Master" tabindex="0">${statusText}</span>`
+          : statusText;
         const details = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'details'));
         const orderIdRaw = String(r && r.ledgerId ? r.ledgerId : '').startsWith('po:') ? String(r.ledgerId).slice(3) : '';
         const orderId = escapeHtml(orderIdRaw);
@@ -12951,7 +12956,7 @@
             <td class="num">
               <input type="checkbox" data-ledger-verify="1" data-ledger-id="${ledgerId}" aria-label="Verified" ${checked} ${verifyDisabled} />
             </td>
-            <td>${status}</td>
+            <td>${statusHtml}</td>
             <td>${details}</td>
           </tr>
         `.trim();
@@ -12959,6 +12964,7 @@
       .join('');
 
     gsLedgerTbody.innerHTML = html;
+    initPoProgressStatusTooltips(gsLedgerTbody);
   }
 
   function updateGsLedgerSortIndicators() {

@@ -130,6 +130,9 @@ function transformHtml(srcText) {
 function transformAppJs(srcText) {
   let out = String(srcText);
 
+  // Make demo tab title obvious even after JS overrides document.title.
+  out = replaceAll(out, "const APP_TAB_TITLE = 'ACGL - FMS';", "const APP_TAB_TITLE = 'ACGL - FMS (DEMO)';");
+
   // Separate browser state between production and demo.
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
 

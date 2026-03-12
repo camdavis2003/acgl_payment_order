@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=f2069d9-20260312113317" />
+    <link rel="stylesheet" href="styles.css?v=c5984b4-20260312173325" />
   </head>
   <body data-page="admin-settings">
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -97,11 +97,9 @@
                 <thead>
                   <tr>
                     <th scope="col">Username</th>
-                    <th scope="col">Budget</th>
-                    <th scope="col">Income</th>
-                    <th scope="col">P.O.</th>
-                    <th scope="col">Ledger</th>
-                    <th scope="col">Settings</th>
+                    <th scope="col">Password</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Role</th>
                     <th scope="col" class="col-actions">Actions</th>
                   </tr>
                 </thead>
@@ -600,125 +598,506 @@
               >
                 <div class="rolesGrid__label">Select all</div>
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permAllWrite" /> Full
-                  access</label
+                  ><input type="checkbox" id="permAllWrite" /> Admin</label
                 >
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permAllPartial" /> Partial
-                  access</label
+                  ><input type="checkbox" id="permAllDelete" /> Delete</label
                 >
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permAllRead" /> Read only</label
+                  ><input type="checkbox" id="permAllCreate" /> Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permAllPartial" /> Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permAllRead" /> View</label
                 >
               </div>
 
-              <div
-                class="rolesGrid__row"
-                role="group"
-                aria-label="Budget access"
-              >
+              <div class="rolesGrid__row" role="group" aria-label="Budget">
                 <div class="rolesGrid__label">Budget</div>
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permBudgetWrite" /> Full
-                  access</label
-                >
-                <label
-                  class="rolesGrid__check"
-                  data-tooltip="Allows: view/edit/save budget table, add/remove lines, export/template. Restricted (no access): Activate Budget, New Budget Year, Deactivate Budget, Import CSV."
-                  ><input type="checkbox" id="permBudgetPartial" /> Partial
-                  access</label
+                  ><input type="checkbox" id="permBudgetWrite" /> Admin</label
                 >
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permBudgetRead" /> Read
-                  only</label
+                  ><input type="checkbox" id="permBudgetDelete" /> Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetCreate" /> Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetPartial" /> Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetRead" /> View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="Dashboard"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  Dashboard
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetDashboardWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetDashboardDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetDashboardCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetDashboardPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permBudgetDashboardRead" />
+                  View</label
                 >
               </div>
 
-              <div
-                class="rolesGrid__row"
-                role="group"
-                aria-label="Income access"
-              >
+              <div class="rolesGrid__row" role="group" aria-label="Income">
                 <div class="rolesGrid__label">Income</div>
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeWrite" /> Full
-                  access</label
-                >
-                <label
-                  class="rolesGrid__check"
-                  data-tooltip="Allows: view/edit/save existing income entries, export/template. Restricted (no access): New Income, Import CSV."
-                  ><input type="checkbox" id="permIncomePartial" /> Partial
-                  access</label
+                  ><input type="checkbox" id="permIncomeWrite" /> Admin</label
                 >
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeRead" /> Read
-                  only</label
+                  ><input type="checkbox" id="permIncomeDelete" /> Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeCreate" /> Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomePartial" /> Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeRead" /> View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="BankEUR"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  BankEUR
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurRead" />
+                  View</label
                 >
               </div>
 
               <div
                 class="rolesGrid__row"
                 role="group"
-                aria-label="Payment Orders access"
+                aria-label="Payment Orders"
               >
                 <div class="rolesGrid__label">Payment Orders</div>
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permOrdersWrite" /> Full
-                  access</label
-                >
-                <label
-                  class="rolesGrid__check"
-                  data-tooltip="Allows: view Payment Orders and open the View form. Partial access can update only the 'With' and 'Status' fields from the View form. Restricted (no access): Create new requests, Edit requests, Delete requests, Items editing, and all Reconciliation actions."
-                  ><input type="checkbox" id="permOrdersPartial" /> Partial
-                  access</label
+                  ><input type="checkbox" id="permOrdersWrite" /> Admin</label
                 >
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permOrdersRead" /> Read
-                  only</label
+                  ><input type="checkbox" id="permOrdersDelete" /> Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersCreate" /> Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersPartial" /> Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersRead" /> View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="Itemize Payment Order"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  Itemize Payment Order
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersItemizeWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersItemizeDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersItemizeCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersItemizePartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersItemizeRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="Reconciliation"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  Reconciliation
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersReconciliationWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersReconciliationDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersReconciliationCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input
+                    type="checkbox"
+                    id="permOrdersReconciliationPartial"
+                  />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permOrdersReconciliationRead" />
+                  View</label
                 >
               </div>
 
-              <div
-                class="rolesGrid__row"
-                role="group"
-                aria-label="Ledger access"
-              >
+              <div class="rolesGrid__row" role="group" aria-label="Ledger">
                 <div class="rolesGrid__label">Ledger</div>
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permLedgerWrite" /> Full
-                  access</label
-                >
-                <label
-                  class="rolesGrid__check"
-                  data-tooltip="Allows: view Ledger and export CSV. Restricted (no access): checking/unchecking Verified."
-                  ><input type="checkbox" id="permLedgerPartial" /> Partial
-                  access</label
+                  ><input type="checkbox" id="permLedgerWrite" /> Admin</label
                 >
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permLedgerRead" /> Read
-                  only</label
+                  ><input type="checkbox" id="permLedgerDelete" /> Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerCreate" /> Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerPartial" /> Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerRead" /> View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="wiseEUR"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  wiseEUR
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseEurWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseEurDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseEurCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseEurPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseEurRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="wiseUSD"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  wiseUSD
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseUsdWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseUsdDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseUsdCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseUsdPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerWiseUsdRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="Money Transfers"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  Money Transfers
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerMoneyTransfersWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerMoneyTransfersDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerMoneyTransfersCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input
+                    type="checkbox"
+                    id="permLedgerMoneyTransfersPartial"
+                  />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permLedgerMoneyTransfersRead" />
+                  View</label
                 >
               </div>
 
               <div
                 class="rolesGrid__row"
                 role="group"
-                aria-label="Admin Settings access"
+                aria-label="Admin Settings"
               >
                 <div class="rolesGrid__label">Admin Settings</div>
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permSettingsWrite" /> Full
-                  access</label
-                >
-                <label
-                  class="rolesGrid__check"
-                  data-tooltip="Allows: view Admin Settings and edit/save Payment Order & Money Transfer Numbering settings, view Audit Log. Restricted (read-only): User Roles (no add/edit/delete users or permissions)."
-                  ><input type="checkbox" id="permSettingsPartial" /> Partial
-                  access</label
+                  ><input type="checkbox" id="permSettingsWrite" /> Admin</label
                 >
                 <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permSettingsRead" /> Read
-                  only</label
+                  ><input type="checkbox" id="permSettingsDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsRead" /> View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="User Roles"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  User Roles
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsRolesWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsRolesDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsRolesCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsRolesPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsRolesRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="Backlog"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  Backlog
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBacklogWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBacklogDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBacklogCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBacklogPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBacklogRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="PO and MT Numbering"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  PO &amp; MT Numbering
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsNumberingWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsNumberingDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsNumberingCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsNumberingPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsNumberingRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="GL Information"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  GL Information
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsGrandLodgeWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsGrandLodgeDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsGrandLodgeCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsGrandLodgePartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsGrandLodgeRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="Backup"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">Backup</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBackupWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBackupDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBackupCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBackupPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsBackupRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
+                aria-label="Audit Log"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  Audit Log
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsAuditWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsAuditDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsAuditCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsAuditPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsAuditRead" />
+                  View</label
                 >
               </div>
             </div>
@@ -925,6 +1304,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=f2069d9-20260312113317" defer></script>
+    <script src="app.js?v=c5984b4-20260312173325" defer></script>
   </body>
 </html>

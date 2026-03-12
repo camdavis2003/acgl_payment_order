@@ -1032,23 +1032,100 @@
     const p = perms && typeof perms === 'object' ? perms : {};
 
     const normalizeLevel = (value) => {
-      if (value === true) return 'write';
+      if (value === true) return 'full';
       if (value === false || value == null) return 'none';
       const v = String(value).trim().toLowerCase();
-      if (v === 'write' || v === 'full' || v === 'fullaccess') return 'write';
-      if (v === 'partial' || v === 'limited' || v === 'some') return 'partial';
+      if (v === 'full' || v === 'fullaccess' || v === 'admin') return 'full';
+      if (v === 'delete' || v === 'remove') return 'delete';
+      if (v === 'create' || v === 'add') return 'create';
+      if (v === 'write' || v === 'edit' || v === 'partial' || v === 'limited' || v === 'some') return 'write';
       if (v === 'read' || v === 'readonly' || v === 'read-only') return 'read';
       if (v === 'none' || v === 'no' || v === 'noaccess') return 'none';
       return 'none';
     };
 
-    return {
-      budget: normalizeLevel(p.budget),
-      income: normalizeLevel(p.income),
-      orders: normalizeLevel(p.orders),
-      ledger: normalizeLevel(p.ledger),
-      settings: normalizeLevel(p.settings),
-    };
+    const next = {};
+    for (const def of PERMISSION_DEFS) {
+      const own = Object.prototype.hasOwnProperty.call(p, def.key);
+      const raw = own
+        ? p[def.key]
+        : (def.parent ? p[def.parent] : null);
+      next[def.key] = normalizeLevel(raw);
+    }
+
+    // Keep parent modules at least as permissive as any configured sub-category.
+    for (const def of PERMISSION_DEFS) {
+      if (!def.parent) continue;
+      const childRank = ACCESS_LEVEL_RANK[next[def.key]] || 0;
+      const parentRank = ACCESS_LEVEL_RANK[next[def.parent]] || 0;
+      if (childRank > parentRank) next[def.parent] = next[def.key];
+    }
+
+    return next;
+  }
+
+  const PERMISSION_DEFS = [
+    { key: 'budget' },
+    { key: 'budget_dashboard', parent: 'budget' },
+    { key: 'income' },
+    { key: 'income_bankeur', parent: 'income' },
+    { key: 'orders' },
+    { key: 'orders_itemize', parent: 'orders' },
+    { key: 'orders_reconciliation', parent: 'orders' },
+    { key: 'ledger' },
+    { key: 'ledger_wiseeur', parent: 'ledger' },
+    { key: 'ledger_wiseusd', parent: 'ledger' },
+    { key: 'ledger_money_transfers', parent: 'ledger' },
+    { key: 'settings' },
+    { key: 'settings_roles', parent: 'settings' },
+    { key: 'settings_backlog', parent: 'settings' },
+    { key: 'settings_numbering', parent: 'settings' },
+    { key: 'settings_grandlodge', parent: 'settings' },
+    { key: 'settings_backup', parent: 'settings' },
+    { key: 'settings_audit', parent: 'settings' },
+  ];
+
+  const PERMISSION_FORM_ROWS = [
+    { key: 'budget', idBase: 'Budget', label: 'Budget', group: 'main' },
+    { key: 'budget_dashboard', idBase: 'BudgetDashboard', label: 'Dashboard', group: 'sub' },
+    { key: 'income', idBase: 'Income', label: 'Income', group: 'main' },
+    { key: 'income_bankeur', idBase: 'IncomeBankeur', label: 'BankEUR', group: 'sub' },
+    { key: 'orders', idBase: 'Orders', label: 'Payment Orders', group: 'main' },
+    { key: 'orders_itemize', idBase: 'OrdersItemize', label: 'Itemize Payment Order', group: 'sub' },
+    { key: 'orders_reconciliation', idBase: 'OrdersReconciliation', label: 'Reconciliation', group: 'sub' },
+    { key: 'ledger', idBase: 'Ledger', label: 'Ledger', group: 'main' },
+    { key: 'ledger_wiseeur', idBase: 'LedgerWiseEur', label: 'wiseEUR', group: 'sub' },
+    { key: 'ledger_wiseusd', idBase: 'LedgerWiseUsd', label: 'wiseUSD', group: 'sub' },
+    { key: 'ledger_money_transfers', idBase: 'LedgerMoneyTransfers', label: 'Money Transfers', group: 'sub' },
+    { key: 'settings', idBase: 'Settings', label: 'Admin Settings', group: 'main' },
+    { key: 'settings_roles', idBase: 'SettingsRoles', label: 'User Roles', group: 'sub' },
+    { key: 'settings_backlog', idBase: 'SettingsBacklog', label: 'Backlog', group: 'sub' },
+    { key: 'settings_numbering', idBase: 'SettingsNumbering', label: 'PO & MT Numbering', group: 'sub' },
+    { key: 'settings_grandlodge', idBase: 'SettingsGrandLodge', label: 'GL Information', group: 'sub' },
+    { key: 'settings_backup', idBase: 'SettingsBackup', label: 'Backup', group: 'sub' },
+    { key: 'settings_audit', idBase: 'SettingsAudit', label: 'Audit Log', group: 'sub' },
+  ];
+
+  const ACCESS_LEVELS = ['none', 'read', 'write', 'create', 'delete', 'full'];
+  const ACCESS_LEVEL_RANK = {
+    none: 0,
+    read: 1,
+    write: 2,
+    create: 3,
+    delete: 4,
+    full: 5,
+  };
+
+  function isValidAccessLevel(level) {
+    return ACCESS_LEVELS.includes(String(level || '').toLowerCase());
+  }
+
+  function hasModuleAccessLevel(user, permKey, minLevel) {
+    if (!permKey) return true;
+    const p = getEffectivePermissions(user);
+    const current = String((p && p[permKey]) || 'none').toLowerCase();
+    const needed = isValidAccessLevel(minLevel) ? String(minLevel).toLowerCase() : 'read';
+    return (ACCESS_LEVEL_RANK[current] || 0) >= (ACCESS_LEVEL_RANK[needed] || 0);
   }
 
   function getEffectivePermissions(user) {
@@ -1076,17 +1153,19 @@
     if (base === 'index.html') return null;
     if (base === 'itemize.html' && isPublicItemizeDraft()) return null;
 
-    // Itemize for an existing order requires Orders permission.
-    if (base === 'itemize.html') return 'orders';
+    // Itemize for an existing order requires Itemize permission.
+    if (base === 'itemize.html') return 'orders_itemize';
 
-    if (base === 'budget.html' || base === 'budget_dashboard.html') return 'budget';
-    if (base === 'income.html') return 'income';
-    if (base === 'wise_eur.html') return 'ledger';
-    if (base === 'wise_usd.html') return 'ledger';
-    if (base === 'menu.html' || base === 'reconciliation.html') return 'orders';
+    if (base === 'budget.html') return 'budget';
+    if (base === 'budget_dashboard.html') return 'budget_dashboard';
+    if (base === 'income.html') return 'income_bankeur';
+    if (base === 'wise_eur.html') return 'ledger_wiseeur';
+    if (base === 'wise_usd.html') return 'ledger_wiseusd';
+    if (base === 'menu.html') return 'orders';
+    if (base === 'reconciliation.html') return 'orders_reconciliation';
     if (base === 'grand_secretary_ledger.html') return 'ledger';
-    if (base === 'money_transfers.html') return 'ledger';
-    if (base === 'money_transfer.html') return 'ledger';
+    if (base === 'money_transfers.html') return 'ledger_money_transfers';
+    if (base === 'money_transfer.html') return 'ledger_money_transfers';
     if (base === 'settings.html') return 'settings';
     return null;
   }
@@ -1148,34 +1227,38 @@
 
   function hasPermission(user, permKey) {
     if (!permKey) return true;
-    const p = getEffectivePermissions(user);
-    return p[permKey] !== 'none';
+    return hasModuleAccessLevel(user, permKey, 'read');
   }
 
   function canWrite(user, permKey) {
     if (!permKey) return true;
-    const p = getEffectivePermissions(user);
-    return p[permKey] === 'write';
+    return hasModuleAccessLevel(user, permKey, 'write');
+  }
+
+  function canCreate(user, permKey) {
+    if (!permKey) return true;
+    return hasModuleAccessLevel(user, permKey, 'create');
+  }
+
+  function canDelete(user, permKey) {
+    if (!permKey) return true;
+    return hasModuleAccessLevel(user, permKey, 'delete');
   }
 
   function canBudgetEdit(user) {
-    const p = getEffectivePermissions(user);
-    return p.budget === 'write' || p.budget === 'partial';
+    return canWrite(user, 'budget');
   }
 
   function canIncomeEdit(user) {
-    const p = getEffectivePermissions(user);
-    return p.income === 'write' || p.income === 'partial';
+    return canWrite(user, 'income');
   }
 
   function canOrdersViewEdit(user) {
-    const p = getEffectivePermissions(user);
-    return p.orders === 'write' || p.orders === 'partial';
+    return canWrite(user, 'orders');
   }
 
   function canSettingsEdit(user) {
-    const p = getEffectivePermissions(user);
-    return p.settings === 'write' || p.settings === 'partial';
+    return canWrite(user, 'settings');
   }
 
   function requireBudgetEditAccess(message) {
@@ -1204,15 +1287,15 @@
     return true;
   }
 
-  function requireWriteAccess(permKey, message) {
+  function requireWriteAccess(permKey, message, minLevel = 'write') {
     // Public New Request Form flow: allow creating a new request without login.
     // If editing an existing order, keep normal permission checks.
     if (permKey === 'orders' && isPublicRequestPage(window.location.pathname) && !getEditOrderId()) {
       // Anonymous users can submit new requests.
-      // Signed-in users must have Full access for Payment Orders to create.
+      // Signed-in users must have required access for Payment Orders to create.
       const maybeUser = getCurrentUser();
       if (!maybeUser) return true;
-      if (!canWrite(maybeUser, 'orders')) {
+      if (!hasModuleAccessLevel(maybeUser, 'orders', minLevel)) {
         window.alert(message || 'Read only access.');
         return false;
       }
@@ -1232,11 +1315,19 @@
       window.alert('Please sign in.');
       return false;
     }
-    if (!canWrite(user, permKey)) {
+    if (!hasModuleAccessLevel(user, permKey, minLevel)) {
       window.alert(message || 'Read only access.');
       return false;
     }
     return true;
+  }
+
+  function requireCreateAccess(permKey, message) {
+    return requireWriteAccess(permKey, message, 'create');
+  }
+
+  function requireDeleteAccess(permKey, message) {
+    return requireWriteAccess(permKey, message, 'delete');
   }
 
   function requireOrdersViewEditAccess(message) {
@@ -1252,7 +1343,7 @@
     return true;
   }
 
-  function requireSettingsEditAccess(message) {
+  function requireSettingsEditAccess(message, permKey = 'settings') {
     // Bootstrap: allow initial setup before any users exist.
     const hasAnyUsers = loadUsers().length > 0;
     if (!hasAnyUsers) return true;
@@ -1262,7 +1353,7 @@
       window.alert('Please sign in.');
       return false;
     }
-    if (!canSettingsEdit(user)) {
+    if (!canWrite(user, permKey)) {
       window.alert(message || 'Read only access.');
       return false;
     }
@@ -1686,7 +1777,7 @@
         href: `budget.html?year=${encodeURIComponent(String(resolvedYear))}`,
         children: [
           // Child #1: Dashboard for the current year.
-          { label: 'Dashboard', href: `budget_dashboard.html?year=${encodeURIComponent(String(resolvedYear))}` },
+          { key: 'budget_dashboard', label: 'Dashboard', href: `budget_dashboard.html?year=${encodeURIComponent(String(resolvedYear))}` },
           // Child #2+: Current year link first, then remaining budget years.
           ...[resolvedYear, ...navYears.filter((y) => y !== resolvedYear)].map((year) => ({
             label: String(year),
@@ -1700,19 +1791,22 @@
         label: 'Ledger',
         href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
         children: [
-          ...(hasPermission(currentUser, 'income')
+          ...(hasPermission(currentUser, 'income_bankeur')
             ? [
               {
+                key: 'income_bankeur',
                 label: 'BankEUR',
                 href: `income.html?year=${encodeURIComponent(String(resolvedYear))}`,
               },
             ]
             : []),
           {
+            key: 'ledger_wiseeur',
             label: 'wiseEUR',
             href: `wise_eur.html?year=${encodeURIComponent(String(resolvedYear))}`,
           },
           {
+            key: 'ledger_wiseusd',
             label: 'wiseUSD',
             href: `wise_usd.html?year=${encodeURIComponent(String(resolvedYear))}`,
           },
@@ -1728,6 +1822,7 @@
         href: `menu.html?year=${encodeURIComponent(String(resolvedYear))}`,
         children: [
           {
+            key: 'orders_reconciliation',
             label: 'Reconciliations',
             href: `reconciliation.html?year=${encodeURIComponent(String(resolvedYear))}`,
           },
@@ -1738,7 +1833,7 @@
         ],
       },
       {
-        key: 'ledger',
+        key: 'ledger_money_transfers',
         label: 'Money Transfers',
         href: `money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`,
         children: navYears.map((year) => ({
@@ -1760,7 +1855,14 @@
     }
 
     // Filter nav by role permissions.
-    return config.filter((it) => hasPermission(currentUser, it.key));
+    return config
+      .filter((it) => hasPermission(currentUser, it.key))
+      .map((it) => ({
+        ...it,
+        children: Array.isArray(it.children)
+          ? it.children.filter((child) => hasPermission(currentUser, child && child.key ? child.key : null))
+          : it.children,
+      }));
   }
 
   async function wpAuthLogin(usernameRaw, passwordRaw) {
@@ -6106,7 +6208,8 @@
         showAttachmentsError('Sign in to upload attachments.');
         return;
       }
-      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+      const requiredLevel = context && context.orderId ? 'write' : 'create';
+      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.', requiredLevel)) return;
 
       const po = context && typeof context.paymentOrderNo === 'string' ? context.paymentOrderNo.trim() : '';
       const oid = context && typeof context.orderId === 'string' ? context.orderId.trim() : '';
@@ -7567,11 +7670,15 @@
     const year = getActiveBudgetYear();
 
     const currentUser = getCurrentUser();
-    const canFullWrite = currentUser ? canWrite(currentUser, 'orders') : false;
+    const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
+    const canDeleteOrders = currentUser ? canDelete(currentUser, 'orders') : false;
     const canViewItems = currentUser ? canOrdersViewEdit(currentUser) : false;
-    const writeDisabledAttr = canFullWrite ? '' : ' disabled';
-    const writeAriaDisabled = canFullWrite ? 'false' : 'true';
-    const writeTooltipAttr = canFullWrite ? '' : ' data-tooltip="Requires Full access for Payment Orders."';
+    const editDisabledAttr = canEditOrders ? '' : ' disabled';
+    const editAriaDisabled = canEditOrders ? 'false' : 'true';
+    const editTooltipAttr = canEditOrders ? '' : ' data-tooltip="Requires Write access for Payment Orders."';
+    const deleteDisabledAttr = canDeleteOrders ? '' : ' disabled';
+    const deleteAriaDisabled = canDeleteOrders ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteOrders ? '' : ' data-tooltip="Requires Delete access for Payment Orders."';
 
     const itemsDisabledAttr = canViewItems ? '' : ' disabled';
     const itemsAriaDisabled = canViewItems ? 'false' : 'true';
@@ -7606,8 +7713,8 @@
                 class="btn btn--x"
                 data-action="delete"
                 aria-label="Delete request"
-                title="${canFullWrite ? 'Delete' : 'Requires Full access for Payment Orders.'}"
-                aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}
+                title="${canDeleteOrders ? 'Delete' : 'Requires Delete access for Payment Orders.'}"
+                aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}
               >
                 X
               </button>
@@ -7624,7 +7731,7 @@
             <td>${escapeHtml(statusLabel)}</td>
             <td class="actions">
               <button type="button" class="btn btn--ghost btn--items" data-action="items" title="${canViewItems ? 'Items' : 'Requires Payment Orders access.'}" aria-disabled="${itemsAriaDisabled}"${itemsDisabledAttr}${itemsTooltipAttr}>Items</button>
-              <button type="button" class="btn btn--editBlue" data-action="edit" title="${canFullWrite ? 'Edit' : 'Requires Full access for Payment Orders.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>Edit</button>
+              <button type="button" class="btn btn--editBlue" data-action="edit" title="${canEditOrders ? 'Edit' : 'Requires Write access for Payment Orders.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}>Edit</button>
               <button type="button" class="btn btn--viewGrey" data-action="view">View</button>
             </td>
           </tr>
@@ -8920,10 +9027,9 @@
     }
 
     // Access rules:
-    // - Orders Partial: read-only everywhere (including Reconciliation) EXCEPT this View modal
-    //   where the user may update only With + Status + Source.
+    // - Orders Write-or-higher can update With + Status + Source from this View modal.
     const currentUser = getCurrentUser();
-    const canFullWrite = currentUser ? canWrite(currentUser, 'orders') : false;
+    const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
     const canViewWrite = currentUser ? canOrdersViewEdit(currentUser) : false;
 
     if (statusSelect) statusSelect.disabled = !canViewWrite;
@@ -8931,8 +9037,8 @@
     if (sourceSelect) sourceSelect.disabled = !canViewWrite;
 
     if (editOrderBtn) {
-      editOrderBtn.disabled = !canFullWrite;
-      if (!canFullWrite) editOrderBtn.setAttribute('data-tooltip', 'Requires Full access for Payment Orders.');
+      editOrderBtn.disabled = !canEditOrders;
+      if (!canEditOrders) editOrderBtn.setAttribute('data-tooltip', 'Requires Write access for Payment Orders.');
       else editOrderBtn.removeAttribute('data-tooltip');
     }
     if (saveOrderBtn) {
@@ -9677,7 +9783,7 @@
       }
 
       if (action === 'delete') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireDeleteAccess('orders', 'Payment Orders is read only for your account.')) return;
         const ok = window.confirm('Delete this reconciliation entry?');
         if (!ok) return;
         deleteReconciliationOrderById(id);
@@ -9717,9 +9823,11 @@
 
   function formatAccessLabel(level) {
     const lv = String(level || 'none').toLowerCase();
-    if (lv === 'write') return 'Full';
-    if (lv === 'partial') return 'Partial';
-    if (lv === 'read') return 'Read only';
+    if (lv === 'full') return 'Admin';
+    if (lv === 'delete') return 'Delete';
+    if (lv === 'create') return 'Create';
+    if (lv === 'write') return 'Write';
+    if (lv === 'read') return 'View';
     return 'None';
   }
 
@@ -9754,7 +9862,7 @@
     if (!wrapEl || !usersTbody) return;
 
     const maxUsers = Math.max(1, Number(maxVisibleUsers) || 1);
-    const maxRows = maxUsers * 2; // each user renders as 2 table rows
+    const maxRows = maxUsers;
     const rows = Array.from(usersTbody.querySelectorAll('tr'));
 
     wrapEl.style.overflowY = 'auto';
@@ -9796,7 +9904,7 @@
     const filterTokens = getUsersFilterTokens(usersTableViewState.globalFilter);
     const filteredUsers = visibleUsers.filter((u) => userMatchesUsersFilter(u, filterTokens));
     const currentUser = getCurrentUser();
-    const canEdit = currentUser ? canWrite(currentUser, 'settings') : false;
+    const canEdit = currentUser ? canWrite(currentUser, 'settings_roles') : false;
 
     if (!usersTableViewState.defaultEmptyText) {
       usersTableViewState.defaultEmptyText = String(usersEmptyState.textContent || '').trim() || 'No users yet.';
@@ -9825,7 +9933,6 @@
         const role = String(u && typeof u.position === 'string' ? u.position : '').trim();
         const passwordPlain = String(u && typeof u.passwordPlain === 'string' ? u.passwordPlain : '')
           || extractLegacyPasswordPlain(u && u.passwordHash, u && u.salt);
-        const p = getEffectivePermissions(u);
         const isEditing = Boolean(usersTableViewState.editingUsername && usersTableViewState.editingUsername === username);
         const isProtected = username === normalizeUsername(HARD_CODED_ADMIN_USERNAME);
         const safeName = escapeHtml(username);
@@ -9833,41 +9940,15 @@
         const roleTooltipAttr = role ? ` data-role-tooltip="${escapeHtml(role)}"` : '';
         const disabled = canEdit && !isProtected ? '' : 'disabled';
 
-        const accessChecks = (key, level) => {
-          const lv = String(level || 'none');
-          const checkedWrite = lv === 'write' ? 'checked' : '';
-          const checkedPartial = lv === 'partial' ? 'checked' : '';
-          const checkedRead = lv === 'read' ? 'checked' : '';
-          return `
-            <div class="rolesChecks" role="group" aria-label="${escapeHtml(key)} access">
-              <label class="rolesChecks__item"><input type="checkbox" data-perm="${escapeHtml(key)}" data-level="write" ${checkedWrite} ${disabled} /> Full</label>
-              <label class="rolesChecks__item"><input type="checkbox" data-perm="${escapeHtml(key)}" data-level="partial" ${checkedPartial} ${disabled} /> Partial</label>
-              <label class="rolesChecks__item"><input type="checkbox" data-perm="${escapeHtml(key)}" data-level="read" ${checkedRead} ${disabled} /> Read only</label>
-            </div>
-          `.trim();
-        };
-
-        const accessDisplay = (key, level) => {
-          const label = formatAccessLabel(level);
-          const safe = escapeHtml(label);
-          return `<span class="usersTable__permLabel" aria-label="${escapeHtml(key)} access">${safe}</span>`;
-        };
-
         const safePw = escapeHtml(passwordPlain);
+        const maskedPw = passwordPlain ? '********' : '—';
         const passwordControl = isEditing
           ? `<input type="text" class="usersTable__detailsInput" data-new-password autocomplete="new-password" value="${safePw}" aria-label="Password" ${disabled} />`
-          : '<span class="usersTable__permLabel">—</span>';
+          : `<span class="usersTable__permLabel">${maskedPw}</span>`;
 
         const emailControl = isEditing
           ? `<input type="email" class="usersTable__detailsInput" data-email autocomplete="email" placeholder="(optional)" value="${safeEmail}" aria-label="Email" ${disabled} />`
           : `<span class="usersTable__permLabel">${email ? escapeHtml(email) : '—'}</span>`;
-
-        const emailDetailsCell = `
-          <div class="usersTable__details" aria-label="Email">
-            <span class="usersTable__detailsLabel">Email:</span>
-            ${emailControl}
-          </div>
-        `.trim();
 
         const baseRoles = [
           'Grand Master',
@@ -9892,25 +9973,9 @@
           return `${extra}${placeholder}${opts}`;
         })();
 
-        const roleDetailsCell = !isEditing
-          ? ''
-          : `
-            <div class="usersTable__details" aria-label="Role">
-              <span class="usersTable__detailsLabel">Role:</span>
-              <select class="usersTable__detailsInput" data-role aria-label="Role" ${disabled}>
-                ${roleOptionsHtml}
-              </select>
-            </div>
-          `.trim();
-
-        const passwordDetailsCell = `
-          <div class="usersTable__details" aria-label="Password">
-            <span class="usersTable__detailsLabel">Password:</span>
-            ${passwordControl}
-          </div>
-        `.trim();
-
-        const identityDetailsCell = `${emailDetailsCell}${roleDetailsCell ? `\n${roleDetailsCell}` : ''}`;
+        const roleControl = isEditing
+          ? `<select class="usersTable__detailsInput" data-role aria-label="Role" ${disabled}>${roleOptionsHtml}</select>`
+          : `<span class="usersTable__permLabel">${role ? escapeHtml(role) : '—'}</span>`;
 
         const actionsCell = (() => {
           const editDisabled = disabled ? 'disabled' : '';
@@ -9927,7 +9992,7 @@
           return `
             <button type="button" class="btn btn--primary" data-action="save" ${editDisabled}${protectTitle}>Save</button>
             <button type="button" class="btn" data-action="cancel" ${editDisabled}${protectTitle}>Cancel</button>
-            <button type="button" class="btn btn--danger" data-action="delete" ${deleteDisabled}${protectTitle}>Delete</button>
+            <button type="button" class="btn btn--ghost" data-action="edit-roles" ${editDisabled}${protectTitle}>Edit Roles</button>
           `.trim();
         })();
 
@@ -9940,17 +10005,10 @@
                 <strong${roleTooltipAttr}>${safeName}</strong>
               </div>
             </td>
-            <td>${isEditing ? accessChecks('budget', p.budget) : accessDisplay('budget', p.budget)}</td>
-            <td>${isEditing ? accessChecks('income', p.income) : accessDisplay('income', p.income)}</td>
-            <td>${isEditing ? accessChecks('orders', p.orders) : accessDisplay('orders', p.orders)}</td>
-            <td>${isEditing ? accessChecks('ledger', p.ledger) : accessDisplay('ledger', p.ledger)}</td>
-            <td>${isEditing ? accessChecks('settings', p.settings) : accessDisplay('settings', p.settings)}</td>
+            <td>${passwordControl}</td>
+            <td>${emailControl}</td>
+            <td>${roleControl}</td>
             <td class="actions">${actionsWrap}</td>
-          </tr>
-          <tr class="usersTable__detailsRow" data-details-for="${safeName}">
-            <td>${identityDetailsCell}</td>
-            <td colspan="5">${passwordDetailsCell}</td>
-            <td></td>
           </tr>
         `.trim();
       })
@@ -10224,10 +10282,18 @@
     return u || '—';
   }
 
+  function syncModalPageScrollLock() {
+    if (!document || !document.body || !document.documentElement) return;
+    const hasOpenModal = Boolean(document.querySelector('.modal.is-open'));
+    document.body.classList.toggle('is-modal-open', hasOpenModal);
+    document.documentElement.classList.toggle('is-modal-open', hasOpenModal);
+  }
+
   function openSimpleModal(modalEl, focusSelector) {
     if (!modalEl) return;
     modalEl.classList.add('is-open');
     modalEl.setAttribute('aria-hidden', 'false');
+    syncModalPageScrollLock();
     const focusTarget = focusSelector ? modalEl.querySelector(focusSelector) : null;
     if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
   }
@@ -10236,6 +10302,7 @@
     if (!modalEl) return;
     modalEl.classList.remove('is-open');
     modalEl.setAttribute('aria-hidden', 'true');
+    syncModalPageScrollLock();
   }
 
   function clearBacklogFormErrors(formEl) {
@@ -10823,7 +10890,7 @@
 
           if (IS_WP_SHARED_MODE) {
             if (!getCurrentUser()) throw new Error('not_authorized');
-            if (!requireWriteAccess('settings', 'Settings is read only for your account.')) throw new Error('not_authorized');
+            if (!requireWriteAccess('settings_backlog', 'Backlog is view only for your account.')) throw new Error('not_authorized');
             return wpUploadBacklogAttachment(itemId, selectedFile);
           }
 
@@ -11725,12 +11792,35 @@
 
     const hasAnyUsers = loadUsers().length > 0;
     const currentUser = getCurrentUser();
-    const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings') : false);
+    const canEditRoles = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_roles') : false);
+    const canEditBacklog = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_backlog') : false);
+    const canViewAudit = !hasAnyUsers || (currentUser ? hasPermission(currentUser, 'settings_audit') : false);
+
+    const settingsCardPermMap = {
+      roles: 'settings_roles',
+      backlog: 'settings_backlog',
+      numbering: 'settings_numbering',
+      grandlodge: 'settings_grandlodge',
+      backup: 'settings_backup',
+      audit: 'settings_audit',
+    };
+
+    for (const [cardKey, permKey] of Object.entries(settingsCardPermMap)) {
+      const cardEl = document.querySelector(`section.card[data-settings-card="${cardKey}"]`);
+      if (!cardEl) continue;
+      if (!hasAnyUsers) {
+        cardEl.hidden = false;
+        continue;
+      }
+      cardEl.hidden = !hasPermission(currentUser, permKey);
+    }
 
     const createUserModal = document.getElementById('createUserModal');
     const openCreateUserBtn = document.getElementById('openCreateUserBtn');
     const usersSearchInput = document.getElementById('usersSearch');
     const usersClearSearchBtn = document.getElementById('usersClearSearchBtn');
+    const createUserModalTitle = document.getElementById('createUserModalTitle');
+    const createUserSubmitBtn = document.querySelector('button[type="submit"][form="createUserForm"]');
 
     let hideUsersRoleTooltip = () => {};
     let hideCreateUserTooltip = () => {};
@@ -11755,10 +11845,10 @@
     initUsersTableColumnResizer();
 
     // Backlog (CRUD + comments)
-    initBacklogSettingsSection(canEdit);
+    initBacklogSettingsSection(canEditBacklog);
 
     // Timeline audit log (Payment Orders + Income)
-    renderSettingsAuditLog();
+    if (canViewAudit) renderSettingsAuditLog();
 
     // Keep Settings compact via CSS max-height + per-row equal heights.
     // Do not force a single global height across all cards.
@@ -11771,10 +11861,10 @@
         const key = e && typeof e.key === 'string' ? e.key : '';
         if (!key) return;
         if (key === AUTH_AUDIT_KEY || key.startsWith('payment_orders_') || key.startsWith('payment_order_income_')) {
-          renderSettingsAuditLog();
+          if (canViewAudit) renderSettingsAuditLog();
         }
         if (key === BACKLOG_KEY) {
-          renderBacklogList(canEdit);
+          renderBacklogList(canEditBacklog);
         }
       });
     }
@@ -11799,16 +11889,68 @@
       if (newPosition) newPosition.value = '';
 
       [
-        'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
-        'permIncomeWrite', 'permIncomePartial', 'permIncomeRead',
-        'permOrdersWrite', 'permOrdersPartial', 'permOrdersRead',
-        'permLedgerWrite', 'permLedgerPartial', 'permLedgerRead',
-        'permSettingsWrite', 'permSettingsPartial', 'permSettingsRead',
-        'permAllWrite', 'permAllPartial', 'permAllRead',
+        ...PERMISSION_FORM_ROWS.flatMap((row) => [
+          `perm${row.idBase}Write`,
+          `perm${row.idBase}Delete`,
+          `perm${row.idBase}Create`,
+          `perm${row.idBase}Partial`,
+          `perm${row.idBase}Read`,
+        ]),
+        'permAllWrite', 'permAllDelete', 'permAllCreate', 'permAllPartial', 'permAllRead',
       ].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.checked = false;
       });
+
+      createUserForm.removeAttribute('data-mode');
+      createUserForm.removeAttribute('data-edit-username');
+      if (createUserModalTitle) createUserModalTitle.textContent = 'Add User';
+      if (createUserSubmitBtn) createUserSubmitBtn.textContent = 'Add User';
+
+      if (newUsername) {
+        newUsername.readOnly = false;
+        newUsername.removeAttribute('aria-readonly');
+      }
+    }
+
+    function openCreateUserModalForUser(usernameRaw) {
+      const username = normalizeUsername(usernameRaw);
+      const user = getUserByUsername(username);
+      if (!user || !createUserModal) {
+        window.alert('Could not open the role editor for this user.');
+        return;
+      }
+
+      resetCreateUserForm();
+
+      const newUsername = document.getElementById('newUsername');
+      const newEmail = document.getElementById('newEmail');
+      const newPassword = document.getElementById('newPassword');
+      const newPosition = document.getElementById('newPosition');
+
+      const pw = String(user && typeof user.passwordPlain === 'string' ? user.passwordPlain : '')
+        || extractLegacyPasswordPlain(user && user.passwordHash, user && user.salt);
+
+      if (newUsername) {
+        newUsername.value = username;
+        newUsername.readOnly = true;
+        newUsername.setAttribute('aria-readonly', 'true');
+      }
+      if (newEmail) newEmail.value = normalizeEmail(user && user.email);
+      if (newPassword) newPassword.value = pw;
+      if (newPosition) newPosition.value = String(user && user.position ? user.position : '');
+
+      const perms = getEffectivePermissions(user);
+      for (const row of PERMISSION_FORM_ROWS) {
+        setModuleAccess(row.idBase, perms[row.key] || 'none');
+      }
+
+      createUserForm.dataset.mode = 'edit';
+      createUserForm.dataset.editUsername = username;
+      if (createUserModalTitle) createUserModalTitle.textContent = `Edit User Roles: ${username}`;
+      if (createUserSubmitBtn) createUserSubmitBtn.textContent = 'Save Roles';
+
+      openSimpleModal(createUserModal, '#newPassword');
     }
 
     function prepareSettingsCardsStickyHeaders() {
@@ -12374,9 +12516,9 @@
     }
 
     if (openCreateUserBtn) {
-      openCreateUserBtn.disabled = hasAnyUsers && !canEdit;
+      openCreateUserBtn.disabled = hasAnyUsers && !canEditRoles;
       if (openCreateUserBtn.disabled) {
-        openCreateUserBtn.setAttribute('data-tooltip', 'Read-only: your account cannot add users.');
+        openCreateUserBtn.setAttribute('data-tooltip', 'View-only: your account cannot add users.');
       } else {
         openCreateUserBtn.removeAttribute('data-tooltip');
       }
@@ -12384,11 +12526,12 @@
       if (!openCreateUserBtn.dataset.bound) {
         openCreateUserBtn.dataset.bound = '1';
         openCreateUserBtn.addEventListener('click', () => {
-          if (hasAnyUsers && !canEdit) {
-            window.alert('This Settings page is read only for your account.');
+          if (hasAnyUsers && !canEditRoles) {
+            window.alert('This User Roles section is view only for your account.');
             return;
           }
           resetCreateUserForm();
+          createUserForm.dataset.mode = 'create';
           openSimpleModal(createUserModal, '#newUsername');
         });
       }
@@ -12432,107 +12575,107 @@
     function setModuleAccess(moduleKey, level) {
       const lv = String(level || 'none');
       const w = document.getElementById(`perm${moduleKey}Write`);
+      const d = document.getElementById(`perm${moduleKey}Delete`);
+      const c = document.getElementById(`perm${moduleKey}Create`);
       const p = document.getElementById(`perm${moduleKey}Partial`);
       const r = document.getElementById(`perm${moduleKey}Read`);
-      if (w) w.checked = lv === 'write';
-      if (p) p.checked = lv === 'partial';
+      if (w) w.checked = lv === 'full';
+      if (d) d.checked = lv === 'delete';
+      if (c) c.checked = lv === 'create';
+      if (p) p.checked = lv === 'write';
       if (r) r.checked = lv === 'read';
     }
 
-    const pairs = [
-      ['Budget', 'budget'],
-      ['Income', 'income'],
-      ['Orders', 'orders'],
-      ['Ledger', 'ledger'],
-      ['Settings', 'settings'],
-    ];
+    const roleInputIds = PERMISSION_FORM_ROWS.flatMap((row) => [
+      `perm${row.idBase}Write`,
+      `perm${row.idBase}Delete`,
+      `perm${row.idBase}Create`,
+      `perm${row.idBase}Partial`,
+      `perm${row.idBase}Read`,
+    ]);
 
     // Bind mutual exclusivity for each module checkbox group in the create-user form.
-    bindExclusiveCheckboxGroup(
-      document.getElementById('permBudgetWrite'),
-      document.getElementById('permBudgetPartial'),
-      document.getElementById('permBudgetRead')
-    );
-    bindExclusiveCheckboxGroup(
-      document.getElementById('permIncomeWrite'),
-      document.getElementById('permIncomePartial'),
-      document.getElementById('permIncomeRead')
-    );
-    bindExclusiveCheckboxGroup(
-      document.getElementById('permOrdersWrite'),
-      document.getElementById('permOrdersPartial'),
-      document.getElementById('permOrdersRead')
-    );
-    bindExclusiveCheckboxGroup(
-      document.getElementById('permLedgerWrite'),
-      document.getElementById('permLedgerPartial'),
-      document.getElementById('permLedgerRead')
-    );
-    bindExclusiveCheckboxGroup(
-      document.getElementById('permSettingsWrite'),
-      document.getElementById('permSettingsPartial'),
-      document.getElementById('permSettingsRead')
-    );
+    for (const row of PERMISSION_FORM_ROWS) {
+      bindExclusiveCheckboxGroup(
+        document.getElementById(`perm${row.idBase}Write`),
+        document.getElementById(`perm${row.idBase}Delete`),
+        document.getElementById(`perm${row.idBase}Create`),
+        document.getElementById(`perm${row.idBase}Partial`),
+        document.getElementById(`perm${row.idBase}Read`)
+      );
+    }
 
     const allWrite = document.getElementById('permAllWrite');
+    const allDelete = document.getElementById('permAllDelete');
+    const allCreate = document.getElementById('permAllCreate');
     const allPartial = document.getElementById('permAllPartial');
     const allRead = document.getElementById('permAllRead');
     if (allWrite && allRead && !allWrite.dataset.bound) {
       allWrite.dataset.bound = 'true';
-      allWrite.disabled = hasAnyUsers && !canEdit;
-      if (allPartial) allPartial.disabled = hasAnyUsers && !canEdit;
-      allRead.disabled = hasAnyUsers && !canEdit;
+      allWrite.disabled = hasAnyUsers && !canEditRoles;
+      if (allDelete) allDelete.disabled = hasAnyUsers && !canEditRoles;
+      if (allCreate) allCreate.disabled = hasAnyUsers && !canEditRoles;
+      if (allPartial) allPartial.disabled = hasAnyUsers && !canEditRoles;
+      allRead.disabled = hasAnyUsers && !canEditRoles;
 
-      bindExclusiveCheckboxGroup(allWrite, allPartial, allRead);
+      bindExclusiveCheckboxGroup(allWrite, allDelete, allCreate, allPartial, allRead);
 
       allWrite.addEventListener('change', () => {
         if (allWrite.checked) {
-          setModuleAccess('Budget', 'write');
-          setModuleAccess('Income', 'write');
-          setModuleAccess('Orders', 'write');
-          setModuleAccess('Ledger', 'write');
-          setModuleAccess('Settings', 'write');
+          PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'full'));
         } else {
-          setModuleAccess('Budget', 'none');
-          setModuleAccess('Income', 'none');
-          setModuleAccess('Orders', 'none');
-          setModuleAccess('Ledger', 'none');
-          setModuleAccess('Settings', 'none');
+          PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'none'));
         }
       });
       allRead.addEventListener('change', () => {
         if (allRead.checked) {
-          setModuleAccess('Budget', 'read');
-          setModuleAccess('Income', 'read');
-          setModuleAccess('Orders', 'read');
-          setModuleAccess('Ledger', 'read');
-          setModuleAccess('Settings', 'read');
+          PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'read'));
         } else {
-          setModuleAccess('Budget', 'none');
-          setModuleAccess('Income', 'none');
-          setModuleAccess('Orders', 'none');
-          setModuleAccess('Ledger', 'none');
-          setModuleAccess('Settings', 'none');
+          PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'none'));
         }
       });
+
+      if (allDelete) {
+        allDelete.addEventListener('change', () => {
+          if (allDelete.checked) {
+            PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'delete'));
+          } else {
+            PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'none'));
+          }
+        });
+      }
+
+      if (allCreate) {
+        allCreate.addEventListener('change', () => {
+          if (allCreate.checked) {
+            PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'create'));
+          } else {
+            PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'none'));
+          }
+        });
+      }
 
       if (allPartial) {
         allPartial.addEventListener('change', () => {
           if (allPartial.checked) {
-            setModuleAccess('Budget', 'partial');
-            setModuleAccess('Income', 'partial');
-            setModuleAccess('Orders', 'partial');
-            setModuleAccess('Ledger', 'partial');
-            setModuleAccess('Settings', 'partial');
+            PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'write'));
           } else {
-            setModuleAccess('Budget', 'none');
-            setModuleAccess('Income', 'none');
-            setModuleAccess('Orders', 'none');
-            setModuleAccess('Ledger', 'none');
-            setModuleAccess('Settings', 'none');
+            PERMISSION_FORM_ROWS.forEach((row) => setModuleAccess(row.idBase, 'none'));
           }
         });
       }
+    }
+
+    const newPositionSelect = document.getElementById('newPosition');
+    if (newPositionSelect && !newPositionSelect.dataset.autoAdminBound) {
+      newPositionSelect.dataset.autoAdminBound = '1';
+      newPositionSelect.addEventListener('change', () => {
+        const role = String(newPositionSelect.value || '').trim();
+        if (role !== 'Grand Secretary') return;
+        if (!allWrite || allWrite.disabled) return;
+        allWrite.checked = true;
+        allWrite.dispatchEvent(new Event('change', { bubbles: true }));
+      });
     }
 
     if (logoutBtn && !logoutBtn.dataset.bound) {
@@ -12546,8 +12689,8 @@
     createUserForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      if (loadUsers().length > 0 && !canEdit) {
-        window.alert('This Settings page is read only for your account.');
+      if (loadUsers().length > 0 && !canEditRoles) {
+        window.alert('This User Roles section is view only for your account.');
         return;
       }
 
@@ -12568,46 +12711,76 @@
       const email = newEmail ? newEmail.value : '';
       const password = newPassword ? newPassword.value : '';
       const position = newPosition ? newPosition.value : '';
+      const modalMode = String(createUserForm.dataset.mode || 'create');
+      const editTargetUsername = normalizeUsername(createUserForm.dataset.editUsername || '');
 
-      const perms = {
-        budget: document.getElementById('permBudgetWrite')?.checked
-          ? 'write'
-          : document.getElementById('permBudgetPartial')?.checked
-            ? 'partial'
-            : document.getElementById('permBudgetRead')?.checked
-              ? 'read'
-              : 'none',
-        income: document.getElementById('permIncomeWrite')?.checked
-          ? 'write'
-          : document.getElementById('permIncomePartial')?.checked
-            ? 'partial'
-            : document.getElementById('permIncomeRead')?.checked
-              ? 'read'
-              : 'none',
-        orders: document.getElementById('permOrdersWrite')?.checked
-          ? 'write'
-          : document.getElementById('permOrdersPartial')?.checked
-            ? 'partial'
-            : document.getElementById('permOrdersRead')?.checked
-              ? 'read'
-              : 'none',
-        ledger: document.getElementById('permLedgerWrite')?.checked
-          ? 'write'
-          : document.getElementById('permLedgerPartial')?.checked
-            ? 'partial'
-            : document.getElementById('permLedgerRead')?.checked
-              ? 'read'
-              : 'none',
-        settings: document.getElementById('permSettingsWrite')?.checked
-          ? 'write'
-          : document.getElementById('permSettingsPartial')?.checked
-            ? 'partial'
-            : document.getElementById('permSettingsRead')?.checked
-              ? 'read'
-              : 'none',
-      };
+      const perms = {};
+      for (const row of PERMISSION_FORM_ROWS) {
+        const writeBox = document.getElementById(`perm${row.idBase}Write`);
+        const deleteBox = document.getElementById(`perm${row.idBase}Delete`);
+        const createBox = document.getElementById(`perm${row.idBase}Create`);
+        const partialBox = document.getElementById(`perm${row.idBase}Partial`);
+        const readBox = document.getElementById(`perm${row.idBase}Read`);
+        perms[row.key] = writeBox && writeBox.checked
+          ? 'full'
+          : deleteBox && deleteBox.checked
+            ? 'delete'
+            : createBox && createBox.checked
+              ? 'create'
+              : partialBox && partialBox.checked
+                ? 'write'
+                : readBox && readBox.checked
+                  ? 'read'
+                  : 'none';
+      }
 
       const hadNoUsers = loadUsers().length === 0;
+
+      if (modalMode === 'edit') {
+        if (!editTargetUsername) {
+          window.alert('Could not determine which user to update.');
+          return;
+        }
+
+        const currentUserRecord = getUserByUsername(editTargetUsername);
+        if (!currentUserRecord) {
+          window.alert('Could not find that user anymore.');
+          return;
+        }
+
+        const existingPerms = getEffectivePermissions(currentUserRecord);
+        const mergedPerms = { ...existingPerms, ...perms };
+        const nextPassword = String(password || '').trim();
+        const res = await updateUser(editTargetUsername, mergedPerms, nextPassword, email, position);
+
+        if (!res.ok && res.reason === 'email' && errEmail) {
+          errEmail.textContent = 'Enter a valid email address.';
+          return;
+        }
+        if (!res.ok && res.reason === 'lastSettings') {
+          window.alert('At least one user must keep Settings access.');
+          return;
+        }
+        if (!res.ok && res.reason === 'wp_save_failed') {
+          window.alert('Could not save users to WordPress shared storage. Changes may not be visible to other users until a Settings-authorized account saves successfully.');
+          return;
+        }
+        if (!res.ok) {
+          window.alert('Could not save user role changes.');
+          return;
+        }
+
+        usersTableViewState.editingUsername = null;
+        renderUsersTableSafe();
+        closeCreateUserModal();
+
+        const current = normalizeUsername(getCurrentUsername());
+        if (current && current === normalizeUsername(editTargetUsername)) {
+          window.location.reload();
+        }
+        return;
+      }
+
       const res = await createUser(username, password, perms, email, position);
       if (!res.ok) {
         if (res.reason === 'username' && errUser) errUser.textContent = 'Username is required.';
@@ -12620,17 +12793,12 @@
         return;
       }
 
-      if (newUsername) newUsername.value = '';
       if (newEmail) newEmail.value = '';
       if (newPassword) newPassword.value = '';
       if (newPosition) newPosition.value = '';
       [
-        'permBudgetWrite', 'permBudgetPartial', 'permBudgetRead',
-        'permIncomeWrite', 'permIncomePartial', 'permIncomeRead',
-        'permOrdersWrite', 'permOrdersPartial', 'permOrdersRead',
-        'permLedgerWrite', 'permLedgerPartial', 'permLedgerRead',
-        'permSettingsWrite', 'permSettingsPartial', 'permSettingsRead',
-        'permAllWrite', 'permAllPartial', 'permAllRead',
+        ...roleInputIds,
+        'permAllWrite', 'permAllDelete', 'permAllCreate', 'permAllPartial', 'permAllRead',
       ].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.checked = false;
@@ -12651,8 +12819,8 @@
       const btn = e.target && e.target.closest ? e.target.closest('button[data-action]') : null;
       if (!btn) return;
 
-      if (!canEdit) {
-        window.alert('This Settings page is read only for your account.');
+      if (!canEditRoles) {
+        window.alert('This User Roles section is view only for your account.');
         return;
       }
       const row = btn.closest('tr[data-username]');
@@ -12706,42 +12874,57 @@
         return;
       }
 
+      if (action === 'edit-roles') {
+        if (!username) return;
+        openCreateUserModalForUser(username);
+        return;
+      }
+
       if (action === 'save') {
         if (!username) return;
         if (usersTableViewState.editingUsername !== normalizeUsername(username)) return;
 
-        const detailsRow = (() => {
-          const next = row.nextElementSibling;
-          if (!next || !next.matches || !next.matches('tr[data-details-for]')) return null;
-          const forName = next.getAttribute('data-details-for');
-          if (normalizeUsername(forName) !== normalizeUsername(username)) return null;
-          return next;
-        })();
-
-        const perms = { budget: 'none', income: 'none', orders: 'none', ledger: 'none', settings: 'none' };
+        const currentUserRecord = getUserByUsername(username);
+        const existingPerms = getEffectivePermissions(currentUserRecord);
         const inputs = Array.from(row.querySelectorAll('input[type="checkbox"][data-perm][data-level]'));
-        for (const key of Object.keys(perms)) {
-          const writeBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'write');
-          const partialBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'partial');
-          const readBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'read');
-          perms[key] = writeBox && writeBox.checked ? 'write' : partialBox && partialBox.checked ? 'partial' : readBox && readBox.checked ? 'read' : 'none';
+        const perms = { budget: 'none', income: 'none', orders: 'none', ledger: 'none', settings: 'none' };
+        let mergedPerms = existingPerms;
+        if (inputs.length > 0) {
+          for (const key of Object.keys(perms)) {
+            const fullBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'full');
+            const deleteBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'delete');
+            const createBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'create');
+            const writeBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'write');
+            const readBox = inputs.find((el) => el.getAttribute('data-perm') === key && el.getAttribute('data-level') === 'read');
+            perms[key] = fullBox && fullBox.checked
+              ? 'full'
+              : deleteBox && deleteBox.checked
+                ? 'delete'
+                : createBox && createBox.checked
+                  ? 'create'
+                  : writeBox && writeBox.checked
+                    ? 'write'
+                    : readBox && readBox.checked
+                      ? 'read'
+                      : 'none';
+          }
+          mergedPerms = { ...existingPerms, ...perms };
         }
 
-        const pwEl = (detailsRow || row).querySelector('input[data-new-password]');
+        const pwEl = row.querySelector('input[data-new-password]');
         // Only treat the password as changed if the admin actually typed in the field.
         // Password managers may autofill; we ignore those values.
         const pwTouched = pwEl && pwEl.dataset && pwEl.dataset.touched === '1';
         const typedPw = pwEl ? String(pwEl.value || '') : '';
-        const currentPw = String((getUserByUsername(username) && getUserByUsername(username).passwordPlain) || '');
+        const currentPw = String((currentUserRecord && currentUserRecord.passwordPlain) || '');
         const newPw = pwTouched && typedPw.trim() && typedPw !== currentPw ? typedPw : '';
 
-        const emailEl = (detailsRow || row).querySelector('input[type="email"][data-email]');
+        const emailEl = row.querySelector('input[type="email"][data-email]');
         const nextEmail = emailEl ? String(emailEl.value || '') : '';
 
-        const roleEl = (detailsRow || row).querySelector('select[data-role]');
-        const nextRole = roleEl ? String(roleEl.value || '') : '';
-
-        const res = await updateUser(username, perms, newPw, nextEmail, nextRole);
+        const roleEl = row.querySelector('select[data-role]');
+        const nextRole = roleEl ? String(roleEl.value || '') : String((currentUserRecord && currentUserRecord.position) || '');
+        const res = await updateUser(username, mergedPerms, newPw, nextEmail, nextRole);
         if (!res.ok && res.reason === 'lastSettings') {
           window.alert('At least one user must keep Settings access.');
           return;
@@ -12794,7 +12977,7 @@
 
       if (!input.checked) return;
 
-      const levels = ['write', 'partial', 'read'];
+      const levels = ['full', 'delete', 'create', 'write', 'read'];
       for (const lv of levels) {
         if (lv === level) continue;
         const other = row.querySelector(
@@ -22573,7 +22756,7 @@
         rs.className = 'btn btn--danger';
         rs.textContent = 'Restore';
         rs.addEventListener('click', async () => {
-          if (!requireSettingsEditAccess('Settings access required to restore backups.')) return;
+          if (!requireSettingsEditAccess('Backup access required to restore backups.', 'settings_backup')) return;
           if (!getWpToken()) {
             window.alert('Please sign in.');
             return;
@@ -22682,7 +22865,7 @@
           rs.className = 'btn btn--danger';
           rs.textContent = 'Restore';
           rs.addEventListener('click', () => {
-            if (!requireSettingsEditAccess('Settings access required to restore backups.')) return;
+            if (!requireSettingsEditAccess('Backup access required to restore backups.', 'settings_backup')) return;
             const ok = window.confirm(`Restore ${String(y)} from this backup? This will overwrite ${String(y)} data.`);
             if (!ok) return;
             const payload = loadBackupPayloadFromStorage(y, meta.id);
@@ -22732,7 +22915,7 @@
           window.alert('Please sign in.');
           return;
         }
-        if (!requireSettingsEditAccess('Settings access required to create backups.')) return;
+        if (!requireSettingsEditAccess('Backup access required to create backups.', 'settings_backup')) return;
         const res = createYearBackup(y, 'manual');
         if (!res.ok) {
           window.alert('Could not create backup.');
@@ -22745,7 +22928,7 @@
     if (restoreFileBtn && restoreFileInput && !restoreFileBtn.dataset.bound) {
       restoreFileBtn.dataset.bound = '1';
       restoreFileBtn.addEventListener('click', () => {
-        if (!requireSettingsEditAccess('Settings access required to restore backups.')) return;
+        if (!requireSettingsEditAccess('Backup access required to restore backups.', 'settings_backup')) return;
         restoreFileInput.value = '';
         restoreFileInput.click();
       });
@@ -22950,7 +23133,7 @@
     {
       const hasAnyUsers = loadUsers().length > 0;
       const currentUser = getCurrentUser();
-      const canEdit = !hasAnyUsers || (currentUser ? canSettingsEdit(currentUser) : false);
+      const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_grandlodge') : false);
       if (hasAnyUsers && !canEdit) {
         if (grandMasterInput) grandMasterInput.disabled = true;
         if (grandSecretaryInput) grandSecretaryInput.disabled = true;
@@ -22967,7 +23150,7 @@
     grandLodgeInfoForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
-      if (!requireSettingsEditAccess('Settings is read only for your account.')) return;
+      if (!requireSettingsEditAccess('GL Information is view only for your account.', 'settings_grandlodge')) return;
 
       const submitBtn = grandLodgeInfoForm.querySelector('button[type="submit"]');
       if (submitBtn) submitBtn.disabled = true;
@@ -23050,7 +23233,7 @@
     {
       const hasAnyUsers = loadUsers().length > 0;
       const currentUser = getCurrentUser();
-      const canEdit = !hasAnyUsers || (currentUser ? canSettingsEdit(currentUser) : false);
+      const canEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_numbering') : false);
       if (hasAnyUsers && !canEdit) {
         if (masonicYearInput) masonicYearInput.disabled = true;
         if (firstNumberInput) firstNumberInput.disabled = true;
@@ -23063,7 +23246,7 @@
     numberingForm.addEventListener('submit', (e) => {
       e.preventDefault();
 
-      if (!requireSettingsEditAccess('Settings is read only for your account.')) return;
+      if (!requireSettingsEditAccess('Numbering is view only for your account.', 'settings_numbering')) return;
 
       const yearErr = document.getElementById('error-masonicYear');
       const seqErr = document.getElementById('error-firstNumber');
@@ -23159,7 +23342,7 @@
     }
 
     // Budget Nr. behavior:
-    // - Only roles with full Payment Orders access may change it.
+    // - Only roles with Write-or-higher Payment Orders access may change it.
     // - In edit mode, we still display the existing value (read-only) for clarity.
     const canEditBudgetNumber = Boolean(currentUser && canWrite(currentUser, 'orders'));
     const budgetNumberEl = form.elements.namedItem('budgetNumber');
@@ -23439,7 +23622,8 @@
 
       // In WP shared mode, allow public (logged-out) submissions via the server endpoint.
       if (!isPublicSubmit) {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        const requiredLevel = editId ? 'write' : 'create';
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.', requiredLevel)) return;
       }
 
       clearFieldErrors();
@@ -23872,7 +24056,7 @@
         beginEditingOrder(order);
         window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
       } else if (action === 'delete') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireDeleteAccess('orders', 'Payment Orders is read only for your account.')) return;
         const ok = window.confirm('Delete this request?');
         if (!ok) return;
         deleteOrderById(id);

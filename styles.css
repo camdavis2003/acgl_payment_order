@@ -1930,13 +1930,18 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .rolesGrid__row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(160px, 1fr) repeat(5, minmax(0, 1fr));
   align-items: center;
   gap: 10px 12px;
 }
 
 .rolesGrid__label {
   font-weight: 800;
+}
+
+.rolesGrid__row--sub .rolesGrid__label--sub {
+  font-weight: 600;
+  padding-left: 16px;
 }
 
 .rolesGrid__check {
@@ -2239,26 +2244,27 @@ body.isTableResizing {
 
 /* Settings: Bring permission columns closer together */
 #usersTable th:nth-child(2),
-#usersTable td:nth-child(2),
+#usersTable td:nth-child(2) {
+  width: 180px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
 #usersTable th:nth-child(3),
-#usersTable td:nth-child(3),
+#usersTable td:nth-child(3) {
+  width: 220px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
 #usersTable th:nth-child(4),
-#usersTable td:nth-child(4),
-#usersTable th:nth-child(5),
-#usersTable td:nth-child(5) {
-  width: 96px;
+#usersTable td:nth-child(4) {
+  width: 180px;
   padding-left: 8px;
   padding-right: 8px;
 }
 
-#usersTable th:nth-child(6),
-#usersTable td:nth-child(6) {
-  width: 130px;
-  padding-left: 8px;
-  padding-right: 8px;
-}
-
-#usersTable th:nth-child(6) {
+#usersTable th:nth-child(4) {
   white-space: normal;
 }
 
@@ -2897,6 +2903,16 @@ input[type='checkbox'].cb {
   inset: 0;
   display: none;
   z-index: 2500;
+  overscroll-behavior: contain;
+}
+
+html.is-modal-open,
+body.is-modal-open {
+  overflow: hidden;
+}
+
+body.is-modal-open {
+  overscroll-behavior: none;
 }
 
 .modal.is-open {
@@ -2975,9 +2991,41 @@ input[type='checkbox'].cb {
 .modal__body {
   padding: 14px;
   overflow: auto;
+  overscroll-behavior: contain;
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+}
+
+/* Add User modal: keep identity fields fixed and scroll only role selections */
+#createUserModal .modal__body {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#createUserForm {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#createUserForm > .grid {
+  flex: 0 0 auto;
+}
+
+#createUserForm > .rolesGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 12px;
 }
 
 .modal__poHeader {

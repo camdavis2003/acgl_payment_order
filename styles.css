@@ -2337,9 +2337,85 @@ body.isTableResizing {
   background: var(--table-head);
 }
 
-#incomeTable td.num,
-#incomeTable th.num {
+/* BankEUR: keep non-description columns tight so Description gets more space. */
+#incomeTable {
+  table-layout: fixed;
+}
+
+#incomeTable th,
+#incomeTable td {
+  text-align: left;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+#incomeTable th {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+#incomeTable td:not(:nth-child(6)):not(:nth-child(7)) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#incomeTable th:nth-child(1),
+#incomeTable td:nth-child(1) {
+  width: 44px;
+}
+
+#incomeTable th:nth-child(2),
+#incomeTable td:nth-child(2) {
+  width: 170px;
+}
+
+#incomeTable th:nth-child(3),
+#incomeTable td:nth-child(3) {
+  width: 230px;
+}
+
+#incomeTable th:nth-child(4),
+#incomeTable td:nth-child(4) {
+  width: 175px;
+}
+
+#incomeTable th:nth-child(5),
+#incomeTable td:nth-child(5) {
+  width: 150px;
+}
+
+#incomeTable th:nth-child(2),
+#incomeTable td:nth-child(2),
+#incomeTable th:nth-child(4),
+#incomeTable td:nth-child(4),
+#incomeTable th:nth-child(5),
+#incomeTable td:nth-child(5) {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+#incomeTable th:nth-child(2),
+#incomeTable td:nth-child(2),
+#incomeTable th:nth-child(4),
+#incomeTable td:nth-child(4),
+#incomeTable th:nth-child(5),
+#incomeTable td:nth-child(5) {
   text-align: center;
+}
+
+#incomeTable th:nth-child(6),
+#incomeTable td:nth-child(6) {
+  white-space: normal;
+  word-break: break-word;
+}
+
+#incomeTable th:nth-child(7),
+#incomeTable td:nth-child(7),
+#incomeTable td.actions {
+  width: 132px;
+  text-align: right;
 }
 
 /* Payment Orders: simple click-to-sort headers */

@@ -2159,6 +2159,7 @@ main.archive__grid > section.card > .settingsCardBody .table-wrap {
 /* Settings: Users table should fit without horizontal scroll */
 #usersTable {
   min-width: 0;
+  width: 100%;
   table-layout: auto;
 }
 
@@ -2236,36 +2237,54 @@ body.isTableResizing {
   min-width: 0;
 }
 
-/* Settings: Users table column sizing (keep Actions on one line) */
+#usersTable th {
+  white-space: nowrap;
+}
+
+#usersTable th,
+#usersTable td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 #usersTable th:first-child,
 #usersTable td:first-child {
-  width: 220px;
+  width: 1%;
 }
 
-/* Settings: Bring permission columns closer together */
 #usersTable th:nth-child(2),
-#usersTable td:nth-child(2) {
-  width: 180px;
-  padding-left: 8px;
-  padding-right: 8px;
-}
-
+#usersTable td:nth-child(2),
 #usersTable th:nth-child(3),
-#usersTable td:nth-child(3) {
-  width: 220px;
-  padding-left: 8px;
-  padding-right: 8px;
-}
-
+#usersTable td:nth-child(3),
 #usersTable th:nth-child(4),
 #usersTable td:nth-child(4) {
-  width: 180px;
-  padding-left: 8px;
-  padding-right: 8px;
+  width: 1%;
 }
 
-#usersTable th:nth-child(4) {
-  white-space: normal;
+#usersTable th:nth-child(5),
+#usersTable td:nth-child(5) {
+  width: 1%;
+}
+
+#usersTable th:nth-child(5) {
+  text-align: left;
+}
+
+#usersTable td:nth-child(5) {
+  text-align: right;
+}
+
+#usersTable .usersTable__actionsHeader,
+#usersTable .usersTable__actions {
+  width: 190px;
+  max-width: 100%;
+}
+
+#usersTable .usersTable__actionsHeader {
+  display: block;
+  margin-left: auto;
+  text-align: left;
 }
 
 
@@ -2277,15 +2296,18 @@ body.isTableResizing {
   text-overflow: ellipsis;
 }
 
-/* Settings: Users table action buttons should wrap (no horizontal scroll) */
+/* Settings: action buttons may wrap to avoid colliding with adjacent columns. */
 #usersTable td.actions {
   white-space: nowrap;
+  text-align: right;
 }
 
 #usersTable .usersTable__actions {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
+  justify-content: flex-start;
+  margin-left: auto;
   gap: 8px;
 }
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=c5984b4-20260312173325" />
+    <link rel="stylesheet" href="styles.css?v=e57f1b0-20260312180747" />
   </head>
   <body data-page="admin-settings">
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -100,7 +100,7 @@
                     <th scope="col">Password</th>
                     <th scope="col">Email</th>
                     <th scope="col">Role</th>
-                    <th scope="col" class="col-actions">Actions</th>
+                    <th scope="col" class="col-actions"><span class="usersTable__actionsHeader">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody id="usersTbody">
@@ -662,54 +662,6 @@
                 >
               </div>
 
-              <div class="rolesGrid__row" role="group" aria-label="Income">
-                <div class="rolesGrid__label">Income</div>
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeWrite" /> Admin</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeDelete" /> Delete</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeCreate" /> Create</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomePartial" /> Write</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeRead" /> View</label
-                >
-              </div>
-              <div
-                class="rolesGrid__row rolesGrid__row--sub"
-                role="group"
-                aria-label="BankEUR"
-              >
-                <div class="rolesGrid__label rolesGrid__label--sub">
-                  BankEUR
-                </div>
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeBankeurWrite" />
-                  Admin</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeBankeurDelete" />
-                  Delete</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeBankeurCreate" />
-                  Create</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeBankeurPartial" />
-                  Write</label
-                >
-                <label class="rolesGrid__check"
-                  ><input type="checkbox" id="permIncomeBankeurRead" />
-                  View</label
-                >
-              </div>
-
               <div
                 class="rolesGrid__row"
                 role="group"
@@ -815,6 +767,35 @@
               <div
                 class="rolesGrid__row rolesGrid__row--sub"
                 role="group"
+                aria-label="BankEUR"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  BankEUR
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permIncomeBankeurRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
                 aria-label="wiseEUR"
               >
                 <div class="rolesGrid__label rolesGrid__label--sub">
@@ -870,14 +851,8 @@
                   View</label
                 >
               </div>
-              <div
-                class="rolesGrid__row rolesGrid__row--sub"
-                role="group"
-                aria-label="Money Transfers"
-              >
-                <div class="rolesGrid__label rolesGrid__label--sub">
-                  Money Transfers
-                </div>
+              <div class="rolesGrid__row" role="group" aria-label="Money Transfers">
+                <div class="rolesGrid__label">Money Transfers</div>
                 <label class="rolesGrid__check"
                   ><input type="checkbox" id="permLedgerMoneyTransfersWrite" />
                   Admin</label
@@ -1304,6 +1279,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=c5984b4-20260312173325" defer></script>
+    <script src="app.js?v=e57f1b0-20260312180747" defer></script>
   </body>
 </html>

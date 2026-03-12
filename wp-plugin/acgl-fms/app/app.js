@@ -657,7 +657,14 @@
         salt: HARD_CODED_ADMIN_SALT,
         passwordHash: buildLegacyPwHash(HARD_CODED_ADMIN_PASSWORD, HARD_CODED_ADMIN_SALT),
         passwordPlain: HARD_CODED_ADMIN_PASSWORD,
-        permissions: { budget: 'write', income: 'write', orders: 'write', ledger: 'write', settings: 'write' },
+        permissions: {
+          budget: 'write',
+          income_bankeur: 'write',
+          orders: 'write',
+          ledger: 'write',
+          ledger_money_transfers: 'write',
+          settings: 'write',
+        },
       };
 
       const raw = localStorage.getItem(USERS_KEY);
@@ -1047,9 +1054,16 @@
     const next = {};
     for (const def of PERMISSION_DEFS) {
       const own = Object.prototype.hasOwnProperty.call(p, def.key);
-      const raw = own
+      let raw = own
         ? p[def.key]
         : (def.parent ? p[def.parent] : null);
+      // Backward compatibility with old permission keys/structure.
+      if (!own && def.key === 'income_bankeur' && Object.prototype.hasOwnProperty.call(p, 'income')) {
+        raw = p.income;
+      }
+      if (!own && def.key === 'ledger_money_transfers' && Object.prototype.hasOwnProperty.call(p, 'ledger')) {
+        raw = p.ledger;
+      }
       next[def.key] = normalizeLevel(raw);
     }
 
@@ -1067,15 +1081,14 @@
   const PERMISSION_DEFS = [
     { key: 'budget' },
     { key: 'budget_dashboard', parent: 'budget' },
-    { key: 'income' },
-    { key: 'income_bankeur', parent: 'income' },
+    { key: 'income_bankeur', parent: 'ledger' },
     { key: 'orders' },
     { key: 'orders_itemize', parent: 'orders' },
     { key: 'orders_reconciliation', parent: 'orders' },
     { key: 'ledger' },
     { key: 'ledger_wiseeur', parent: 'ledger' },
     { key: 'ledger_wiseusd', parent: 'ledger' },
-    { key: 'ledger_money_transfers', parent: 'ledger' },
+    { key: 'ledger_money_transfers' },
     { key: 'settings' },
     { key: 'settings_roles', parent: 'settings' },
     { key: 'settings_backlog', parent: 'settings' },
@@ -1088,15 +1101,14 @@
   const PERMISSION_FORM_ROWS = [
     { key: 'budget', idBase: 'Budget', label: 'Budget', group: 'main' },
     { key: 'budget_dashboard', idBase: 'BudgetDashboard', label: 'Dashboard', group: 'sub' },
-    { key: 'income', idBase: 'Income', label: 'Income', group: 'main' },
-    { key: 'income_bankeur', idBase: 'IncomeBankeur', label: 'BankEUR', group: 'sub' },
     { key: 'orders', idBase: 'Orders', label: 'Payment Orders', group: 'main' },
     { key: 'orders_itemize', idBase: 'OrdersItemize', label: 'Itemize Payment Order', group: 'sub' },
     { key: 'orders_reconciliation', idBase: 'OrdersReconciliation', label: 'Reconciliation', group: 'sub' },
     { key: 'ledger', idBase: 'Ledger', label: 'Ledger', group: 'main' },
+    { key: 'income_bankeur', idBase: 'IncomeBankeur', label: 'BankEUR', group: 'sub' },
     { key: 'ledger_wiseeur', idBase: 'LedgerWiseEur', label: 'wiseEUR', group: 'sub' },
     { key: 'ledger_wiseusd', idBase: 'LedgerWiseUsd', label: 'wiseUSD', group: 'sub' },
-    { key: 'ledger_money_transfers', idBase: 'LedgerMoneyTransfers', label: 'Money Transfers', group: 'sub' },
+    { key: 'ledger_money_transfers', idBase: 'LedgerMoneyTransfers', label: 'Money Transfers', group: 'main' },
     { key: 'settings', idBase: 'Settings', label: 'Admin Settings', group: 'main' },
     { key: 'settings_roles', idBase: 'SettingsRoles', label: 'User Roles', group: 'sub' },
     { key: 'settings_backlog', idBase: 'SettingsBacklog', label: 'Backlog', group: 'sub' },
@@ -1250,7 +1262,7 @@
   }
 
   function canIncomeEdit(user) {
-    return canWrite(user, 'income');
+    return canWrite(user, 'income_bankeur');
   }
 
   function canOrdersViewEdit(user) {
@@ -1364,7 +1376,7 @@
     const year = Number.isInteger(Number(resolvedYear)) ? Number(resolvedYear) : getActiveBudgetYear();
     const order = [
       { key: 'orders', href: `menu.html?year=${encodeURIComponent(String(year))}` },
-      { key: 'income', href: `income.html?year=${encodeURIComponent(String(year))}` },
+      { key: 'income_bankeur', href: `income.html?year=${encodeURIComponent(String(year))}` },
       { key: 'budget', href: `budget_dashboard.html?year=${encodeURIComponent(String(year))}` },
       { key: 'ledger', href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}` },
       { key: 'settings', href: 'settings.html' },
@@ -12061,7 +12073,8 @@
       if (tableEl.dataset.colResizeBound) return;
       tableEl.dataset.colResizeBound = '1';
 
-      const STORAGE_KEY = 'acgl_usersTable_colWidths_v1';
+      const STORAGE_KEY = 'acgl_usersTable_colWidths_v2';
+      const LEGACY_STORAGE_KEY = 'acgl_usersTable_colWidths_v1';
 
       const isNarrow = () => {
         try {
@@ -12097,15 +12110,24 @@
       const clearWidths = () => {
         try {
           window.localStorage.removeItem(STORAGE_KEY);
+          window.localStorage.removeItem(LEGACY_STORAGE_KEY);
         } catch {
           // ignore
         }
       };
 
+      // Drop legacy fixed-width snapshots so the table can reflow from content.
+      try {
+        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+
       const headerRow = tableEl.tHead && tableEl.tHead.rows && tableEl.tHead.rows[0] ? tableEl.tHead.rows[0] : null;
       if (!headerRow) return;
       const ths = Array.from(headerRow.cells || []);
       if (ths.length < 2) return;
+      const wrapEl = tableEl.closest ? tableEl.closest('.table-wrap') : null;
 
       const minWidths = ths.map((th, idx) => {
         // Username column
@@ -12134,10 +12156,34 @@
       let widths = null;
       let colGroupEl = null;
 
+      const fitWidthsToContainer = (nextWidths) => {
+        const base = (nextWidths || []).slice(0, ths.length).map((w, i) => Math.max(minWidths[i] || 40, Math.round(w || 0)));
+        while (base.length < ths.length) base.push(80);
+
+        const available = Math.max(0, Math.floor((wrapEl && wrapEl.clientWidth) || tableEl.clientWidth || 0) - 2);
+        if (!available) return base;
+
+        const total = base.reduce((sum, n) => sum + n, 0);
+        if (total <= available) return base;
+
+        const minSum = minWidths.reduce((sum, n) => sum + (n || 40), 0);
+        if (minSum >= available) {
+          const scale = available / Math.max(1, minSum);
+          return minWidths.map((n) => Math.max(40, Math.floor((n || 40) * scale)));
+        }
+
+        const extras = base.map((w, i) => Math.max(0, w - (minWidths[i] || 40)));
+        const extraTotal = extras.reduce((sum, n) => sum + n, 0);
+        if (extraTotal <= 0) return minWidths.slice(0, ths.length).map((n) => n || 40);
+
+        const targetExtra = available - minSum;
+        const scale = targetExtra / extraTotal;
+        return base.map((w, i) => Math.max(minWidths[i] || 40, Math.floor((minWidths[i] || 40) + extras[i] * scale)));
+      };
+
       const applyWidths = (nextWidths, { persist } = { persist: false }) => {
         if (isNarrow()) return;
-        widths = nextWidths.slice(0, ths.length);
-        while (widths.length < ths.length) widths.push(80);
+        widths = fitWidthsToContainer(nextWidths);
 
         tableEl.classList.add('is-colResizable');
         colGroupEl = ensureColGroup();
@@ -12160,8 +12206,10 @@
       };
 
       const stored = readWidths();
-      if (stored && stored.length >= ths.length - 1 && !isNarrow()) {
+      if (stored && stored.length === ths.length && !isNarrow()) {
         applyWidths(stored, { persist: false });
+      } else if (stored && stored.length !== ths.length) {
+        clearWidths();
       }
 
       let dragging = false;

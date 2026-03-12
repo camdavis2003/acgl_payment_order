@@ -1726,10 +1726,16 @@
         key: 'orders',
         label: 'Payment Orders',
         href: `menu.html?year=${encodeURIComponent(String(resolvedYear))}`,
-        children: navYears.map((year) => ({
-          label: String(year),
-          href: `menu.html?year=${encodeURIComponent(String(year))}`,
-        })),
+        children: [
+          {
+            label: 'Reconciliations',
+            href: `reconciliation.html?year=${encodeURIComponent(String(resolvedYear))}`,
+          },
+          ...navYears.map((year) => ({
+            label: String(year),
+            href: `menu.html?year=${encodeURIComponent(String(year))}`,
+          })),
+        ],
       },
       {
         key: 'ledger',
@@ -7308,7 +7314,7 @@
     const fields = [
       { key: 'date', label: 'Date', fmt: (v) => auditValue(v) },
       { key: 'remitter', label: 'Remitter', fmt: (v) => auditValue(v) },
-      { key: 'budgetNumber', label: 'Budget Number', fmt: (v) => auditValue(v) },
+      { key: 'budgetNumber', label: 'Budget Nr.', fmt: (v) => auditValue(v) },
       { key: 'euro', label: 'Euro', fmt: (v) => (auditIsBlank(v) ? '—' : auditMoney(v)) },
       { key: 'description', label: 'Description', fmt: (v) => auditValue(v) },
     ];
@@ -7345,7 +7351,7 @@
       },
       { key: 'date', label: 'Date', fmt: (v) => auditValue(v) },
       { key: 'name', label: 'Name', fmt: (v) => auditValue(v) },
-      { key: 'budgetNumber', label: 'Budget Number', fmt: (v) => auditValue(v) },
+      { key: 'budgetNumber', label: 'Budget Nr.', fmt: (v) => auditValue(v) },
       { key: 'source', label: 'Source', fmt: (v) => auditValue(v) },
       { key: 'purpose', label: 'Purpose', fmt: (v) => auditValue(v) },
       { key: 'address', label: 'Address', fmt: (v) => auditValue(v) },
@@ -7638,7 +7644,7 @@
     const budgetNumberRaw = String(order.budgetNumber || '').trim();
     const purpose = String(order.purpose || '').trim();
 
-    // Budget Number must be present and parse to a 4-digit OUT code.
+    // Budget Nr. must be present and parse to a 4-digit OUT code.
     const outCode = extractOutCodeFromBudgetNumberText(budgetNumberRaw);
     if (!paymentOrderNo || !date || !name || !address || !purpose || !outCode) return true;
 
@@ -8561,7 +8567,7 @@
       const year = getActiveBudgetYear();
       const budgetDisplay = formatBudgetNumberForDisplay(orderForView.budgetNumber);
       const budgetHtml = renderOutBudgetNumberHtml(orderForView.budgetNumber, year, budgetDisplay);
-      modalHeaderBudget.innerHTML = `Budget Number: ${budgetHtml || '—'}`;
+      modalHeaderBudget.innerHTML = `Budget Nr.: ${budgetHtml || '—'}`;
     }
 
     const currentStatus = getOrderStatusLabel(orderForView);
@@ -8778,11 +8784,11 @@
         modal.setAttribute('data-pending-actor-status', nextStatus);
         modal.setAttribute('data-pending-actor-at', new Date().toISOString());
 
-        // Guardrail: cannot set Approved/Paid unless a valid Budget Number exists.
+        // Guardrail: cannot set Approved/Paid unless a valid Budget Nr. exists.
         const outCode = extractOutCodeFromBudgetNumberText(orderForView.budgetNumber);
         const isImpact = nextStatus === 'Approved' || nextStatus === 'Paid';
         if (isImpact && !/^\d{4}$/.test(outCode)) {
-          window.alert('Budget Number is required before setting Status to Approved or Paid. Edit the order and set Budget Number first.');
+          window.alert('Budget Nr. is required before setting Status to Approved or Paid. Edit the order and set Budget Nr. first.');
           statusSelect.value = normalizeOrderStatus(currentStatus);
           modal.removeAttribute('data-pending-status');
           return;
@@ -9051,7 +9057,7 @@
     { key: 'usAccountType', label: 'US Account Type' },
     { key: 'specialInstructions', label: 'Special Instructions' },
     { key: 'bankDetailsMode', label: 'Bank Details Mode' },
-    { key: 'budgetNumber', label: 'Budget Number' },
+    { key: 'budgetNumber', label: 'Budget Nr.' },
     { key: 'purpose', label: 'Purpose' },
     { key: 'euro', label: 'Euro (EUR)', format: (v) => formatCurrency(v, 'EUR') },
     { key: 'usd', label: 'USD (USD)', format: (v) => formatCurrency(v, 'USD') },
@@ -13704,7 +13710,7 @@
     }
 
     function exportGsLedgerToCsv() {
-      const header = ['Date', 'Budget Number', 'Creditor/Debtor', 'Payment Order Nr.', 'Euro (€)', 'USD ($)', 'Verified', 'With', 'Status', 'Details'];
+      const header = ['Date', 'Budget Nr.', 'Counterparty', 'Payment Order Nr.', 'Euro (€)', 'USD ($)', 'Verified', 'With', 'Status', 'Details'];
       const all = buildGsLedgerRowsForYear(year);
       const sorted = sortGsLedgerForView(all, 'date', 'desc');
       const lines = [];
@@ -15096,7 +15102,7 @@
           </div>
 
           <div class="field field--span2">
-            <label for="incomeBudgetNumber">Budget Number</label>
+            <label for="incomeBudgetNumber">Budget Nr.</label>
             <select id="incomeBudgetNumber" name="incomeBudgetNumber">
               <option value="" selected>Select a budget number (restricted)…</option>
             </select>
@@ -15378,7 +15384,7 @@
     }
 
     function exportIncomeToCsv() {
-      const header = ['Transaction Date', 'Remitter', 'Budget Number', 'Euro', 'Description'];
+      const header = ['Transaction Date', 'Remitter', 'Budget Nr.', 'Euro', 'Description'];
       const entries = loadIncome(year);
       const lines = [];
       lines.push(header.map(escapeCsvValue).join(','));
@@ -15401,7 +15407,7 @@
     }
 
     function downloadIncomeCsvTemplate() {
-      const header = ['Transaction Date', 'Remitter', 'Budget Number', 'Euro', 'Description'];
+      const header = ['Transaction Date', 'Remitter', 'Budget Nr.', 'Euro', 'Description'];
       // Include a valid ISO date example so imports succeed without guesswork.
       const example = [getTodayStamp(), 'Example Remitter', '', '0.00', 'Example description'];
       const lines = [];
@@ -23152,7 +23158,7 @@
       delete form.dataset.reconciliationEdit;
     }
 
-    // Budget Number behavior:
+    // Budget Nr. behavior:
     // - Only roles with full Payment Orders access may change it.
     // - In edit mode, we still display the existing value (read-only) for clarity.
     const canEditBudgetNumber = Boolean(currentUser && canWrite(currentUser, 'orders'));
@@ -23208,7 +23214,7 @@
         'bic',
         'specialInstructions',
         ...(draft.bankDetailsMode ? ['bankDetailsMode'] : []),
-        // Always show the existing Budget Number during edits, even if read-only.
+        // Always show the existing Budget Nr. during edits, even if read-only.
         ...(editId || canEditBudgetNumber ? ['budgetNumber'] : []),
         'purpose',
       ];
@@ -23488,7 +23494,7 @@
         const baseOrder = preferReconciliation && existingRec ? existingRec : (existing || existingRec);
         const isReconciliationEdit = Boolean(preferReconciliation && existingRec);
 
-        // If this user cannot edit Budget Number, preserve the existing value.
+        // If this user cannot edit Budget Nr., preserve the existing value.
         if (!canEditBudgetNumber) {
           orderValues.budgetNumber = String(baseOrder.budgetNumber || '').trim();
         }
@@ -23768,12 +23774,12 @@
         const prevSource = normalizeOrderSource(latest.source);
         const nextSource = sourceSelect ? (normalizeOrderSource(sourceSelect.value) || prevSource) : prevSource;
 
-        // Guardrail: cannot change Status to Approved/Paid unless Budget Number is set.
+        // Guardrail: cannot change Status to Approved/Paid unless Budget Nr. is set.
         const changingToImpact = (nextStatus === 'Approved' || nextStatus === 'Paid') && nextStatus !== getOrderStatusLabel(latest);
         if (changingToImpact) {
           const outCode = extractOutCodeFromBudgetNumberText(latest.budgetNumber);
           if (!/^\d{4}$/.test(outCode)) {
-            window.alert('Budget Number is required before setting Status to Approved or Paid. Edit the order and set Budget Number first.');
+            window.alert('Budget Nr. is required before setting Status to Approved or Paid. Edit the order and set Budget Nr. first.');
             statusSelect.value = prevStatus;
             modal.removeAttribute('data-pending-status');
             return;

@@ -1128,12 +1128,44 @@
     full: 5,
   };
 
+  const STRICT_EXPLICIT_PERMISSION_KEYS = new Set([
+    'income_bankeur',
+    'ledger_wiseeur',
+    'ledger_wiseusd',
+    'ledger_money_transfers',
+    'orders_itemize',
+    'orders_reconciliation',
+  ]);
+
   function isValidAccessLevel(level) {
     return ACCESS_LEVELS.includes(String(level || '').toLowerCase());
   }
 
+  function hasOwnPermissionKey(perms, key) {
+    if (!perms || typeof perms !== 'object') return false;
+    if (!key) return false;
+    return Object.prototype.hasOwnProperty.call(perms, key);
+  }
+
+  function hasAnyGranularChildPermissions(perms) {
+    if (!perms || typeof perms !== 'object') return false;
+    return PERMISSION_DEFS.some((def) => def && def.parent && hasOwnPermissionKey(perms, def.key));
+  }
+
+  function isChildPermissionKey(permKey) {
+    if (!permKey) return false;
+    return PERMISSION_DEFS.some((def) => def && def.key === permKey && def.parent);
+  }
+
   function hasModuleAccessLevel(user, permKey, minLevel) {
     if (!permKey) return true;
+    if (STRICT_EXPLICIT_PERMISSION_KEYS.has(permKey)) {
+      const rawPerms = user && user.permissions && typeof user.permissions === 'object'
+        ? user.permissions
+        : {};
+      const hasGranularChildren = hasAnyGranularChildPermissions(rawPerms);
+      if (hasGranularChildren && !hasOwnPermissionKey(rawPerms, permKey)) return false;
+    }
     const p = getEffectivePermissions(user);
     const current = String((p && p[permKey]) || 'none').toLowerCase();
     const needed = isValidAccessLevel(minLevel) ? String(minLevel).toLowerCase() : 'read';
@@ -1240,6 +1272,17 @@
   function hasPermission(user, permKey) {
     if (!permKey) return true;
     return hasModuleAccessLevel(user, permKey, 'read');
+  }
+
+  function hasExplicitPermission(user, permKey, minLevel = 'read') {
+    if (!permKey) return true;
+    if (!user || !user.permissions || typeof user.permissions !== 'object') return false;
+    if (Object.prototype.hasOwnProperty.call(user.permissions, permKey)) {
+      // Explicit key wins (including explicit "none").
+      return hasModuleAccessLevel({ permissions: { [permKey]: user.permissions[permKey] } }, permKey, minLevel);
+    }
+    // Legacy fallback: if a child key is missing, defer to normalized/inherited permission.
+    return hasModuleAccessLevel(user, permKey, minLevel);
   }
 
   function canWrite(user, permKey) {
@@ -1803,7 +1846,7 @@
         label: 'Ledger',
         href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(resolvedYear))}`,
         children: [
-          ...(hasPermission(currentUser, 'income_bankeur')
+          ...(hasExplicitPermission(currentUser, 'income_bankeur')
             ? [
               {
                 key: 'income_bankeur',
@@ -1868,11 +1911,11 @@
 
     // Filter nav by role permissions.
     return config
-      .filter((it) => hasPermission(currentUser, it.key))
+      .filter((it) => hasExplicitPermission(currentUser, it.key))
       .map((it) => ({
         ...it,
         children: Array.isArray(it.children)
-          ? it.children.filter((child) => hasPermission(currentUser, child && child.key ? child.key : null))
+          ? it.children.filter((child) => hasExplicitPermission(currentUser, child && child.key ? child.key : null))
           : it.children,
       }));
   }
@@ -3662,6 +3705,17 @@
   const ordersClearSearchBtn = document.getElementById('ordersClearSearchBtn');
   const reconciliationBtn = document.getElementById('reconciliationBtn');
   const newPoBtn = document.getElementById('newPoBtn');
+
+  // Hide protected UI immediately; page init will unhide only when authorized.
+  const rolesCardBoot = document.querySelector('section.card[data-settings-card="roles"]');
+  if (rolesCardBoot) rolesCardBoot.hidden = true;
+  if (reconciliationBtn) reconciliationBtn.hidden = true;
+  const gsLedgerBankEurBtnBoot = document.getElementById('gsLedgerBankEurBtn');
+  const gsLedgerWiseEurBtnBoot = document.getElementById('gsLedgerWiseEurBtn');
+  const gsLedgerWiseUsdBtnBoot = document.getElementById('gsLedgerWiseUsdBtn');
+  if (gsLedgerBankEurBtnBoot) gsLedgerBankEurBtnBoot.hidden = true;
+  if (gsLedgerWiseEurBtnBoot) gsLedgerWiseEurBtnBoot.hidden = true;
+  if (gsLedgerWiseUsdBtnBoot) gsLedgerWiseUsdBtnBoot.hidden = true;
 
   // Payment Orders Reconciliation list page
   const reconcileTbody = document.getElementById('reconcileOrdersTbody');
@@ -8218,6 +8272,122 @@
     }
   }
 
+  function initBudgetCodeHoverTooltips() {
+    if (window.__acglBudgetCodeTooltipBound) return;
+    window.__acglBudgetCodeTooltipBound = true;
+
+    const TOOLTIP_SELECTOR = '.budgetCode[data-tooltip]';
+    const margin = 12;
+    const gap = 10;
+    let tooltipEl = null;
+    let activeTarget = null;
+    let rafId = 0;
+
+    const ensureTooltipEl = () => {
+      if (tooltipEl) return tooltipEl;
+      tooltipEl = document.createElement('div');
+      tooltipEl.className = 'floatingTooltip';
+      tooltipEl.setAttribute('role', 'tooltip');
+      tooltipEl.style.display = 'none';
+      document.body.appendChild(tooltipEl);
+      return tooltipEl;
+    };
+
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+    const positionTooltipFor = (target) => {
+      if (!target || !document.contains(target)) return;
+      const text = String(target.getAttribute('data-tooltip') || '').trim();
+      if (!text) return;
+
+      const el = ensureTooltipEl();
+      el.textContent = text;
+      el.style.display = 'block';
+      el.style.visibility = 'hidden';
+      el.style.left = '0px';
+      el.style.top = '0px';
+
+      const targetRect = target.getBoundingClientRect();
+      const tipRect = el.getBoundingClientRect();
+      const maxLeft = window.innerWidth - margin - tipRect.width;
+      const idealLeft = targetRect.left + (targetRect.width / 2) - (tipRect.width / 2);
+      const left = clamp(idealLeft, margin, maxLeft);
+
+      const belowTop = targetRect.bottom + gap;
+      const aboveTop = targetRect.top - gap - tipRect.height;
+      const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
+      const fitsAbove = aboveTop >= margin;
+
+      let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
+      top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
+
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+      el.style.visibility = 'visible';
+    };
+
+    const scheduleReposition = () => {
+      if (!activeTarget) return;
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        positionTooltipFor(activeTarget);
+      });
+    };
+
+    const hide = () => {
+      activeTarget = null;
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      if (tooltipEl) {
+        tooltipEl.style.display = 'none';
+        tooltipEl.textContent = '';
+      }
+    };
+
+    const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
+
+    document.addEventListener('mouseover', (e) => {
+      const t = findTarget(e.target);
+      if (!t) return;
+      if (activeTarget === t) return;
+      activeTarget = t;
+      positionTooltipFor(activeTarget);
+    });
+
+    document.addEventListener('mouseout', (e) => {
+      if (!activeTarget) return;
+      const from = findTarget(e.target);
+      if (!from || from !== activeTarget) return;
+      const to = e.relatedTarget;
+      if (to && from.contains && from.contains(to)) return;
+      hide();
+    });
+
+    document.addEventListener('focusin', (e) => {
+      const t = findTarget(e.target);
+      if (!t) return;
+      activeTarget = t;
+      positionTooltipFor(activeTarget);
+    });
+
+    document.addEventListener('focusout', (e) => {
+      if (!activeTarget) return;
+      const from = findTarget(e.target);
+      if (!from || from !== activeTarget) return;
+      const to = e.relatedTarget;
+      if (to && from.contains && from.contains(to)) return;
+      hide();
+    });
+
+    window.addEventListener('resize', scheduleReposition);
+    window.addEventListener('scroll', scheduleReposition, { passive: true, capture: true });
+  }
+
+  initBudgetCodeHoverTooltips();
+
   function getPaymentOrderProgressStepAbbrev(step) {
     const s = normalizeWith(step);
     if (s === 'Grand Secretary') return 'GS';
@@ -9138,6 +9308,10 @@
   function initPaymentOrdersListPage() {
     if (!tbody) return;
     const year = getActiveBudgetYear();
+    const currentUser = getCurrentUser();
+    const canOpenReconciliation = currentUser
+      ? hasPermission(currentUser, 'orders_reconciliation')
+      : false;
 
     // Ensure the year is present in the URL for consistent nav highlighting.
     const fromUrl = getBudgetYearFromUrl();
@@ -9156,6 +9330,18 @@
 
     const listTitleEl = document.querySelector('[data-payment-orders-list-title]');
     if (listTitleEl) listTitleEl.textContent = `${year} Payment Orders`;
+
+    if (reconciliationBtn) {
+      reconciliationBtn.hidden = !canOpenReconciliation;
+      reconciliationBtn.disabled = !canOpenReconciliation;
+      if (canOpenReconciliation && !reconciliationBtn.dataset.bound) {
+        reconciliationBtn.dataset.bound = '1';
+        reconciliationBtn.addEventListener('click', () => {
+          const y = getActiveBudgetYear();
+          window.location.href = `reconciliation.html?year=${encodeURIComponent(String(y))}`;
+        });
+      }
+    }
 
     applyAppTabTitle();
   }
@@ -11802,22 +11988,41 @@
   function initRolesSettingsPage() {
     if (!createUserForm || !usersTbody || !usersEmptyState) return;
 
-    const hasAnyUsers = loadUsers().length > 0;
     const currentUser = getCurrentUser();
+    const hasAnyUsers = loadUsers().length > 0 || Boolean(currentUser);
     const hasExplicitSettingsAccess = (permKey, minLevel = 'read') => {
       if (!hasAnyUsers) return true;
       if (!currentUser || !permKey) return false;
       const rawPerms = currentUser && currentUser.permissions && typeof currentUser.permissions === 'object'
         ? currentUser.permissions
         : {};
-      if (!Object.prototype.hasOwnProperty.call(rawPerms, permKey)) return false;
-      // Evaluate only this explicit key to avoid inheriting from parent "settings".
-      return hasModuleAccessLevel({ permissions: { [permKey]: rawPerms[permKey] } }, permKey, minLevel);
+      if (Object.prototype.hasOwnProperty.call(rawPerms, permKey)) {
+        // Explicit key wins (including explicit "none").
+        return hasModuleAccessLevel({ permissions: { [permKey]: rawPerms[permKey] } }, permKey, minLevel);
+      }
+      // Legacy fallback: if a settings child key is missing, defer to inherited permission.
+      return hasModuleAccessLevel(currentUser, permKey, minLevel);
     };
 
-    const canEditRoles = hasExplicitSettingsAccess('settings_roles', 'write');
+    const hasStrictExplicitSettingsAccess = (permKey, minLevel = 'read') => {
+      if (!hasAnyUsers) return true;
+      if (!currentUser || !permKey) return false;
+      const rawPerms = currentUser && currentUser.permissions && typeof currentUser.permissions === 'object'
+        ? currentUser.permissions
+        : {};
+      const hasSettingsChildren = hasAnyGranularChildPermissions(rawPerms)
+        && PERMISSION_DEFS.some((def) => def && def.parent === 'settings' && hasOwnPermissionKey(rawPerms, def.key));
+      if (hasOwnPermissionKey(rawPerms, permKey)) {
+        return hasModuleAccessLevel({ permissions: { [permKey]: rawPerms[permKey] } }, permKey, minLevel);
+      }
+      if (hasSettingsChildren && isChildPermissionKey(permKey)) return false;
+      return hasModuleAccessLevel(currentUser, permKey, minLevel);
+    };
+
+    const canEditRoles = hasStrictExplicitSettingsAccess('settings_roles', 'write');
     const canEditBacklog = hasExplicitSettingsAccess('settings_backlog', 'write');
     const canViewAudit = hasExplicitSettingsAccess('settings_audit', 'read');
+    const canViewRolesCard = hasStrictExplicitSettingsAccess('settings_roles', 'read');
 
     const settingsCardPermMap = {
       roles: 'settings_roles',
@@ -11833,6 +12038,10 @@
       if (!cardEl) continue;
       if (!hasAnyUsers) {
         cardEl.hidden = false;
+        continue;
+      }
+      if (cardKey === 'roles') {
+        cardEl.hidden = !canViewRolesCard;
         continue;
       }
       cardEl.hidden = !hasExplicitSettingsAccess(permKey, 'read');
@@ -13781,8 +13990,15 @@
     const gsLedgerWiseUsdBtn = document.getElementById('gsLedgerWiseUsdBtn');
     const menuBtn = document.getElementById('gsLedgerActionsMenuBtn');
     const menuPanel = document.getElementById('gsLedgerActionsMenu');
+    const canViewBankEurBtn = hasPermission(user, 'income_bankeur');
+    const canViewWiseEurBtn = hasPermission(user, 'ledger_wiseeur');
+    const canViewWiseUsdBtn = hasPermission(user, 'ledger_wiseusd');
 
-    if (gsLedgerBankEurBtn && !gsLedgerBankEurBtn.dataset.bound) {
+    if (gsLedgerBankEurBtn) gsLedgerBankEurBtn.hidden = !canViewBankEurBtn;
+    if (gsLedgerWiseEurBtn) gsLedgerWiseEurBtn.hidden = !canViewWiseEurBtn;
+    if (gsLedgerWiseUsdBtn) gsLedgerWiseUsdBtn.hidden = !canViewWiseUsdBtn;
+
+    if (canViewBankEurBtn && gsLedgerBankEurBtn && !gsLedgerBankEurBtn.dataset.bound) {
       gsLedgerBankEurBtn.dataset.bound = '1';
       gsLedgerBankEurBtn.addEventListener('click', () => {
         window.location.href = `income.html?year=${encodeURIComponent(String(year))}`;
@@ -13794,7 +14010,7 @@
       gsLedgerBankEurBtn.title = `Open the ${year} BankEUR grid`;
     }
 
-    if (gsLedgerWiseEurBtn && !gsLedgerWiseEurBtn.dataset.bound) {
+    if (canViewWiseEurBtn && gsLedgerWiseEurBtn && !gsLedgerWiseEurBtn.dataset.bound) {
       gsLedgerWiseEurBtn.dataset.bound = '1';
       gsLedgerWiseEurBtn.addEventListener('click', () => {
         window.location.href = `wise_eur.html?year=${encodeURIComponent(String(year))}`;
@@ -13806,7 +14022,7 @@
       gsLedgerWiseEurBtn.title = `Open the ${year} wiseEUR grid`;
     }
 
-    if (gsLedgerWiseUsdBtn && !gsLedgerWiseUsdBtn.dataset.bound) {
+    if (canViewWiseUsdBtn && gsLedgerWiseUsdBtn && !gsLedgerWiseUsdBtn.dataset.bound) {
       gsLedgerWiseUsdBtn.dataset.bound = '1';
       gsLedgerWiseUsdBtn.addEventListener('click', () => {
         window.location.href = `wise_usd.html?year=${encodeURIComponent(String(year))}`;
@@ -24172,13 +24388,6 @@
     initPaymentOrdersHeaderFilters();
     seedMockOrdersIfDev();
     applyPaymentOrdersView();
-  }
-
-  if (reconciliationBtn) {
-    reconciliationBtn.addEventListener('click', () => {
-      const year = getActiveBudgetYear();
-      window.location.href = `reconciliation.html?year=${encodeURIComponent(String(year))}`;
-    });
   }
 
   if (newPoBtn) {

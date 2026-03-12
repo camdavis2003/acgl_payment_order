@@ -123,12 +123,40 @@ function acgl_fms_normalize_perm_level($value) {
 
 function acgl_fms_normalize_permissions($perms) {
     $p = is_array($perms) ? $perms : [];
+
+    $pick = function ($key, $fallbackParent = null) use ($p) {
+        if (array_key_exists($key, $p)) {
+            return acgl_fms_normalize_perm_level($p[$key]);
+        }
+        if ($fallbackParent !== null && array_key_exists($fallbackParent, $p)) {
+            return acgl_fms_normalize_perm_level($p[$fallbackParent]);
+        }
+        return 'none';
+    };
+
     return [
-        'budget' => acgl_fms_normalize_perm_level($p['budget'] ?? null),
-        'income' => acgl_fms_normalize_perm_level($p['income'] ?? null),
-        'orders' => acgl_fms_normalize_perm_level($p['orders'] ?? null),
-        'ledger' => acgl_fms_normalize_perm_level($p['ledger'] ?? null),
-        'settings' => acgl_fms_normalize_perm_level($p['settings'] ?? null),
+        'budget' => $pick('budget'),
+        'budget_dashboard' => $pick('budget_dashboard', 'budget'),
+
+        'income' => $pick('income'),
+        'income_bankeur' => $pick('income_bankeur', 'income'),
+
+        'orders' => $pick('orders'),
+        'orders_itemize' => $pick('orders_itemize', 'orders'),
+        'orders_reconciliation' => $pick('orders_reconciliation', 'orders'),
+
+        'ledger' => $pick('ledger'),
+        'ledger_wiseeur' => $pick('ledger_wiseeur', 'ledger'),
+        'ledger_wiseusd' => $pick('ledger_wiseusd', 'ledger'),
+        'ledger_money_transfers' => $pick('ledger_money_transfers', 'ledger'),
+
+        'settings' => $pick('settings'),
+        'settings_roles' => $pick('settings_roles', 'settings'),
+        'settings_backlog' => $pick('settings_backlog', 'settings'),
+        'settings_numbering' => $pick('settings_numbering', 'settings'),
+        'settings_grandlodge' => $pick('settings_grandlodge', 'settings'),
+        'settings_backup' => $pick('settings_backup', 'settings'),
+        'settings_audit' => $pick('settings_audit', 'settings'),
     ];
 }
 

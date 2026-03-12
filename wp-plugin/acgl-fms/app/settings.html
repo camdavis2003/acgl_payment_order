@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=91c5ae4-20260312190838" />
+    <link rel="stylesheet" href="styles.css?v=a3a2b2d-20260312204805" />
   </head>
   <body data-page="admin-settings">
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -52,6 +52,7 @@
             aria-labelledby="roles-title"
             draggable="true"
             data-settings-card="roles"
+            hidden
           >
             <div class="list-header">
               <h2 id="roles-title">User Roles</h2>
@@ -100,7 +101,9 @@
                     <th scope="col">Password</th>
                     <th scope="col">Email</th>
                     <th scope="col">Role</th>
-                    <th scope="col" class="col-actions"><span class="usersTable__actionsHeader">Actions</span></th>
+                    <th scope="col" class="col-actions">
+                      <span class="usersTable__actionsHeader">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody id="usersTbody">
@@ -851,7 +854,11 @@
                   View</label
                 >
               </div>
-              <div class="rolesGrid__row" role="group" aria-label="Money Transfers">
+              <div
+                class="rolesGrid__row"
+                role="group"
+                aria-label="Money Transfers"
+              >
                 <div class="rolesGrid__label">Money Transfers</div>
                 <label class="rolesGrid__check"
                   ><input type="checkbox" id="permLedgerMoneyTransfersWrite" />
@@ -1279,6 +1286,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=91c5ae4-20260312190838" defer></script>
+    <script src="app.js?v=a3a2b2d-20260312204805" defer></script>
   </body>
 </html>

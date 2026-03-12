@@ -1466,7 +1466,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
-  z-index: 20;
+  z-index: 2602;
 }
 
 .budgetMenu__panel .actionLink[data-tooltip]:hover::before,
@@ -1481,7 +1481,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;
   border-left: 7px solid var(--border);
-  z-index: 21;
+  z-index: 2603;
 }
 
 .budgetTable tr.budgetRow--selected td {
@@ -1663,7 +1663,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
   box-sizing: border-box;
-  z-index: 30;
+  z-index: 2602;
 }
 
 .btn[data-tooltip]:hover::before,
@@ -1678,7 +1678,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-top: 7px solid var(--border);
-  z-index: 31;
+  z-index: 2603;
 }
 
 /* Tooltip popup for displayed Budget Numbers */
@@ -1691,7 +1691,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .budgetCode[data-tooltip]:hover::after,
 .budgetCode[data-tooltip]:focus-visible::after {
-  content: attr(data-tooltip);
+  content: none;
   position: absolute;
   left: 0;
   bottom: calc(100% + 10px);
@@ -1704,12 +1704,12 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
-  z-index: 40;
+  z-index: 2604;
 }
 
 .budgetCode[data-tooltip]:hover::before,
 .budgetCode[data-tooltip]:focus-visible::before {
-  content: '';
+  content: none;
   position: absolute;
   left: 18px;
   bottom: calc(100% + 4px);
@@ -1718,7 +1718,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-top: 7px solid var(--border);
-  z-index: 41;
+  z-index: 2605;
 }
 
 .btn--primary {
@@ -1983,7 +1983,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
   box-sizing: border-box;
-  z-index: 40;
+  z-index: 2604;
 }
 
 .rolesGrid__check[data-tooltip]:hover::before,
@@ -1997,7 +1997,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-bottom: 7px solid var(--border);
-  z-index: 41;
+  z-index: 2605;
 }
 
 /* Add User modal: use JS-driven tooltips so hovering does not expand scroll area */
@@ -2010,7 +2010,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .floatingTooltip {
   position: fixed;
-  z-index: 2005;
+  z-index: 2606;
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--surface);

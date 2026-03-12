@@ -14887,6 +14887,7 @@
           // Avoid duplicating legacy/free-typed converted markers.
           .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
           .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
           .trim();
         const descText = escapeHtml(strippedDescRaw);
 
@@ -14910,17 +14911,18 @@
           : null;
 
         const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
         const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
-        const orderScopeForLink = orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)) ? 'orders' : 'reconciliation';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
         const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
         const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
 
-        const convertedHtml = (isNegative && poDisplay)
+        const convertedHtml = (isNegative && isOnPaymentOrdersTable && poDisplay)
           ? (orderIdForLink
             ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
-            : ` (converted to ${poDisplay})`
-          )
-          : '';
+            : ` (converted to ${poDisplay})`)
+          : (isNegative && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
 
         const desc = `${descText}${convertedHtml}`;
 
@@ -16200,9 +16202,57 @@
   function renderWiseEurRows(entries) {
     if (!wiseEurTbody) return;
     const canVerify = Boolean(wiseEurViewState.canVerify);
+    const year = getActiveBudgetYear();
     const activeYear = getActiveBudgetYear();
     const inMap = getInDescMapForYear(activeYear);
     const outMap = getOutDescMapForYear(activeYear);
+    const ordersBySourceEntryKey = new Map();
+    const reconcileBySourceEntryKey = new Map();
+    const ordersByPoCanon = new Map();
+    const reconcileByPoCanon = new Map();
+    const orderIds = new Set();
+    const sourceEntryKey = (sourceRaw, sourceEntryIdRaw) => {
+      const source = String(sourceRaw || '').trim().toLowerCase();
+      const sourceEntryId = String(sourceEntryIdRaw || '').trim();
+      if (!source || !sourceEntryId) return '';
+      return `${source}::${sourceEntryId}`;
+    };
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!ordersBySourceEntryKey.has(key)) {
+          ordersBySourceEntryKey.set(key, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryKey.get(key);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryKey.set(key, o);
+      }
+    }
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!reconcileBySourceEntryKey.has(key)) reconcileBySourceEntryKey.set(key, o);
+      }
+    }
     const html = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
@@ -16237,7 +16287,45 @@
         const receivedFromDisbursedTo = escapeHtml(getWiseEurDisplayValueForColumn(e, 'receivedFromDisbursedTo'));
         const receipts = escapeHtml(getWiseEurDisplayValueForColumn(e, 'receipts'));
         const disburse = escapeHtml(getWiseEurDisplayValueForColumn(e, 'disburse'));
-        const description = escapeHtml(getWiseEurDisplayValueForColumn(e, 'description'));
+        const descRaw = String(getWiseEurDisplayValueForColumn(e, 'description') || '');
+        const strippedDescRaw = descRaw
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const isDisbursement = Number.isFinite(disburseAmt) && disburseAmt > 0;
+        const srcKey = isDisbursement ? sourceEntryKey('wiseEUR', e.id) : '';
+        const match = srcKey
+          ? (ordersBySourceEntryKey.get(srcKey) || reconcileBySourceEntryKey.get(srcKey))
+          : null;
+
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isDisbursement && isOnPaymentOrdersTable && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`)
+          : (isDisbursement && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
+        const description = `${descText}${convertedHtml}`;
         const issuanceDateBank = escapeHtml(getWiseEurDisplayValueForColumn(e, 'issuanceDateBank'));
         const verifiedChecked = getWiseEurVerified(e) ? 'checked' : '';
         const verifyDisabled = canVerify ? '' : 'disabled';
@@ -17608,6 +17696,25 @@
     }
 
     wiseEurTbody.addEventListener('click', (e) => {
+      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
+      if (dl) {
+        e.preventDefault();
+        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
+        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
+        if (!orderId) return;
+
+        const order = scope === 'reconciliation'
+          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
+          : loadOrders(year).find((o) => o && String(o.id) === orderId);
+        if (!order) return;
+        if (hasOrderMissingRequiredValues(order)) {
+          window.alert('Complete all required fields before downloading a PDF.');
+          return;
+        }
+        generatePaymentOrderPdfFromTemplate({ order });
+        return;
+      }
+
       const btn = e.target.closest('button[data-wise-eur-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-wise-eur-id]');
@@ -17971,9 +18078,57 @@
   function renderWiseUsdRows(entries) {
     if (!wiseUsdTbody) return;
     const canVerify = Boolean(wiseUsdViewState.canVerify);
+    const year = getActiveBudgetYear();
     const activeYear = getActiveBudgetYear();
     const inMap = getInDescMapForYear(activeYear);
     const outMap = getOutDescMapForYear(activeYear);
+    const ordersBySourceEntryKey = new Map();
+    const reconcileBySourceEntryKey = new Map();
+    const ordersByPoCanon = new Map();
+    const reconcileByPoCanon = new Map();
+    const orderIds = new Set();
+    const sourceEntryKey = (sourceRaw, sourceEntryIdRaw) => {
+      const source = String(sourceRaw || '').trim().toLowerCase();
+      const sourceEntryId = String(sourceEntryIdRaw || '').trim();
+      if (!source || !sourceEntryId) return '';
+      return `${source}::${sourceEntryId}`;
+    };
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!ordersBySourceEntryKey.has(key)) {
+          ordersBySourceEntryKey.set(key, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryKey.get(key);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryKey.set(key, o);
+      }
+    }
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!reconcileBySourceEntryKey.has(key)) reconcileBySourceEntryKey.set(key, o);
+      }
+    }
     const html = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
@@ -18008,7 +18163,45 @@
         const receivedFromDisbursedTo = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receivedFromDisbursedTo'));
         const receipts = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receipts'));
         const disburse = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'disburse'));
-        const description = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'description'));
+        const descRaw = String(getWiseUsdDisplayValueForColumn(e, 'description') || '');
+        const strippedDescRaw = descRaw
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const isDisbursement = Number.isFinite(disburseAmt) && disburseAmt > 0;
+        const srcKey = isDisbursement ? sourceEntryKey('wiseUSD', e.id) : '';
+        const match = srcKey
+          ? (ordersBySourceEntryKey.get(srcKey) || reconcileBySourceEntryKey.get(srcKey))
+          : null;
+
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isDisbursement && isOnPaymentOrdersTable && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`)
+          : (isDisbursement && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
+        const description = `${descText}${convertedHtml}`;
         const issuanceDateBank = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'issuanceDateBank'));
         const verifiedChecked = getWiseUsdVerified(e) ? 'checked' : '';
         const verifyDisabled = canVerify ? '' : 'disabled';
@@ -19178,6 +19371,25 @@
     }
 
     wiseUsdTbody.addEventListener('click', (e) => {
+      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
+      if (dl) {
+        e.preventDefault();
+        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
+        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
+        if (!orderId) return;
+
+        const order = scope === 'reconciliation'
+          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
+          : loadOrders(year).find((o) => o && String(o.id) === orderId);
+        if (!order) return;
+        if (hasOrderMissingRequiredValues(order)) {
+          window.alert('Complete all required fields before downloading a PDF.');
+          return;
+        }
+        generatePaymentOrderPdfFromTemplate({ order });
+        return;
+      }
+
       const btn = e.target.closest('button[data-wise-usd-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-wise-usd-id]');

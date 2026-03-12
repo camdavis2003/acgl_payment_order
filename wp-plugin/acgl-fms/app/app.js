@@ -3671,6 +3671,123 @@
   const appMain = document.querySelector('.appMain');
   const siteHeader = document.querySelector('.site-header');
 
+  // Lock the page header so it doesn't scroll away.
+  // We set a fixed position and dynamically match the appMain column width/left
+  // so it aligns properly when the left navigation is shown/hidden.
+  function lockSiteHeaderToViewport() {
+    if (!appMain || !siteHeader) return;
+    if (siteHeader.dataset.locked === '1') return;
+    siteHeader.dataset.locked = '1';
+
+    const spacerAttr = 'data-site-header-spacer';
+    let spacer = appMain.querySelector(`[${spacerAttr}]`);
+
+    if (!spacer) {
+      spacer = document.createElement('div');
+      spacer.setAttribute(spacerAttr, '');
+      spacer.style.height = '0px';
+      spacer.style.flex = '0 0 auto';
+      appMain.insertBefore(spacer, appMain.firstChild);
+    }
+
+    if (siteHeader.dataset.movedToBody !== '1') {
+      siteHeader.dataset.movedToBody = '1';
+      document.body.insertBefore(siteHeader, document.body.firstChild);
+    }
+
+    const apply = () => {
+      try {
+        const rect = appMain.getBoundingClientRect();
+        if (!rect || !Number.isFinite(rect.width) || rect.width <= 0) return;
+
+        siteHeader.style.position = 'fixed';
+        siteHeader.style.top = '0';
+        siteHeader.style.left = `${Math.round(rect.left)}px`;
+        siteHeader.style.width = `${Math.round(rect.width)}px`;
+        siteHeader.style.zIndex = '1500';
+
+        const h = Math.ceil(siteHeader.getBoundingClientRect().height);
+        if (Number.isFinite(h) && h > 0) {
+          spacer.style.height = `${h}px`;
+          appMain.style.paddingTop = '';
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    apply();
+    window.addEventListener('resize', apply);
+    window.addEventListener('load', apply);
+    window.addEventListener('scroll', apply, { passive: true });
+
+    if (navToggleBtn && appShell) {
+      const schedule = () => window.requestAnimationFrame(apply);
+      navToggleBtn.addEventListener('click', schedule);
+      appShell.addEventListener('transitionend', schedule);
+    }
+  }
+
+  lockSiteHeaderToViewport();
+
+  // Tables with sticky headers/footers: size the scroll wrapper to the viewport.
+  // This avoids "too tall" tables on pages with larger headers (e.g., Income).
+  function fitFixedFooterTableWrapsToViewport() {
+    const baseBottomPadding = 8;
+
+    const getViewportHeight = () => {
+      if (window.visualViewport && Number.isFinite(window.visualViewport.height)) {
+        return window.visualViewport.height;
+      }
+      return window.innerHeight;
+    };
+
+    const apply = () => {
+      try {
+        const viewportH = getViewportHeight();
+        const wraps = document.querySelectorAll('.table-wrap.fixedFooterTableWrap');
+        if (!wraps || wraps.length === 0) return;
+
+        wraps.forEach((wrap) => {
+          const rect = wrap.getBoundingClientRect();
+          if (!rect || !Number.isFinite(rect.top)) return;
+
+          const main = wrap.closest('main');
+          const card = wrap.closest('.card');
+          const mainStyles = main ? window.getComputedStyle(main) : null;
+          const cardStyles = card ? window.getComputedStyle(card) : null;
+
+          const mainPaddingBottom = mainStyles ? parseFloat(mainStyles.paddingBottom) || 0 : 0;
+          const cardPaddingBottom = cardStyles ? parseFloat(cardStyles.paddingBottom) || 0 : 0;
+          const cardMarginBottom = cardStyles ? parseFloat(cardStyles.marginBottom) || 0 : 0;
+
+          const bottomPadding = baseBottomPadding + mainPaddingBottom + cardPaddingBottom + cardMarginBottom;
+          const available = Math.floor(viewportH - rect.top - bottomPadding);
+          const maxH = Math.max(260, available);
+          wrap.style.maxHeight = `${maxH}px`;
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    apply();
+    window.addEventListener('resize', apply);
+    window.addEventListener('load', apply);
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', apply);
+    }
+
+    if (navToggleBtn && appShell) {
+      const schedule = () => window.requestAnimationFrame(apply);
+      navToggleBtn.addEventListener('click', schedule);
+      appShell.addEventListener('transitionend', schedule);
+    }
+  }
+
+  fitFixedFooterTableWrapsToViewport();
+
   // Settings page (numbering)
   const numberingForm = document.getElementById('numberingForm');
   const masonicYearInput = document.getElementById('masonicYear');
@@ -3934,10 +4051,62 @@
       const raw = localStorage.getItem(storageKey);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      const orders = Array.isArray(parsed) ? parsed : [];
+      return migrateKnownUsdOrderSourcesIfNeeded(resolvedYear, orders, { kind: 'reconciliation', storageKey });
     } catch {
       return [];
     }
+  }
+
+  function migrateKnownUsdOrderSourcesIfNeeded(year, orders, opts) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return Array.isArray(orders) ? orders : [];
+    const kind = opts && opts.kind ? String(opts.kind) : 'orders';
+    const storageKey = opts && opts.storageKey ? String(opts.storageKey) : '';
+    if (!storageKey) return Array.isArray(orders) ? orders : [];
+
+    const migrationKey = `payment_orders_known_usd_source_fix_${kind}_${y}_v1`;
+    try {
+      if (localStorage.getItem(migrationKey) === '1') return Array.isArray(orders) ? orders : [];
+    } catch {
+      return Array.isArray(orders) ? orders : [];
+    }
+
+    const list = Array.isArray(orders) ? orders : [];
+
+    function hasUsdValue(o) {
+      const usdNum = Number(o && o.usd);
+      if (Number.isFinite(usdNum) && usdNum > 0) return true;
+      const items = Array.isArray(o && o.items) ? o.items : [];
+      return items.some((it) => {
+        const n = Number(it && it.usd);
+        return Number.isFinite(n) && n > 0;
+      });
+    }
+
+    const fixCanons = new Set(['PO25-04']);
+
+    let changed = false;
+    const patched = list.map((o) => {
+      if (!o || typeof o !== 'object') return o;
+      const canon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+      if (!fixCanons.has(canon)) return o;
+      if (!hasUsdValue(o)) return o;
+      const src = String(o.source || '').trim();
+      if (src === 'wiseUSD') return o;
+      if (src && src !== 'Commerzbank') return o;
+      changed = true;
+      return { ...o, source: 'wiseUSD' };
+    });
+
+    try {
+      if (changed) localStorage.setItem(storageKey, JSON.stringify(patched));
+      localStorage.setItem(migrationKey, '1');
+    } catch {
+      // ignore
+    }
+
+    return changed ? patched : list;
   }
 
   /** @param {Array<Object>} orders */
@@ -3999,7 +4168,8 @@
       const raw = localStorage.getItem(storageKey);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      const orders = Array.isArray(parsed) ? parsed : [];
+      return migrateKnownUsdOrderSourcesIfNeeded(resolvedYear, orders, { kind: 'orders', storageKey });
     } catch {
       return [];
     }
@@ -5967,7 +6137,7 @@
   const MOCK_VERSION_KEY = 'payment_orders_mock_version';
   const MOCK_VERSION = '3';
   const RECONCILIATION_MOCK_VERSION_KEY = 'payment_orders_reconciliation_mock_version';
-  const RECONCILIATION_MOCK_VERSION = '1';
+  const RECONCILIATION_MOCK_VERSION = '2';
 
   function isMockOrder(order) {
     return !!order && typeof order === 'object' && String(order.id || '').startsWith('mock_');
@@ -5990,6 +6160,7 @@
         name: 'Riley Example',
         euro: 148.75,
         usd: null,
+        source: 'Commerzbank',
         budgetNumber: '2200',
         with: 'Requestor',
         status: 'Submitted',
@@ -6001,6 +6172,7 @@
         name: 'Morgan Example',
         euro: 92.40,
         usd: null,
+        source: 'Commerzbank',
         budgetNumber: '2100',
         with: 'Grand Secretary',
         status: 'Review',
@@ -6012,6 +6184,7 @@
         name: 'Casey Example',
         euro: null,
         usd: 64.15,
+        source: 'wiseUSD',
         budgetNumber: '2246',
         with: 'Requestor',
         status: 'Submitted',
@@ -6025,7 +6198,7 @@
         id: `mock_rec_${y}_${idx + 1}`,
         createdAt,
         updatedAt: createdAt,
-        source: 'Commerzbank',
+        source: String(t.source || '').trim() || 'Commerzbank',
         paymentOrderNo: t.paymentOrderNo,
         date: t.date,
         name: t.name,
@@ -6442,6 +6615,25 @@
         patchedExisting = true;
         return { ...o, source: 'Form Submission' };
       });
+
+      // Fix specific seeded/mock payment orders that are USD but incorrectly marked as Commerzbank.
+      // (Requested: PO 25-04 and PO 25-92 should be wiseUSD when they are USD.)
+      const forceWiseUsdCanons = new Set([
+        `PO${targetYear2}-04`,
+        `PO${targetYear2}-92`,
+      ]);
+      existing = existing.map((o) => {
+        if (!o || typeof o !== 'object') return o;
+        if (!isMockOrder(o)) return o;
+        const canon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (!forceWiseUsdCanons.has(canon)) return o;
+        const usdNum = Number(o.usd);
+        if (!Number.isFinite(usdNum) || usdNum <= 0) return o;
+        const src = String(o.source || '').trim();
+        if (src === 'wiseUSD') return o;
+        patchedExisting = true;
+        return { ...o, source: 'wiseUSD' };
+      });
       if (patchedExisting) {
         localStorage.setItem(ordersKey, JSON.stringify(existing));
       }
@@ -6670,7 +6862,7 @@
     const incomeKey = getIncomeKeyForYear(targetYear);
     if (incomeKey) {
       const INCOME_MOCK_VERSION_KEY = 'payment_orders_income_mock_version';
-      const INCOME_MOCK_VERSION = '1';
+      const INCOME_MOCK_VERSION = '3';
 
       let existingIncome = [];
       try {
@@ -6728,6 +6920,38 @@
           });
           localStorage.setItem(incomeKey, JSON.stringify(upgraded));
           existingIncome = upgraded;
+        }
+
+        // Ensure a mock negative BankEUR entry exists corresponding to the Commerzbank mock expenditure
+        // that also creates PO 25-91 in Reconciliation.
+        const year2 = String(targetYear % 100).padStart(2, '0');
+        const po91IncomeId = `mock_income_${targetYear}_neg_po_${year2}_91`;
+        const po91BudgetNumber = '2100';
+        const hasPo91Income = existingIncome.some((e) => e && String(e.id || '') === po91IncomeId);
+        if (!hasPo91Income) {
+          const createdAt = new Date(baseMs - 11 * 1000 * 60 * 60 * 24 * 9).toISOString();
+          const po91Entry = {
+            id: po91IncomeId,
+            createdAt,
+            updatedAt: nowIso,
+            date: `${targetYear}-03-11`,
+            remitter: 'Morgan Example',
+            budgetNumber: po91BudgetNumber,
+            euro: -92.40,
+            description: 'Office supplies reimbursement (converted to PO 25-91).',
+          };
+          existingIncome = [po91Entry, ...existingIncome];
+          localStorage.setItem(incomeKey, JSON.stringify(existingIncome));
+        } else {
+          const patched = existingIncome.map((e) => {
+            if (!e || typeof e !== 'object') return e;
+            if (String(e.id || '') !== po91IncomeId) return e;
+            const cur = String(e.budgetNumber || '').trim();
+            if (cur === po91BudgetNumber) return e;
+            return { ...e, budgetNumber: po91BudgetNumber, updatedAt: nowIso };
+          });
+          existingIncome = patched;
+          localStorage.setItem(incomeKey, JSON.stringify(existingIncome));
         }
 
         localStorage.setItem(INCOME_MOCK_VERSION_KEY, INCOME_MOCK_VERSION);
@@ -14955,9 +15179,10 @@
     ensureIncomeListExistsForYear(year);
 
     const titleEl = document.querySelector('[data-income-title]');
-    if (titleEl) titleEl.textContent = `${year} Income`;
+    const incomeTitle = `${year} BankEUR (Commerzbank)`;
+    if (titleEl) titleEl.textContent = incomeTitle;
     const listTitleEl = document.querySelector('[data-income-list-title]');
-    if (listTitleEl) listTitleEl.textContent = `${year} Income`;
+    if (listTitleEl) listTitleEl.textContent = incomeTitle;
     if (incomeBackToLedgerLink) {
       incomeBackToLedgerLink.href = `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`;
       incomeBackToLedgerLink.textContent = `← Back to ${year} Ledger`;
@@ -15303,7 +15528,7 @@
         if (!description) errors.push(`Row ${rowNo}: Description is required.`);
         if (!date || !remitter || euroSigned === null || !description) continue;
 
-        // Negative amounts are expenditures: skip Income import and create Payment Orders instead.
+        // Negative amounts are expenditures: also create Payment Orders in Reconciliation.
         if (euroSigned < 0) {
           const absEuro = Math.abs(euroSigned);
           const itemTitle = description || 'Imported from Income CSV';
@@ -15335,13 +15560,6 @@
           po.updatedAt = po.createdAt;
 
           createdReconciliationOrders.push(po);
-          continue;
-        }
-
-        const euroNum = parseEuroAmount(String(euroSigned));
-        if (euroNum === null) {
-          errors.push(`Row ${rowNo}: Euro must be 0 or greater.`);
-          continue;
         }
 
         const inc = {
@@ -15351,7 +15569,7 @@
           date,
           remitter,
           budgetNumber,
-          euro: euroNum,
+          euro: euroSigned,
           description,
         };
 

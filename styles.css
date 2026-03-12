@@ -694,6 +694,9 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
 .site-header {
   background: var(--card);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1500;
 }
 
 .header-top {

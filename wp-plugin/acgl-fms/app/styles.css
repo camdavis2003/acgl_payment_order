@@ -16,6 +16,10 @@
   --danger-text: #991b1b;
   --chart-balance: #60a5fa;
   --chart-expenditures: #fdba74;
+  --z-popover: 30020;
+  --z-tooltip: 30040;
+  --z-tooltip-arrow: 30041;
+  --z-floating-tooltip: 30060;
 }
 
 html[data-theme="dark"] {
@@ -1392,7 +1396,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
   padding: 6px;
   min-width: 220px;
-  z-index: 10;
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1433,7 +1437,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
   padding: 6px;
   min-width: 170px;
-  z-index: 10;
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1466,7 +1470,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
-  z-index: 2602;
+  z-index: var(--z-tooltip);
 }
 
 .budgetMenu__panel .actionLink[data-tooltip]:hover::before,
@@ -1481,7 +1485,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;
   border-left: 7px solid var(--border);
-  z-index: 2603;
+  z-index: var(--z-tooltip-arrow);
 }
 
 .budgetTable tr.budgetRow--selected td {
@@ -1663,7 +1667,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
   box-sizing: border-box;
-  z-index: 2602;
+  z-index: var(--z-tooltip);
 }
 
 .btn[data-tooltip]:hover::before,
@@ -1678,7 +1682,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-top: 7px solid var(--border);
-  z-index: 2603;
+  z-index: var(--z-tooltip-arrow);
 }
 
 /* Tooltip popup for displayed Budget Numbers */
@@ -1704,7 +1708,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
-  z-index: 2604;
+  z-index: var(--z-tooltip);
 }
 
 .budgetCode[data-tooltip]:hover::before,
@@ -1718,7 +1722,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-top: 7px solid var(--border);
-  z-index: 2605;
+  z-index: var(--z-tooltip-arrow);
 }
 
 .btn--primary {
@@ -1983,7 +1987,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
   box-sizing: border-box;
-  z-index: 2604;
+  z-index: var(--z-tooltip);
 }
 
 .rolesGrid__check[data-tooltip]:hover::before,
@@ -1997,7 +2001,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-bottom: 7px solid var(--border);
-  z-index: 2605;
+  z-index: var(--z-tooltip-arrow);
 }
 
 /* Add User modal: use JS-driven tooltips so hovering does not expand scroll area */
@@ -2010,7 +2014,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .floatingTooltip {
   position: fixed;
-  z-index: 2606;
+  z-index: var(--z-floating-tooltip);
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--surface);
@@ -2696,88 +2700,44 @@ input[type='checkbox'].cb {
   text-align: left;
 }
 
-/* Money Transfers: center selected columns (MT No, MT Date, Verified, Names) */
-#moneyTransfersTable th:nth-child(2),
-#moneyTransfersTable td:nth-child(2),
-#moneyTransfersTable th:nth-child(3),
-#moneyTransfersTable td:nth-child(3),
-#moneyTransfersTable th:nth-child(4),
-#moneyTransfersTable td:nth-child(4),
-#moneyTransfersTable th:nth-child(5),
-#moneyTransfersTable td:nth-child(5),
-#moneyTransfersTable th:nth-child(6),
-#moneyTransfersTable td:nth-child(6),
-#moneyTransfersTable th:nth-child(7),
-#moneyTransfersTable td:nth-child(7) {
-  text-align: center;
-}
-
-/* Money Transfers: keep non-comment columns tight; give Comments the space */
+/* Money Transfers: responsive layout with Comments prioritized */
 #moneyTransfersTable {
-  table-layout: fixed;
+  width: 100%;
+  table-layout: auto;
 }
 
 #moneyTransfersTable th,
 #moneyTransfersTable td {
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-left: 6px;
+  padding-right: 6px;
+  text-align: center;
+  vertical-align: top;
 }
 
-/* Default: keep most columns on one line */
-#moneyTransfersTable td:not(:nth-child(8)),
-#moneyTransfersTable th:not(:nth-child(8)) {
+/* Keep compact columns tight so Comments can expand */
+#moneyTransfersTable th:not(:nth-child(8)):not(:nth-child(9)),
+#moneyTransfersTable td:not(:nth-child(8)):not(:nth-child(9)) {
+  width: 1%;
   white-space: nowrap;
 }
 
-/* Column widths (1=delete, 8=comments, 9=actions) */
-#moneyTransfersTable th:nth-child(1),
-#moneyTransfersTable td:nth-child(1) {
-  width: 44px;
-}
-
-#moneyTransfersTable th:nth-child(2),
-#moneyTransfersTable td:nth-child(2) {
-  width: 150px;
-}
-
-#moneyTransfersTable th:nth-child(3),
-#moneyTransfersTable td:nth-child(3) {
-  width: 120px;
-}
-
-/* Verified columns (4 and 6) */
-#moneyTransfersTable th:nth-child(4),
-#moneyTransfersTable td:nth-child(4),
-#moneyTransfersTable th:nth-child(6),
-#moneyTransfersTable td:nth-child(6) {
-  width: 95px;
-}
-
-/* Name columns (5 and 7) */
-#moneyTransfersTable th:nth-child(5),
-#moneyTransfersTable td:nth-child(5),
-#moneyTransfersTable th:nth-child(7),
-#moneyTransfersTable td:nth-child(7) {
-  width: 200px;
-}
-
-#moneyTransfersTable th:nth-child(9),
-#moneyTransfersTable td:nth-child(9) {
-  width: 120px;
-}
-
-/* Comments: allow wrapping */
+/* Comments grows with screen size and takes remaining room */
 #moneyTransfersTable th:nth-child(8),
 #moneyTransfersTable td:nth-child(8) {
+  width: 40%;
+  min-width: clamp(260px, 34vw, 620px);
+  text-align: left;
   white-space: normal;
   word-break: break-word;
 }
 
-/* Actions far right */
+/* Actions stays on the far right and remains button-friendly */
 #moneyTransfersTable th:nth-child(9),
-#moneyTransfersTable td:nth-child(9),
-#moneyTransfersTable td.actions {
-  text-align: right;
+#moneyTransfersTable td:nth-child(9) {
+  width: 1%;
+  min-width: 170px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 /* Description column (7th) stays left-aligned */

@@ -663,6 +663,7 @@
           orders: 'write',
           ledger: 'write',
           ledger_money_transfers: 'write',
+          archive: 'write',
           settings: 'write',
         },
       };
@@ -1064,6 +1065,9 @@
       if (!own && def.key === 'ledger_money_transfers' && Object.prototype.hasOwnProperty.call(p, 'ledger')) {
         raw = p.ledger;
       }
+      if (!own && def.key === 'archive' && Object.prototype.hasOwnProperty.call(p, 'settings')) {
+        raw = p.settings;
+      }
       next[def.key] = normalizeLevel(raw);
     }
 
@@ -1089,6 +1093,7 @@
     { key: 'ledger_wiseeur', parent: 'ledger' },
     { key: 'ledger_wiseusd', parent: 'ledger' },
     { key: 'ledger_money_transfers' },
+    { key: 'archive' },
     { key: 'settings' },
     { key: 'settings_roles', parent: 'settings' },
     { key: 'settings_backlog', parent: 'settings' },
@@ -1109,6 +1114,7 @@
     { key: 'ledger_wiseeur', idBase: 'LedgerWiseEur', label: 'wiseEUR', group: 'sub' },
     { key: 'ledger_wiseusd', idBase: 'LedgerWiseUsd', label: 'wiseUSD', group: 'sub' },
     { key: 'ledger_money_transfers', idBase: 'LedgerMoneyTransfers', label: 'Money Transfers', group: 'main' },
+    { key: 'archive', idBase: 'Archive', label: 'Archive', group: 'main' },
     { key: 'settings', idBase: 'Settings', label: 'Admin Settings', group: 'main' },
     { key: 'settings_roles', idBase: 'SettingsRoles', label: 'User Roles', group: 'sub' },
     { key: 'settings_backlog', idBase: 'SettingsBacklog', label: 'Backlog', group: 'sub' },
@@ -1210,6 +1216,7 @@
     if (base === 'grand_secretary_ledger.html') return 'ledger';
     if (base === 'money_transfers.html') return 'ledger_money_transfers';
     if (base === 'money_transfer.html') return 'ledger_money_transfers';
+    if (base === 'archive.html') return 'archive';
     if (base === 'settings.html') return 'settings';
     return null;
   }
@@ -1896,7 +1903,7 @@
           href: `money_transfers.html?year=${encodeURIComponent(String(year))}`,
         })),
       },
-      { key: null, label: 'Archive', href: 'archive.html' },
+      { key: 'archive', label: 'Archive', href: 'archive.html' },
       { key: 'settings', label: 'Admin Settings', href: 'settings.html' },
       { key: null, label: 'About', href: 'about.html' },
       { key: null, label: 'Log out', href: 'index.html?logout=1' },
@@ -12878,6 +12885,169 @@
     const allCreate = document.getElementById('permAllCreate');
     const allPartial = document.getElementById('permAllPartial');
     const allRead = document.getElementById('permAllRead');
+
+    const ROLE_ACCESS_PRESETS = {
+      'Grand Secretary': Object.fromEntries(PERMISSION_FORM_ROWS.map((row) => [row.idBase, 'full'])),
+      'Assist. Grand Secretary': Object.fromEntries(PERMISSION_FORM_ROWS.map((row) => [row.idBase, 'full'])),
+      Auditor: {
+        Budget: 'read',
+        BudgetDashboard: 'read',
+        Orders: 'read',
+        OrdersItemize: 'read',
+        OrdersReconciliation: 'read',
+        Ledger: 'read',
+        IncomeBankeur: 'read',
+        LedgerWiseEur: 'read',
+        LedgerWiseUsd: 'read',
+        LedgerMoneyTransfers: 'read',
+        Archive: 'read',
+        Settings: 'none',
+        SettingsRoles: 'none',
+        SettingsBacklog: 'none',
+        SettingsNumbering: 'none',
+        SettingsGrandLodge: 'none',
+        SettingsBackup: 'none',
+        SettingsAudit: 'none',
+      },
+      'Sr. Grand Warden': {
+        Budget: 'read',
+        BudgetDashboard: 'read',
+        Orders: 'read',
+        OrdersItemize: 'read',
+        OrdersReconciliation: 'read',
+        Ledger: 'read',
+        IncomeBankeur: 'read',
+        LedgerWiseEur: 'read',
+        LedgerWiseUsd: 'read',
+        LedgerMoneyTransfers: 'read',
+        Archive: 'read',
+        Settings: 'read',
+        SettingsRoles: 'none',
+        SettingsBacklog: 'full',
+        SettingsNumbering: 'read',
+        SettingsGrandLodge: 'full',
+        SettingsBackup: 'read',
+        SettingsAudit: 'read',
+      },
+      'Jr. Grand Warden': {
+        Budget: 'read',
+        BudgetDashboard: 'read',
+        Orders: 'read',
+        OrdersItemize: 'read',
+        OrdersReconciliation: 'read',
+        Ledger: 'read',
+        IncomeBankeur: 'read',
+        LedgerWiseEur: 'read',
+        LedgerWiseUsd: 'read',
+        LedgerMoneyTransfers: 'read',
+        Archive: 'read',
+        Settings: 'read',
+        SettingsRoles: 'none',
+        SettingsBacklog: 'full',
+        SettingsNumbering: 'read',
+        SettingsGrandLodge: 'full',
+        SettingsBackup: 'read',
+        SettingsAudit: 'read',
+      },
+      'Grand Master': {
+        Budget: 'read',
+        BudgetDashboard: 'read',
+        Orders: 'read',
+        OrdersItemize: 'create',
+        OrdersReconciliation: 'read',
+        Ledger: 'read',
+        IncomeBankeur: 'read',
+        LedgerWiseEur: 'read',
+        LedgerWiseUsd: 'read',
+        LedgerMoneyTransfers: 'read',
+        Archive: 'read',
+        Settings: 'read',
+        SettingsRoles: 'none',
+        SettingsBacklog: 'full',
+        SettingsNumbering: 'read',
+        SettingsGrandLodge: 'full',
+        SettingsBackup: 'read',
+        SettingsAudit: 'read',
+      },
+      'Deputy Grand Master': {
+        Budget: 'read',
+        BudgetDashboard: 'read',
+        Orders: 'read',
+        OrdersItemize: 'create',
+        OrdersReconciliation: 'read',
+        Ledger: 'read',
+        IncomeBankeur: 'read',
+        LedgerWiseEur: 'read',
+        LedgerWiseUsd: 'read',
+        LedgerMoneyTransfers: 'read',
+        Archive: 'read',
+        Settings: 'read',
+        SettingsRoles: 'none',
+        SettingsBacklog: 'full',
+        SettingsNumbering: 'read',
+        SettingsGrandLodge: 'full',
+        SettingsBackup: 'read',
+        SettingsAudit: 'read',
+      },
+      'Grand Treasurer': {
+        Budget: 'write',
+        BudgetDashboard: 'read',
+        Orders: 'read',
+        OrdersItemize: 'none',
+        OrdersReconciliation: 'read',
+        Ledger: 'read',
+        IncomeBankeur: 'create',
+        LedgerWiseEur: 'create',
+        LedgerWiseUsd: 'create',
+        LedgerMoneyTransfers: 'write',
+        Archive: 'read',
+        Settings: 'read',
+        SettingsRoles: 'none',
+        SettingsBacklog: 'full',
+        SettingsNumbering: 'read',
+        SettingsGrandLodge: 'full',
+        SettingsBackup: 'read',
+        SettingsAudit: 'read',
+      },
+      'Assist. Grand Treasurer': {
+        Budget: 'write',
+        BudgetDashboard: 'read',
+        Orders: 'read',
+        OrdersItemize: 'none',
+        OrdersReconciliation: 'read',
+        Ledger: 'read',
+        IncomeBankeur: 'create',
+        LedgerWiseEur: 'create',
+        LedgerWiseUsd: 'create',
+        LedgerMoneyTransfers: 'write',
+        Archive: 'read',
+        Settings: 'read',
+        SettingsRoles: 'none',
+        SettingsBacklog: 'full',
+        SettingsNumbering: 'read',
+        SettingsGrandLodge: 'full',
+        SettingsBackup: 'read',
+        SettingsAudit: 'read',
+      },
+    };
+
+    function applyRoleAccessPreset(roleName) {
+      const role = String(roleName || '').trim();
+      const preset = ROLE_ACCESS_PRESETS[role];
+      if (!preset) return false;
+
+      if (allWrite) allWrite.checked = false;
+      if (allDelete) allDelete.checked = false;
+      if (allCreate) allCreate.checked = false;
+      if (allPartial) allPartial.checked = false;
+      if (allRead) allRead.checked = false;
+
+      for (const row of PERMISSION_FORM_ROWS) {
+        setModuleAccess(row.idBase, preset[row.idBase] || 'none');
+      }
+      return true;
+    }
+
     if (allWrite && allRead && !allWrite.dataset.bound) {
       allWrite.dataset.bound = 'true';
       allWrite.disabled = hasAnyUsers && !canEditRoles;
@@ -12938,11 +13108,9 @@
     if (newPositionSelect && !newPositionSelect.dataset.autoAdminBound) {
       newPositionSelect.dataset.autoAdminBound = '1';
       newPositionSelect.addEventListener('change', () => {
+        if (allWrite && allWrite.disabled) return;
         const role = String(newPositionSelect.value || '').trim();
-        if (role !== 'Grand Secretary') return;
-        if (!allWrite || allWrite.disabled) return;
-        allWrite.checked = true;
-        allWrite.dispatchEvent(new Event('change', { bubbles: true }));
+        applyRoleAccessPreset(role);
       });
     }
 
@@ -14532,6 +14700,7 @@
             <td>${gtName}</td>
             <td>${comments}</td>
             <td class="actions">
+              <button type="button" class="btn btn--ghost" data-mt-action="view" data-mt-id="${mtId}" title="View">View</button>
               <button type="button" class="btn btn--editBlue" data-mt-action="edit" data-mt-id="${mtId}" title="${canWrite ? 'Edit' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>Edit</button>
             </td>
           </tr>
@@ -14668,11 +14837,25 @@
         const id = normalizeMoneyTransferId(btn.getAttribute('data-mt-id'));
         if (!action || !id) return;
 
-        if (!moneyTransfersViewState.canWrite) return;
-        if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
-
         const all = ensureMoneyTransfersHaveIdsForYear(year);
         const current = (all || []).find((t) => normalizeMoneyTransferId(t && t.id) === id) || null;
+
+        if (action === 'view') {
+          if (!current) return;
+          const viewParams = new URLSearchParams();
+          viewParams.set('year', String(year));
+          viewParams.set('mode', 'view');
+          viewParams.set('id', normalizeMoneyTransferId(current.id));
+          const vStart = normalizeMoneyTransferRangeStart(current);
+          const vEnd = normalizeMoneyTransferRangeEnd(current);
+          if (vStart) viewParams.set('start', vStart);
+          if (vEnd) viewParams.set('end', vEnd);
+          window.location.href = withWpEmbedParams(`money_transfer.html?${viewParams.toString()}`);
+          return;
+        }
+
+        if (!moneyTransfersViewState.canWrite) return;
+        if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
 
         if (action === 'delete') {
           const ok = window.confirm('Delete this money transfer?');
@@ -14735,6 +14918,10 @@
       mtRangeModal.removeAttribute('data-edit-id');
       mtRangeModal.removeAttribute('data-year');
       mtRangeModal.removeAttribute('data-draft-no');
+      // Restore inputs and submit button in case they were hidden/disabled by view mode.
+      mtRangeStartInput.disabled = false;
+      mtRangeEndInput.disabled = false;
+      mtRangeSubmitBtn.hidden = false;
     }
 
     mtRangeModal.addEventListener('click', (e) => {
@@ -14799,13 +14986,17 @@
   function openMoneyTransferRangeModal({ year, mode, transfer } = {}) {
     if (!mtRangeModal || !mtRangeStartInput || !mtRangeEndInput || !mtRangeSubmitBtn) return;
     const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
-    const m = mode === 'edit' ? 'edit' : 'new';
+    const m = mode === 'edit' ? 'edit' : (mode === 'view' ? 'view' : 'new');
 
     const titleEl = mtRangeModal.querySelector('#mtRangeModalTitle');
     const subheadEl = mtRangeModal.querySelector('#mtRangeModalSubhead');
+    const no = String(transfer && (transfer.moneyTransferNo || transfer.mtNo || transfer.no) ? (transfer.moneyTransferNo || transfer.mtNo || transfer.no) : '').trim();
 
-    if (m === 'edit') {
-      const no = String(transfer && (transfer.moneyTransferNo || transfer.mtNo || transfer.no) ? (transfer.moneyTransferNo || transfer.mtNo || transfer.no) : '').trim();
+    if (m === 'view') {
+      if (titleEl) titleEl.textContent = `View ${spellOutMoneyTransferNo(no)}`;
+      if (subheadEl) subheadEl.textContent = 'Money Transfer details (read only).';
+      mtRangeModal.setAttribute('data-edit-id', normalizeMoneyTransferId(transfer && transfer.id));
+    } else if (m === 'edit') {
       if (titleEl) titleEl.textContent = `Edit ${spellOutMoneyTransferNo(no)}`;
       if (subheadEl) subheadEl.textContent = 'Update the date range for this Money Transfer.';
       mtRangeModal.setAttribute('data-edit-id', normalizeMoneyTransferId(transfer && transfer.id));
@@ -14820,13 +15011,18 @@
     mtRangeModal.setAttribute('data-year', String(y));
 
     const budgetStart = getDerivedBudgetCreatedDateOnlyForYear(y);
-    const defaultStart = m === 'edit'
+    const defaultStart = m !== 'new'
       ? normalizeMoneyTransferRangeStart(transfer)
       : getDefaultMoneyTransferStartDateForYear(y);
     const today = getTodayIsoDateOnly();
-    const defaultEnd = m === 'edit'
+    const defaultEnd = m !== 'new'
       ? normalizeMoneyTransferRangeEnd(transfer)
       : (today && defaultStart && today < defaultStart ? defaultStart : today);
+
+    const viewOnly = m === 'view';
+    mtRangeStartInput.disabled = viewOnly;
+    mtRangeEndInput.disabled = viewOnly;
+    mtRangeSubmitBtn.hidden = viewOnly;
 
     mtRangeStartInput.min = budgetStart || '';
     mtRangeEndInput.min = defaultStart || budgetStart || '';
@@ -14835,14 +15031,16 @@
     if (mtRangeEndInput && mtRangeStartInput.value) mtRangeEndInput.min = mtRangeStartInput.value;
 
     if (mtRangeErrorEl) mtRangeErrorEl.textContent = '';
-    mtRangeSubmitBtn.disabled = true;
+    if (!viewOnly) mtRangeSubmitBtn.disabled = true;
 
     mtRangeModal.classList.add('is-open');
     mtRangeModal.setAttribute('aria-hidden', 'false');
 
-    // Trigger initial validation.
-    const evt = new Event('change');
-    mtRangeStartInput.dispatchEvent(evt);
+    if (!viewOnly) {
+      // Trigger initial validation.
+      const evt = new Event('change');
+      mtRangeStartInput.dispatchEvent(evt);
+    }
   }
 
   // ---- Money Transfer builder page ----
@@ -14993,6 +15191,8 @@
       }
     })();
 
+    const isViewOnly = String(params.get('mode') || '').trim().toLowerCase() === 'view';
+
     const fromUrlYear = Number(params.get('year'));
     const resolvedYear = Number.isInteger(fromUrlYear) ? fromUrlYear : year;
     mtBuilderViewState.year = resolvedYear;
@@ -15082,11 +15282,12 @@
     }
 
     if (saveBtn) {
-      saveBtn.disabled = !mtBuilderViewState.canWrite;
-      if (!mtBuilderViewState.canWrite) saveBtn.setAttribute('data-tooltip', 'Read only access.');
+      saveBtn.hidden = isViewOnly;
+      saveBtn.disabled = isViewOnly || !mtBuilderViewState.canWrite;
+      if (!isViewOnly && !mtBuilderViewState.canWrite) saveBtn.setAttribute('data-tooltip', 'Read only access.');
       else saveBtn.removeAttribute('data-tooltip');
 
-      if (!saveBtn.dataset.bound) {
+      if (!isViewOnly && !saveBtn.dataset.bound) {
         saveBtn.dataset.bound = '1';
         saveBtn.addEventListener('click', () => {
           if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
@@ -15145,6 +15346,16 @@
           window.location.href = withWpEmbedParams(`money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`);
         });
       }
+    }
+
+    if (commentsEl) {
+      commentsEl.disabled = isViewOnly;
+    }
+
+    if (cancelBtn) {
+      cancelBtn.textContent = isViewOnly ? 'Close' : 'Cancel';
+      cancelBtn.setAttribute('aria-label', isViewOnly ? 'Close' : 'Cancel');
+      cancelBtn.title = isViewOnly ? 'Close' : 'Cancel';
     }
 
     if (cancelBtn && !cancelBtn.dataset.bound) {
@@ -15695,8 +15906,7 @@
     const year = getActiveBudgetYear();
 
     const currentUser = getCurrentUser();
-    const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = incomeLevel === 'write';
+    const hasIncomeFullAccess = Boolean(currentUser && hasModuleAccessLevel(currentUser, 'income_bankeur', 'write'));
 
     const incomeNewLink = document.getElementById('incomeNewLink');
     const incomeExportCsvLink = document.getElementById('incomeExportCsvLink');
@@ -15791,7 +16001,7 @@
       incomeNewLink.addEventListener('click', (e) => {
         e.preventDefault();
         if (incomeNewLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         openIncomeModal(null, year);
         if (incomeMenuPanel && incomeMenuBtn) {
           incomeMenuPanel.setAttribute('hidden', '');

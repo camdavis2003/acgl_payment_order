@@ -149,6 +149,7 @@ function acgl_fms_normalize_permissions($perms) {
         'ledger_wiseeur' => $pick('ledger_wiseeur', 'ledger'),
         'ledger_wiseusd' => $pick('ledger_wiseusd', 'ledger'),
         'ledger_money_transfers' => $pick('ledger_money_transfers', 'ledger'),
+        'archive' => $pick('archive', 'settings'),
 
         'settings' => $pick('settings'),
         'settings_roles' => $pick('settings_roles', 'settings'),
@@ -174,7 +175,10 @@ function acgl_fms_key_to_module($key) {
     if ($k === 'payment_order_numbering') return 'orders';
     if (str_starts_with($k, 'payment_orders_')) return 'orders';
 
-    if (str_starts_with($k, 'payment_order_income_')) return 'income';
+    if (str_starts_with($k, 'payment_order_income_')) return 'income_bankeur';
+
+    if (str_starts_with($k, 'payment_order_wise_eur_')) return 'ledger_wiseeur';
+    if (str_starts_with($k, 'payment_order_wise_usd_')) return 'ledger_wiseusd';
 
     if (str_starts_with($k, 'payment_order_gs_ledger_verified_')) return 'ledger';
 

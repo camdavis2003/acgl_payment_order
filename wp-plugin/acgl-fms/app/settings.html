@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=a3a2b2d-20260312204805" />
+    <link rel="stylesheet" href="styles.css?v=0529e98-20260312221620" />
   </head>
   <body data-page="admin-settings">
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -885,6 +885,28 @@
                 >
               </div>
 
+              <div class="rolesGrid__row" role="group" aria-label="Archive">
+                <div class="rolesGrid__label">Archive</div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permArchiveWrite" /> Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permArchiveDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permArchiveCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permArchivePartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permArchiveRead" /> View</label
+                >
+              </div>
+
               <div
                 class="rolesGrid__row"
                 role="group"
@@ -1286,6 +1308,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=a3a2b2d-20260312204805" defer></script>
+    <script src="app.js?v=0529e98-20260312221620" defer></script>
   </body>
 </html>

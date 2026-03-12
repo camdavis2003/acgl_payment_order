@@ -11804,9 +11804,20 @@
 
     const hasAnyUsers = loadUsers().length > 0;
     const currentUser = getCurrentUser();
-    const canEditRoles = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_roles') : false);
-    const canEditBacklog = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_backlog') : false);
-    const canViewAudit = !hasAnyUsers || (currentUser ? hasPermission(currentUser, 'settings_audit') : false);
+    const hasExplicitSettingsAccess = (permKey, minLevel = 'read') => {
+      if (!hasAnyUsers) return true;
+      if (!currentUser || !permKey) return false;
+      const rawPerms = currentUser && currentUser.permissions && typeof currentUser.permissions === 'object'
+        ? currentUser.permissions
+        : {};
+      if (!Object.prototype.hasOwnProperty.call(rawPerms, permKey)) return false;
+      // Evaluate only this explicit key to avoid inheriting from parent "settings".
+      return hasModuleAccessLevel({ permissions: { [permKey]: rawPerms[permKey] } }, permKey, minLevel);
+    };
+
+    const canEditRoles = hasExplicitSettingsAccess('settings_roles', 'write');
+    const canEditBacklog = hasExplicitSettingsAccess('settings_backlog', 'write');
+    const canViewAudit = hasExplicitSettingsAccess('settings_audit', 'read');
 
     const settingsCardPermMap = {
       roles: 'settings_roles',
@@ -11824,7 +11835,7 @@
         cardEl.hidden = false;
         continue;
       }
-      cardEl.hidden = !hasPermission(currentUser, permKey);
+      cardEl.hidden = !hasExplicitSettingsAccess(permKey, 'read');
     }
 
     const createUserModal = document.getElementById('createUserModal');

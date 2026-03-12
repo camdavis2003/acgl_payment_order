@@ -2265,6 +2265,7 @@ body.isTableResizing {
 #usersTable th:nth-child(5),
 #usersTable td:nth-child(5) {
   width: 1%;
+  padding-right: 20px;
 }
 
 #usersTable th:nth-child(5) {

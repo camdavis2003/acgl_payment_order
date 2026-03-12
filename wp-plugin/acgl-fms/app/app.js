@@ -3671,6 +3671,123 @@
   const appMain = document.querySelector('.appMain');
   const siteHeader = document.querySelector('.site-header');
 
+  // Lock the page header so it doesn't scroll away.
+  // We set a fixed position and dynamically match the appMain column width/left
+  // so it aligns properly when the left navigation is shown/hidden.
+  function lockSiteHeaderToViewport() {
+    if (!appMain || !siteHeader) return;
+    if (siteHeader.dataset.locked === '1') return;
+    siteHeader.dataset.locked = '1';
+
+    const spacerAttr = 'data-site-header-spacer';
+    let spacer = appMain.querySelector(`[${spacerAttr}]`);
+
+    if (!spacer) {
+      spacer = document.createElement('div');
+      spacer.setAttribute(spacerAttr, '');
+      spacer.style.height = '0px';
+      spacer.style.flex = '0 0 auto';
+      appMain.insertBefore(spacer, appMain.firstChild);
+    }
+
+    if (siteHeader.dataset.movedToBody !== '1') {
+      siteHeader.dataset.movedToBody = '1';
+      document.body.insertBefore(siteHeader, document.body.firstChild);
+    }
+
+    const apply = () => {
+      try {
+        const rect = appMain.getBoundingClientRect();
+        if (!rect || !Number.isFinite(rect.width) || rect.width <= 0) return;
+
+        siteHeader.style.position = 'fixed';
+        siteHeader.style.top = '0';
+        siteHeader.style.left = `${Math.round(rect.left)}px`;
+        siteHeader.style.width = `${Math.round(rect.width)}px`;
+        siteHeader.style.zIndex = '1500';
+
+        const h = Math.ceil(siteHeader.getBoundingClientRect().height);
+        if (Number.isFinite(h) && h > 0) {
+          spacer.style.height = `${h}px`;
+          appMain.style.paddingTop = '';
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    apply();
+    window.addEventListener('resize', apply);
+    window.addEventListener('load', apply);
+    window.addEventListener('scroll', apply, { passive: true });
+
+    if (navToggleBtn && appShell) {
+      const schedule = () => window.requestAnimationFrame(apply);
+      navToggleBtn.addEventListener('click', schedule);
+      appShell.addEventListener('transitionend', schedule);
+    }
+  }
+
+  lockSiteHeaderToViewport();
+
+  // Tables with sticky headers/footers: size the scroll wrapper to the viewport.
+  // This avoids "too tall" tables on pages with larger headers (e.g., Income).
+  function fitFixedFooterTableWrapsToViewport() {
+    const baseBottomPadding = 8;
+
+    const getViewportHeight = () => {
+      if (window.visualViewport && Number.isFinite(window.visualViewport.height)) {
+        return window.visualViewport.height;
+      }
+      return window.innerHeight;
+    };
+
+    const apply = () => {
+      try {
+        const viewportH = getViewportHeight();
+        const wraps = document.querySelectorAll('.table-wrap.fixedFooterTableWrap');
+        if (!wraps || wraps.length === 0) return;
+
+        wraps.forEach((wrap) => {
+          const rect = wrap.getBoundingClientRect();
+          if (!rect || !Number.isFinite(rect.top)) return;
+
+          const main = wrap.closest('main');
+          const card = wrap.closest('.card');
+          const mainStyles = main ? window.getComputedStyle(main) : null;
+          const cardStyles = card ? window.getComputedStyle(card) : null;
+
+          const mainPaddingBottom = mainStyles ? parseFloat(mainStyles.paddingBottom) || 0 : 0;
+          const cardPaddingBottom = cardStyles ? parseFloat(cardStyles.paddingBottom) || 0 : 0;
+          const cardMarginBottom = cardStyles ? parseFloat(cardStyles.marginBottom) || 0 : 0;
+
+          const bottomPadding = baseBottomPadding + mainPaddingBottom + cardPaddingBottom + cardMarginBottom;
+          const available = Math.floor(viewportH - rect.top - bottomPadding);
+          const maxH = Math.max(260, available);
+          wrap.style.maxHeight = `${maxH}px`;
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    apply();
+    window.addEventListener('resize', apply);
+    window.addEventListener('load', apply);
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', apply);
+    }
+
+    if (navToggleBtn && appShell) {
+      const schedule = () => window.requestAnimationFrame(apply);
+      navToggleBtn.addEventListener('click', schedule);
+      appShell.addEventListener('transitionend', schedule);
+    }
+  }
+
+  fitFixedFooterTableWrapsToViewport();
+
   // Settings page (numbering)
   const numberingForm = document.getElementById('numberingForm');
   const masonicYearInput = document.getElementById('masonicYear');
@@ -3934,10 +4051,62 @@
       const raw = localStorage.getItem(storageKey);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      const orders = Array.isArray(parsed) ? parsed : [];
+      return migrateKnownUsdOrderSourcesIfNeeded(resolvedYear, orders, { kind: 'reconciliation', storageKey });
     } catch {
       return [];
     }
+  }
+
+  function migrateKnownUsdOrderSourcesIfNeeded(year, orders, opts) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return Array.isArray(orders) ? orders : [];
+    const kind = opts && opts.kind ? String(opts.kind) : 'orders';
+    const storageKey = opts && opts.storageKey ? String(opts.storageKey) : '';
+    if (!storageKey) return Array.isArray(orders) ? orders : [];
+
+    const migrationKey = `payment_orders_known_usd_source_fix_${kind}_${y}_v1`;
+    try {
+      if (localStorage.getItem(migrationKey) === '1') return Array.isArray(orders) ? orders : [];
+    } catch {
+      return Array.isArray(orders) ? orders : [];
+    }
+
+    const list = Array.isArray(orders) ? orders : [];
+
+    function hasUsdValue(o) {
+      const usdNum = Number(o && o.usd);
+      if (Number.isFinite(usdNum) && usdNum > 0) return true;
+      const items = Array.isArray(o && o.items) ? o.items : [];
+      return items.some((it) => {
+        const n = Number(it && it.usd);
+        return Number.isFinite(n) && n > 0;
+      });
+    }
+
+    const fixCanons = new Set(['PO25-04']);
+
+    let changed = false;
+    const patched = list.map((o) => {
+      if (!o || typeof o !== 'object') return o;
+      const canon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+      if (!fixCanons.has(canon)) return o;
+      if (!hasUsdValue(o)) return o;
+      const src = String(o.source || '').trim();
+      if (src === 'wiseUSD') return o;
+      if (src && src !== 'Commerzbank') return o;
+      changed = true;
+      return { ...o, source: 'wiseUSD' };
+    });
+
+    try {
+      if (changed) localStorage.setItem(storageKey, JSON.stringify(patched));
+      localStorage.setItem(migrationKey, '1');
+    } catch {
+      // ignore
+    }
+
+    return changed ? patched : list;
   }
 
   /** @param {Array<Object>} orders */
@@ -3999,7 +4168,8 @@
       const raw = localStorage.getItem(storageKey);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      const orders = Array.isArray(parsed) ? parsed : [];
+      return migrateKnownUsdOrderSourcesIfNeeded(resolvedYear, orders, { kind: 'orders', storageKey });
     } catch {
       return [];
     }
@@ -5967,7 +6137,7 @@
   const MOCK_VERSION_KEY = 'payment_orders_mock_version';
   const MOCK_VERSION = '3';
   const RECONCILIATION_MOCK_VERSION_KEY = 'payment_orders_reconciliation_mock_version';
-  const RECONCILIATION_MOCK_VERSION = '1';
+  const RECONCILIATION_MOCK_VERSION = '2';
 
   function isMockOrder(order) {
     return !!order && typeof order === 'object' && String(order.id || '').startsWith('mock_');
@@ -5990,6 +6160,7 @@
         name: 'Riley Example',
         euro: 148.75,
         usd: null,
+        source: 'Commerzbank',
         budgetNumber: '2200',
         with: 'Requestor',
         status: 'Submitted',
@@ -6001,6 +6172,7 @@
         name: 'Morgan Example',
         euro: 92.40,
         usd: null,
+        source: 'Commerzbank',
         budgetNumber: '2100',
         with: 'Grand Secretary',
         status: 'Review',
@@ -6012,6 +6184,7 @@
         name: 'Casey Example',
         euro: null,
         usd: 64.15,
+        source: 'wiseUSD',
         budgetNumber: '2246',
         with: 'Requestor',
         status: 'Submitted',
@@ -6025,7 +6198,7 @@
         id: `mock_rec_${y}_${idx + 1}`,
         createdAt,
         updatedAt: createdAt,
-        source: 'Commerzbank',
+        source: String(t.source || '').trim() || 'Commerzbank',
         paymentOrderNo: t.paymentOrderNo,
         date: t.date,
         name: t.name,
@@ -6442,6 +6615,25 @@
         patchedExisting = true;
         return { ...o, source: 'Form Submission' };
       });
+
+      // Fix specific seeded/mock payment orders that are USD but incorrectly marked as Commerzbank.
+      // (Requested: PO 25-04 and PO 25-92 should be wiseUSD when they are USD.)
+      const forceWiseUsdCanons = new Set([
+        `PO${targetYear2}-04`,
+        `PO${targetYear2}-92`,
+      ]);
+      existing = existing.map((o) => {
+        if (!o || typeof o !== 'object') return o;
+        if (!isMockOrder(o)) return o;
+        const canon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (!forceWiseUsdCanons.has(canon)) return o;
+        const usdNum = Number(o.usd);
+        if (!Number.isFinite(usdNum) || usdNum <= 0) return o;
+        const src = String(o.source || '').trim();
+        if (src === 'wiseUSD') return o;
+        patchedExisting = true;
+        return { ...o, source: 'wiseUSD' };
+      });
       if (patchedExisting) {
         localStorage.setItem(ordersKey, JSON.stringify(existing));
       }
@@ -6670,7 +6862,7 @@
     const incomeKey = getIncomeKeyForYear(targetYear);
     if (incomeKey) {
       const INCOME_MOCK_VERSION_KEY = 'payment_orders_income_mock_version';
-      const INCOME_MOCK_VERSION = '1';
+      const INCOME_MOCK_VERSION = '3';
 
       let existingIncome = [];
       try {
@@ -6728,6 +6920,38 @@
           });
           localStorage.setItem(incomeKey, JSON.stringify(upgraded));
           existingIncome = upgraded;
+        }
+
+        // Ensure a mock negative BankEUR entry exists corresponding to the Commerzbank mock expenditure
+        // that also creates PO 25-91 in Reconciliation.
+        const year2 = String(targetYear % 100).padStart(2, '0');
+        const po91IncomeId = `mock_income_${targetYear}_neg_po_${year2}_91`;
+        const po91BudgetNumber = '2100';
+        const hasPo91Income = existingIncome.some((e) => e && String(e.id || '') === po91IncomeId);
+        if (!hasPo91Income) {
+          const createdAt = new Date(baseMs - 11 * 1000 * 60 * 60 * 24 * 9).toISOString();
+          const po91Entry = {
+            id: po91IncomeId,
+            createdAt,
+            updatedAt: nowIso,
+            date: `${targetYear}-03-11`,
+            remitter: 'Morgan Example',
+            budgetNumber: po91BudgetNumber,
+            euro: -92.40,
+            description: 'Office supplies reimbursement.',
+          };
+          existingIncome = [po91Entry, ...existingIncome];
+          localStorage.setItem(incomeKey, JSON.stringify(existingIncome));
+        } else {
+          const patched = existingIncome.map((e) => {
+            if (!e || typeof e !== 'object') return e;
+            if (String(e.id || '') !== po91IncomeId) return e;
+            const cur = String(e.budgetNumber || '').trim();
+            if (cur === po91BudgetNumber) return e;
+            return { ...e, budgetNumber: po91BudgetNumber, updatedAt: nowIso };
+          });
+          existingIncome = patched;
+          localStorage.setItem(incomeKey, JSON.stringify(existingIncome));
         }
 
         localStorage.setItem(INCOME_MOCK_VERSION_KEY, INCOME_MOCK_VERSION);
@@ -14605,6 +14829,49 @@
   function renderIncomeRows(entries, year) {
     if (!incomeTbody) return;
 
+    const ordersBySourceEntryId = new Map();
+    const ordersByPoCanon = new Map();
+    const orderIds = new Set();
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const sourceEntryId = String(o.sourceEntryId || '').trim();
+        if (!sourceEntryId) continue;
+        if (!ordersBySourceEntryId.has(sourceEntryId)) {
+          ordersBySourceEntryId.set(sourceEntryId, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryId.get(sourceEntryId);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryId.set(sourceEntryId, o);
+      }
+    }
+
+    const reconcileBySourceEntryId = new Map();
+    const reconcileByPoCanon = new Map();
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const sourceEntryId = String(o.sourceEntryId || '').trim();
+        if (!sourceEntryId) continue;
+        if (!reconcileBySourceEntryId.has(sourceEntryId)) reconcileBySourceEntryId.set(sourceEntryId, o);
+      }
+    }
+
     const rowsHtml = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
@@ -14615,7 +14882,49 @@
         const budgetCode = getIncomeDisplayValueForColumn(e, 'budgetNumber', year);
         const budget = renderInBudgetNumberHtml(budgetCode, year);
         const euro = escapeHtml(getIncomeDisplayValueForColumn(e, 'euro', year));
-        const desc = escapeHtml(getIncomeDisplayValueForColumn(e, 'description', year));
+        const descRaw = String(e && e.description ? e.description : '');
+        const strippedDescRaw = descRaw
+          // Avoid duplicating legacy/free-typed converted markers.
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const euroRaw = Number(e && e.euro);
+        const isNegative = Number.isFinite(euroRaw) && euroRaw < 0;
+        const srcEntryId = isNegative ? `inc:${String(e.id || '')}` : '';
+        const match = srcEntryId
+          ? (ordersBySourceEntryId.get(srcEntryId) || reconcileBySourceEntryId.get(srcEntryId))
+          : null;
+
+        // Determine the PO number to display/link.
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isNegative && isOnPaymentOrdersTable && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`)
+          : (isNegative && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
+
+        const desc = `${descText}${convertedHtml}`;
 
         return `
           <tr${rowClass} data-income-id="${id}">
@@ -14776,7 +15085,7 @@
 
           <div class="field">
             <label for="incomeEuro">Euro (€)<span class="req" aria-hidden="true">*</span></label>
-            <input id="incomeEuro" name="incomeEuro" type="number" inputmode="decimal" step="0.01" min="0" required value="${safeEuro}" />
+            <input id="incomeEuro" name="incomeEuro" type="number" inputmode="decimal" step="0.01" required value="${safeEuro}" />
             <div class="error" id="error-incomeEuro" role="alert" aria-live="polite"></div>
           </div>
 
@@ -14868,8 +15177,8 @@
     if (!values.description) errors.description = 'This field is required.';
 
     const euroNum = Number(values.euro);
-    if (!values.euro) errors.euro = 'This field is required.';
-    else if (!Number.isFinite(euroNum) || euroNum < 0) errors.euro = 'Enter a valid amount.';
+    if (String(values.euro || '').trim() === '') errors.euro = 'This field is required.';
+    else if (!Number.isFinite(euroNum)) errors.euro = 'Enter a valid amount.';
 
     if (Object.keys(errors).length > 0) return { ok: false, errors };
     return {
@@ -14955,9 +15264,10 @@
     ensureIncomeListExistsForYear(year);
 
     const titleEl = document.querySelector('[data-income-title]');
-    if (titleEl) titleEl.textContent = `${year} Income`;
+    const incomeTitle = `${year} BankEUR (Commerzbank)`;
+    if (titleEl) titleEl.textContent = incomeTitle;
     const listTitleEl = document.querySelector('[data-income-list-title]');
-    if (listTitleEl) listTitleEl.textContent = `${year} Income`;
+    if (listTitleEl) listTitleEl.textContent = incomeTitle;
     if (incomeBackToLedgerLink) {
       incomeBackToLedgerLink.href = `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`;
       incomeBackToLedgerLink.textContent = `← Back to ${year} Ledger`;
@@ -15303,7 +15613,7 @@
         if (!description) errors.push(`Row ${rowNo}: Description is required.`);
         if (!date || !remitter || euroSigned === null || !description) continue;
 
-        // Negative amounts are expenditures: skip Income import and create Payment Orders instead.
+        // Negative amounts are expenditures: also create Payment Orders in Reconciliation.
         if (euroSigned < 0) {
           const absEuro = Math.abs(euroSigned);
           const itemTitle = description || 'Imported from Income CSV';
@@ -15335,13 +15645,6 @@
           po.updatedAt = po.createdAt;
 
           createdReconciliationOrders.push(po);
-          continue;
-        }
-
-        const euroNum = parseEuroAmount(String(euroSigned));
-        if (euroNum === null) {
-          errors.push(`Row ${rowNo}: Euro must be 0 or greater.`);
-          continue;
         }
 
         const inc = {
@@ -15351,7 +15654,7 @@
           date,
           remitter,
           budgetNumber,
-          euro: euroNum,
+          euro: euroSigned,
           description,
         };
 
@@ -15518,6 +15821,25 @@
     }
 
     incomeTbody.addEventListener('click', (e) => {
+      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
+      if (dl) {
+        e.preventDefault();
+        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
+        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
+        if (!orderId) return;
+
+        const order = scope === 'reconciliation'
+          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
+          : loadOrders(year).find((o) => o && String(o.id) === orderId);
+        if (!order) return;
+        if (hasOrderMissingRequiredValues(order)) {
+          window.alert('Complete all required fields before downloading a PDF.');
+          return;
+        }
+        generatePaymentOrderPdfFromTemplate({ order });
+        return;
+      }
+
       const btn = e.target.closest('button[data-income-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-income-id]');
@@ -15606,6 +15928,48 @@
         }
 
         upsertIncomeEntry(entry, year);
+
+        // Keep negative BankEUR entries in sync with Reconciliation.
+        // Negative amounts are expenditures: create/update a reconciliation order while still displaying the entry.
+        const euroNum = Number(entry.euro);
+        const sourceEntryId = `inc:${String(id)}`;
+        if (Number.isFinite(euroNum) && euroNum < 0) {
+          ensurePaymentOrdersReconciliationListExistsForYear(year);
+          const absEuro = Math.abs(euroNum);
+          const itemTitle = String(entry.description || '').trim() || 'Imported from BankEUR';
+          const po = {
+            id: (crypto?.randomUUID ? crypto.randomUUID() : `po_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            source: 'Commerzbank',
+            sourceEntryId,
+            paymentOrderNo: '',
+            date: String(entry.date || '').trim(),
+            name: String(entry.remitter || '').trim(),
+            euro: absEuro,
+            usd: null,
+            items: [
+              {
+                id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+                title: itemTitle,
+                euro: absEuro,
+                usd: null,
+              },
+            ],
+            address: '',
+            iban: '',
+            bic: '',
+            specialInstructions: '',
+            budgetNumber: String(entry.budgetNumber || '').trim(),
+            purpose: String(entry.description || '').trim(),
+            with: 'Grand Secretary',
+            status: 'Submitted',
+          };
+          upsertReconciliationOrderBySource(po, year);
+        } else {
+          removeReconciliationOrderBySource('Commerzbank', sourceEntryId, year);
+        }
+
         applyIncomeView();
         closeIncomeModal();
       });
@@ -15838,9 +16202,57 @@
   function renderWiseEurRows(entries) {
     if (!wiseEurTbody) return;
     const canVerify = Boolean(wiseEurViewState.canVerify);
+    const year = getActiveBudgetYear();
     const activeYear = getActiveBudgetYear();
     const inMap = getInDescMapForYear(activeYear);
     const outMap = getOutDescMapForYear(activeYear);
+    const ordersBySourceEntryKey = new Map();
+    const reconcileBySourceEntryKey = new Map();
+    const ordersByPoCanon = new Map();
+    const reconcileByPoCanon = new Map();
+    const orderIds = new Set();
+    const sourceEntryKey = (sourceRaw, sourceEntryIdRaw) => {
+      const source = String(sourceRaw || '').trim().toLowerCase();
+      const sourceEntryId = String(sourceEntryIdRaw || '').trim();
+      if (!source || !sourceEntryId) return '';
+      return `${source}::${sourceEntryId}`;
+    };
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!ordersBySourceEntryKey.has(key)) {
+          ordersBySourceEntryKey.set(key, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryKey.get(key);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryKey.set(key, o);
+      }
+    }
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!reconcileBySourceEntryKey.has(key)) reconcileBySourceEntryKey.set(key, o);
+      }
+    }
     const html = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
@@ -15875,7 +16287,45 @@
         const receivedFromDisbursedTo = escapeHtml(getWiseEurDisplayValueForColumn(e, 'receivedFromDisbursedTo'));
         const receipts = escapeHtml(getWiseEurDisplayValueForColumn(e, 'receipts'));
         const disburse = escapeHtml(getWiseEurDisplayValueForColumn(e, 'disburse'));
-        const description = escapeHtml(getWiseEurDisplayValueForColumn(e, 'description'));
+        const descRaw = String(getWiseEurDisplayValueForColumn(e, 'description') || '');
+        const strippedDescRaw = descRaw
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const isDisbursement = Number.isFinite(disburseAmt) && disburseAmt > 0;
+        const srcKey = isDisbursement ? sourceEntryKey('wiseEUR', e.id) : '';
+        const match = srcKey
+          ? (ordersBySourceEntryKey.get(srcKey) || reconcileBySourceEntryKey.get(srcKey))
+          : null;
+
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isDisbursement && isOnPaymentOrdersTable && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`)
+          : (isDisbursement && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
+        const description = `${descText}${convertedHtml}`;
         const issuanceDateBank = escapeHtml(getWiseEurDisplayValueForColumn(e, 'issuanceDateBank'));
         const verifiedChecked = getWiseEurVerified(e) ? 'checked' : '';
         const verifyDisabled = canVerify ? '' : 'disabled';
@@ -17246,6 +17696,25 @@
     }
 
     wiseEurTbody.addEventListener('click', (e) => {
+      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
+      if (dl) {
+        e.preventDefault();
+        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
+        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
+        if (!orderId) return;
+
+        const order = scope === 'reconciliation'
+          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
+          : loadOrders(year).find((o) => o && String(o.id) === orderId);
+        if (!order) return;
+        if (hasOrderMissingRequiredValues(order)) {
+          window.alert('Complete all required fields before downloading a PDF.');
+          return;
+        }
+        generatePaymentOrderPdfFromTemplate({ order });
+        return;
+      }
+
       const btn = e.target.closest('button[data-wise-eur-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-wise-eur-id]');
@@ -17609,9 +18078,57 @@
   function renderWiseUsdRows(entries) {
     if (!wiseUsdTbody) return;
     const canVerify = Boolean(wiseUsdViewState.canVerify);
+    const year = getActiveBudgetYear();
     const activeYear = getActiveBudgetYear();
     const inMap = getInDescMapForYear(activeYear);
     const outMap = getOutDescMapForYear(activeYear);
+    const ordersBySourceEntryKey = new Map();
+    const reconcileBySourceEntryKey = new Map();
+    const ordersByPoCanon = new Map();
+    const reconcileByPoCanon = new Map();
+    const orderIds = new Set();
+    const sourceEntryKey = (sourceRaw, sourceEntryIdRaw) => {
+      const source = String(sourceRaw || '').trim().toLowerCase();
+      const sourceEntryId = String(sourceEntryIdRaw || '').trim();
+      if (!source || !sourceEntryId) return '';
+      return `${source}::${sourceEntryId}`;
+    };
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!ordersBySourceEntryKey.has(key)) {
+          ordersBySourceEntryKey.set(key, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryKey.get(key);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryKey.set(key, o);
+      }
+    }
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!reconcileBySourceEntryKey.has(key)) reconcileBySourceEntryKey.set(key, o);
+      }
+    }
     const html = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
@@ -17646,7 +18163,45 @@
         const receivedFromDisbursedTo = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receivedFromDisbursedTo'));
         const receipts = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receipts'));
         const disburse = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'disburse'));
-        const description = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'description'));
+        const descRaw = String(getWiseUsdDisplayValueForColumn(e, 'description') || '');
+        const strippedDescRaw = descRaw
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const isDisbursement = Number.isFinite(disburseAmt) && disburseAmt > 0;
+        const srcKey = isDisbursement ? sourceEntryKey('wiseUSD', e.id) : '';
+        const match = srcKey
+          ? (ordersBySourceEntryKey.get(srcKey) || reconcileBySourceEntryKey.get(srcKey))
+          : null;
+
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isDisbursement && isOnPaymentOrdersTable && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`)
+          : (isDisbursement && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
+        const description = `${descText}${convertedHtml}`;
         const issuanceDateBank = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'issuanceDateBank'));
         const verifiedChecked = getWiseUsdVerified(e) ? 'checked' : '';
         const verifyDisabled = canVerify ? '' : 'disabled';
@@ -18816,6 +19371,25 @@
     }
 
     wiseUsdTbody.addEventListener('click', (e) => {
+      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
+      if (dl) {
+        e.preventDefault();
+        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
+        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
+        if (!orderId) return;
+
+        const order = scope === 'reconciliation'
+          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
+          : loadOrders(year).find((o) => o && String(o.id) === orderId);
+        if (!order) return;
+        if (hasOrderMissingRequiredValues(order)) {
+          window.alert('Complete all required fields before downloading a PDF.');
+          return;
+        }
+        generatePaymentOrderPdfFromTemplate({ order });
+        return;
+      }
+
       const btn = e.target.closest('button[data-wise-usd-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-wise-usd-id]');

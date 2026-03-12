@@ -694,6 +694,9 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
 .site-header {
   background: var(--card);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1500;
 }
 
 .header-top {
@@ -1177,6 +1180,11 @@ input:focus, textarea:focus, select:focus, button:focus {
 .incomeRow--missingBudget .btn--editBlue:hover {
   background: var(--surface);
   filter: brightness(0.98);
+}
+
+#incomeTable a.poNoDownloadLink {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* Payment Orders: highlight rows missing required fields */
@@ -2804,7 +2812,7 @@ input[type='checkbox'].cb {
   position: fixed;
   inset: 0;
   display: none;
-  z-index: 1000;
+  z-index: 2500;
 }
 
 .modal.is-open {

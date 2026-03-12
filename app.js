@@ -6938,7 +6938,7 @@
             remitter: 'Morgan Example',
             budgetNumber: po91BudgetNumber,
             euro: -92.40,
-            description: 'Office supplies reimbursement (converted to PO 25-91).',
+            description: 'Office supplies reimbursement.',
           };
           existingIncome = [po91Entry, ...existingIncome];
           localStorage.setItem(incomeKey, JSON.stringify(existingIncome));
@@ -14829,6 +14829,49 @@
   function renderIncomeRows(entries, year) {
     if (!incomeTbody) return;
 
+    const ordersBySourceEntryId = new Map();
+    const ordersByPoCanon = new Map();
+    const orderIds = new Set();
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const sourceEntryId = String(o.sourceEntryId || '').trim();
+        if (!sourceEntryId) continue;
+        if (!ordersBySourceEntryId.has(sourceEntryId)) {
+          ordersBySourceEntryId.set(sourceEntryId, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryId.get(sourceEntryId);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryId.set(sourceEntryId, o);
+      }
+    }
+
+    const reconcileBySourceEntryId = new Map();
+    const reconcileByPoCanon = new Map();
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const sourceEntryId = String(o.sourceEntryId || '').trim();
+        if (!sourceEntryId) continue;
+        if (!reconcileBySourceEntryId.has(sourceEntryId)) reconcileBySourceEntryId.set(sourceEntryId, o);
+      }
+    }
+
     const rowsHtml = (entries || [])
       .map((e) => {
         const id = escapeHtml(e.id);
@@ -14839,7 +14882,47 @@
         const budgetCode = getIncomeDisplayValueForColumn(e, 'budgetNumber', year);
         const budget = renderInBudgetNumberHtml(budgetCode, year);
         const euro = escapeHtml(getIncomeDisplayValueForColumn(e, 'euro', year));
-        const desc = escapeHtml(getIncomeDisplayValueForColumn(e, 'description', year));
+        const descRaw = String(e && e.description ? e.description : '');
+        const strippedDescRaw = descRaw
+          // Avoid duplicating legacy/free-typed converted markers.
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const euroRaw = Number(e && e.euro);
+        const isNegative = Number.isFinite(euroRaw) && euroRaw < 0;
+        const srcEntryId = isNegative ? `inc:${String(e.id || '')}` : '';
+        const match = srcEntryId
+          ? (ordersBySourceEntryId.get(srcEntryId) || reconcileBySourceEntryId.get(srcEntryId))
+          : null;
+
+        // Determine the PO number to display/link.
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)) ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isNegative && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`
+          )
+          : '';
+
+        const desc = `${descText}${convertedHtml}`;
 
         return `
           <tr${rowClass} data-income-id="${id}">
@@ -15000,7 +15083,7 @@
 
           <div class="field">
             <label for="incomeEuro">Euro (€)<span class="req" aria-hidden="true">*</span></label>
-            <input id="incomeEuro" name="incomeEuro" type="number" inputmode="decimal" step="0.01" min="0" required value="${safeEuro}" />
+            <input id="incomeEuro" name="incomeEuro" type="number" inputmode="decimal" step="0.01" required value="${safeEuro}" />
             <div class="error" id="error-incomeEuro" role="alert" aria-live="polite"></div>
           </div>
 
@@ -15092,8 +15175,8 @@
     if (!values.description) errors.description = 'This field is required.';
 
     const euroNum = Number(values.euro);
-    if (!values.euro) errors.euro = 'This field is required.';
-    else if (!Number.isFinite(euroNum) || euroNum < 0) errors.euro = 'Enter a valid amount.';
+    if (String(values.euro || '').trim() === '') errors.euro = 'This field is required.';
+    else if (!Number.isFinite(euroNum)) errors.euro = 'Enter a valid amount.';
 
     if (Object.keys(errors).length > 0) return { ok: false, errors };
     return {
@@ -15736,6 +15819,25 @@
     }
 
     incomeTbody.addEventListener('click', (e) => {
+      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
+      if (dl) {
+        e.preventDefault();
+        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
+        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
+        if (!orderId) return;
+
+        const order = scope === 'reconciliation'
+          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
+          : loadOrders(year).find((o) => o && String(o.id) === orderId);
+        if (!order) return;
+        if (hasOrderMissingRequiredValues(order)) {
+          window.alert('Complete all required fields before downloading a PDF.');
+          return;
+        }
+        generatePaymentOrderPdfFromTemplate({ order });
+        return;
+      }
+
       const btn = e.target.closest('button[data-income-action]');
       if (!btn) return;
       const row = btn.closest('tr[data-income-id]');
@@ -15824,6 +15926,48 @@
         }
 
         upsertIncomeEntry(entry, year);
+
+        // Keep negative BankEUR entries in sync with Reconciliation.
+        // Negative amounts are expenditures: create/update a reconciliation order while still displaying the entry.
+        const euroNum = Number(entry.euro);
+        const sourceEntryId = `inc:${String(id)}`;
+        if (Number.isFinite(euroNum) && euroNum < 0) {
+          ensurePaymentOrdersReconciliationListExistsForYear(year);
+          const absEuro = Math.abs(euroNum);
+          const itemTitle = String(entry.description || '').trim() || 'Imported from BankEUR';
+          const po = {
+            id: (crypto?.randomUUID ? crypto.randomUUID() : `po_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            source: 'Commerzbank',
+            sourceEntryId,
+            paymentOrderNo: '',
+            date: String(entry.date || '').trim(),
+            name: String(entry.remitter || '').trim(),
+            euro: absEuro,
+            usd: null,
+            items: [
+              {
+                id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+                title: itemTitle,
+                euro: absEuro,
+                usd: null,
+              },
+            ],
+            address: '',
+            iban: '',
+            bic: '',
+            specialInstructions: '',
+            budgetNumber: String(entry.budgetNumber || '').trim(),
+            purpose: String(entry.description || '').trim(),
+            with: 'Grand Secretary',
+            status: 'Submitted',
+          };
+          upsertReconciliationOrderBySource(po, year);
+        } else {
+          removeReconciliationOrderBySource('Commerzbank', sourceEntryId, year);
+        }
+
         applyIncomeView();
         closeIncomeModal();
       });

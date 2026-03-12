@@ -1182,6 +1182,11 @@ input:focus, textarea:focus, select:focus, button:focus {
   filter: brightness(0.98);
 }
 
+#incomeTable a.poNoDownloadLink {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Payment Orders: highlight rows missing required fields */
 .ordersRow--missingRequired td {
   background: var(--danger);
@@ -2807,7 +2812,7 @@ input[type='checkbox'].cb {
   position: fixed;
   inset: 0;
   display: none;
-  z-index: 1000;
+  z-index: 2500;
 }
 
 .modal.is-open {

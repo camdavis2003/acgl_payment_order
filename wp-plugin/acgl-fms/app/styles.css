@@ -2355,7 +2355,7 @@ body.isTableResizing {
   text-overflow: clip;
 }
 
-#incomeTable td:not(:nth-child(6)):not(:nth-child(7)) {
+#incomeTable td:not(:nth-child(1)):not(:nth-child(6)):not(:nth-child(7)) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2396,12 +2396,20 @@ body.isTableResizing {
   text-overflow: clip;
 }
 
-#incomeTable th:nth-child(2),
-#incomeTable td:nth-child(2),
-#incomeTable th:nth-child(4),
-#incomeTable td:nth-child(4),
-#incomeTable th:nth-child(5),
-#incomeTable td:nth-child(5) {
+#incomeTable thead th:nth-child(2),
+#incomeTable tbody td:nth-child(2),
+#incomeTable thead th:nth-child(4),
+#incomeTable tbody td:nth-child(4),
+#incomeTable thead th:nth-child(5),
+#incomeTable tbody td:nth-child(5) {
+  text-align: center;
+}
+
+#incomeTable tfoot .ordersTotalsRow__label {
+  text-align: left;
+}
+
+#incomeTable tfoot #incomeTotalEuro {
   text-align: center;
 }
 

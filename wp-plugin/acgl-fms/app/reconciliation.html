@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=50457e6-20260313111307" />
+    <link rel="stylesheet" href="styles.css?v=9905282-20260313153314" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -34,6 +34,12 @@
                     reconciliation. Reconciled entries are moved into the main
                     Payment Orders list.
                   </p>
+                  <a
+                    id="reconcileToPaymentOrdersBtn"
+                    class="actionLink"
+                    href="menu.html?year=2026"
+                    >← Back to 2026 Payment Orders</a
+                  >
                 </div>
               </div>
               <div class="header-actions">
@@ -72,13 +78,6 @@
                 Reconciliation
               </h2>
               <div class="list-actions">
-                <a
-                  class="btn btn--ghost"
-                  id="reconcileToPaymentOrdersBtn"
-                  href="menu.html"
-                >
-                  Payment Orders
-                </a>
                 <div class="list-search">
                   <label class="sr-only" for="reconcileOrdersGlobalSearch"
                     >Search all columns</label
@@ -156,8 +155,8 @@
       </div>
     </div>
 
-    <script src="pdf-lib.min.js?v=50457e6-20260313111307" defer></script>
-    <script src="app.js?v=50457e6-20260313111307"></script>
+    <script src="pdf-lib.min.js?v=9905282-20260313153314" defer></script>
+    <script src="app.js?v=9905282-20260313153314"></script>
 
     <div class="modal" id="reconcileMergeModal" aria-hidden="true">
       <div class="modal__backdrop" data-modal-close></div>

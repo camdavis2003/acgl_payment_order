@@ -1212,7 +1212,7 @@
     if (base === 'wise_eur.html') return 'ledger_wiseeur';
     if (base === 'wise_usd.html') return 'ledger_wiseusd';
     if (base === 'menu.html') return 'orders';
-    if (base === 'reconciliation.html') return 'orders_reconciliation';
+    if (base === 'reconciliation.html') return 'orders';
     if (base === 'grand_secretary_ledger.html') return 'ledger';
     if (base === 'money_transfers.html') return 'ledger_money_transfers';
     if (base === 'money_transfer.html') return 'ledger_money_transfers';
@@ -1922,7 +1922,11 @@
       .map((it) => ({
         ...it,
         children: Array.isArray(it.children)
-          ? it.children.filter((child) => hasExplicitPermission(currentUser, child && child.key ? child.key : null))
+          ? it.children.filter((child) => {
+            const childKey = child && child.key ? child.key : null;
+            if (childKey === 'orders_reconciliation') return true;
+            return hasExplicitPermission(currentUser, childKey);
+          })
           : it.children,
       }));
   }
@@ -9316,9 +9320,7 @@
     if (!tbody) return;
     const year = getActiveBudgetYear();
     const currentUser = getCurrentUser();
-    const canOpenReconciliation = currentUser
-      ? hasPermission(currentUser, 'orders_reconciliation')
-      : false;
+    const canOpenReconciliation = Boolean(currentUser);
 
     // Ensure the year is present in the URL for consistent nav highlighting.
     const fromUrl = getBudgetYearFromUrl();
@@ -9942,8 +9944,10 @@
     applyAppTabTitle();
 
     if (reconcileToPaymentOrdersBtn) {
-      reconcileToPaymentOrdersBtn.textContent = `${year} Payment Orders`;
+      reconcileToPaymentOrdersBtn.textContent = `← Back to ${year} Payment Orders`;
       reconcileToPaymentOrdersBtn.setAttribute('href', `menu.html?year=${encodeURIComponent(String(year))}`);
+      reconcileToPaymentOrdersBtn.setAttribute('aria-label', `Back to ${year} Payment Orders`);
+      reconcileToPaymentOrdersBtn.title = `Back to ${year} Payment Orders`;
     }
 
     const globalInput = document.getElementById('reconcileOrdersGlobalSearch');
@@ -15241,6 +15245,13 @@
     if (titleEl) titleEl.textContent = titleText;
     const listTitleEl = document.querySelector('[data-mt-builder-list-title]');
     if (listTitleEl) listTitleEl.textContent = titleText;
+    const mtBackLink = document.getElementById('mtBuilderBackToTransfersLink');
+    if (mtBackLink) {
+      mtBackLink.href = `money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`;
+      mtBackLink.textContent = `← Back to ${resolvedYear} Money Transfers`;
+      mtBackLink.setAttribute('aria-label', `Back to ${resolvedYear} Money Transfers`);
+      mtBackLink.title = `Back to ${resolvedYear} Money Transfers`;
+    }
     const subheadEl = document.querySelector('[data-mt-builder-subhead]');
     if (subheadEl) {
       const start = mtBuilderViewState.start;
@@ -22248,9 +22259,9 @@
     const backLink = document.getElementById('budgetDashboardBackLink');
     if (backLink) {
       backLink.href = `budget.html?year=${encodeURIComponent(String(year))}`;
-      backLink.textContent = `${year} Budget`;
+      backLink.textContent = `← Back to ${year} Budget`;
       backLink.setAttribute('aria-label', `Back to ${year} Budget`);
-      backLink.title = `${year} Budget`;
+      backLink.title = `Back to ${year} Budget`;
     }
 
     initBudgetYearNav();

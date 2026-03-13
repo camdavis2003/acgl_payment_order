@@ -71,6 +71,20 @@
               <h2 id="mt-builder-list-title" data-mt-builder-list-title>
                 Money Transfer
               </h2>
+              <div
+                class="mtBuilderRangeInline"
+                aria-label="Money Transfer date range"
+              >
+                <label for="mtBuilderRangeStart">Start</label>
+                <input id="mtBuilderRangeStart" type="date" />
+                <label for="mtBuilderRangeEnd">End</label>
+                <input id="mtBuilderRangeEnd" type="date" />
+                <div
+                  id="mtBuilderRangeInlineError"
+                  class="error"
+                  aria-live="polite"
+                ></div>
+              </div>
               <div class="list-actions">
                 <div class="list-search">
                   <label class="sr-only" for="mtBuilderGlobalSearch"
@@ -94,6 +108,14 @@
                     ×
                   </button>
                 </div>
+
+                <button
+                  type="button"
+                  class="btn btn--ghost"
+                  id="mtBuilderSelectItemsBtn"
+                >
+                  Select Items
+                </button>
 
                 <button
                   type="button"
@@ -163,6 +185,73 @@
             </div>
           </section>
         </main>
+      </div>
+    </div>
+
+    <div class="modal" id="mtEntrySelectModal" aria-hidden="true">
+      <div class="modal__backdrop" data-mt-entry-select-close></div>
+      <div
+        class="modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mtEntrySelectModalTitle"
+      >
+        <div class="modal__header">
+          <div class="modal__headerText">
+            <h2 id="mtEntrySelectModalTitle" class="modal__poHeader">
+              Select Eligible Income Transactions
+            </h2>
+            <p id="mtEntrySelectModalSubhead" class="modal__poDate">
+              Select income transactions to add to this Money Transfer.
+            </p>
+          </div>
+        </div>
+
+        <div class="modal__body">
+          <div
+            class="table-wrap ordersTableWrap"
+            role="region"
+            aria-label="Eligible transactions"
+            tabindex="0"
+          >
+            <table id="mtEntrySelectTable" class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Select</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Budget Nr.</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Creditor</th>
+                  <th scope="col" class="num">Euro (EUR)</th>
+                  <th scope="col" class="num">USD ($)</th>
+                  <th scope="col">Details</th>
+                </tr>
+              </thead>
+              <tbody id="mtEntrySelectTbody"></tbody>
+            </table>
+          </div>
+
+          <div id="mtEntrySelectEmptyState" class="empty" hidden>
+            No eligible income transactions found for this date range.
+          </div>
+        </div>
+
+        <div class="modal__footer">
+          <button
+            type="button"
+            id="mtEntrySelectAddBtn"
+            class="btn btn--primary"
+          >
+            Add
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost"
+            data-mt-entry-select-close
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
 

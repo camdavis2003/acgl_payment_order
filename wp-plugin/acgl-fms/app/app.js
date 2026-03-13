@@ -4023,6 +4023,14 @@
   const mtBuilderTbody = document.getElementById('mtBuilderTbody');
   const mtBuilderEmptyState = document.getElementById('mtBuilderEmptyState');
   const mtBuilderClearSearchBtn = document.getElementById('mtBuilderClearSearchBtn');
+  const mtBuilderSelectItemsBtn = document.getElementById('mtBuilderSelectItemsBtn');
+  const mtBuilderRangeStartInput = document.getElementById('mtBuilderRangeStart');
+  const mtBuilderRangeEndInput = document.getElementById('mtBuilderRangeEnd');
+  const mtBuilderRangeInlineError = document.getElementById('mtBuilderRangeInlineError');
+  const mtEntrySelectModal = document.getElementById('mtEntrySelectModal');
+  const mtEntrySelectTbody = document.getElementById('mtEntrySelectTbody');
+  const mtEntrySelectEmptyState = document.getElementById('mtEntrySelectEmptyState');
+  const mtEntrySelectAddBtn = document.getElementById('mtEntrySelectAddBtn');
 
   // Request form CAPTCHA (client-side human check)
   let requestCaptchaExpected = null;
@@ -13900,9 +13908,21 @@
     const isPositive = (Number.isFinite(e) && e > 0) || (Number.isFinite(u) && u > 0);
     if (!isPositive) return '';
 
-    const ranges = getMoneyTransferRangesForYear(year);
-    for (const r of ranges) {
-      if (r.start <= d && d <= r.end) return r.no;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const transfers = ensureMoneyTransfersHaveIdsForYear(y);
+    for (const t of Array.isArray(transfers) ? transfers : []) {
+      const no = String(t && (t.moneyTransferNo || t.mtNo || t.no) ? (t.moneyTransferNo || t.mtNo || t.no) : '').trim();
+      if (!no) continue;
+
+      const explicitIds = normalizeMoneyTransferEntryLedgerIds(t);
+      if (hasExplicitMoneyTransferSelection(t)) {
+        if (explicitIds.includes(ledgerId)) return no;
+        continue;
+      }
+
+      const start = normalizeMoneyTransferRangeStart(t);
+      const end = normalizeMoneyTransferRangeEnd(t);
+      if (start && end && start <= d && d <= end) return no;
     }
     return '';
   }
@@ -14534,6 +14554,89 @@
     return isIsoDateOnly(s) ? s : '';
   }
 
+  function normalizeMoneyTransferEntryLedgerIds(row) {
+    const parseRaw = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        const s = String(value || '').trim();
+        if (!s) return [];
+        if (s.startsWith('[') && s.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(s);
+            if (Array.isArray(parsed)) return parsed;
+          } catch {
+            // ignore and try CSV fallback
+          }
+        }
+        return s.split(',').map((x) => String(x || '').trim()).filter(Boolean);
+      }
+      return [];
+    };
+
+    const raw = row && row.entryLedgerIds !== undefined && row.entryLedgerIds !== null
+      ? parseRaw(row.entryLedgerIds)
+      : parseRaw(row && row.selectedLedgerIds);
+
+    const out = [];
+    const seen = new Set();
+    for (const v of raw || []) {
+      const id = String(v || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  }
+
+  function hasExplicitMoneyTransferSelection(row) {
+    if (!row || typeof row !== 'object') return false;
+    return Object.prototype.hasOwnProperty.call(row, 'entryLedgerIds')
+      || Object.prototype.hasOwnProperty.call(row, 'selectedLedgerIds');
+  }
+
+  function isMtEligibleLedgerIncomeRow(row) {
+    const ledgerId = String(row && row.ledgerId ? row.ledgerId : '').trim();
+    if (!ledgerId || ledgerId.startsWith('po:')) return false;
+    const d = String(row && row.date ? row.date : '').trim();
+    if (!isIsoDateOnly(d)) return false;
+    const e = Number(row && row.euro);
+    const u = Number(row && row.usd);
+    return (Number.isFinite(e) && e > 0) || (Number.isFinite(u) && u > 0);
+  }
+
+  function getAssignedMoneyTransferLedgerIdsForYear(year, { excludeTransferId } = {}) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const exclude = normalizeMoneyTransferId(excludeTransferId);
+    const allTransfers = ensureMoneyTransfersHaveIdsForYear(y);
+    const allLedgerRows = buildGsLedgerRowsForYear(y);
+    const out = new Set();
+
+    for (const t of Array.isArray(allTransfers) ? allTransfers : []) {
+      const transferId = normalizeMoneyTransferId(t && t.id);
+      if (exclude && transferId === exclude) continue;
+
+      const explicit = normalizeMoneyTransferEntryLedgerIds(t);
+      if (hasExplicitMoneyTransferSelection(t)) {
+        for (const id of explicit) out.add(id);
+        continue;
+      }
+
+      const start = normalizeMoneyTransferRangeStart(t);
+      const end = normalizeMoneyTransferRangeEnd(t);
+      if (!start || !end) continue;
+
+      for (const row of Array.isArray(allLedgerRows) ? allLedgerRows : []) {
+        if (!isMtEligibleLedgerIncomeRow(row)) continue;
+        const d = String(row.date || '').trim();
+        if (d < start || d > end) continue;
+        const ledgerId = String(row.ledgerId || '').trim();
+        if (ledgerId) out.add(ledgerId);
+      }
+    }
+
+    return out;
+  }
+
   function rangesOverlapInclusive(aStart, aEnd, bStart, bEnd) {
     if (!isIsoDateOnly(aStart) || !isIsoDateOnly(aEnd) || !isIsoDateOnly(bStart) || !isIsoDateOnly(bEnd)) return false;
     if (aStart > aEnd) return false;
@@ -14870,7 +14973,14 @@
 
         if (action === 'edit') {
           if (!current) return;
-          openMoneyTransferRangeModal({ year, mode: 'edit', transfer: current });
+          const editParams = new URLSearchParams();
+          editParams.set('year', String(year));
+          editParams.set('id', normalizeMoneyTransferId(current.id));
+          const eStart = normalizeMoneyTransferRangeStart(current);
+          const eEnd = normalizeMoneyTransferRangeEnd(current);
+          if (eStart) editParams.set('start', eStart);
+          if (eEnd) editParams.set('end', eEnd);
+          window.location.href = withWpEmbedParams(`money_transfer.html?${editParams.toString()}`);
         }
       });
     }
@@ -15055,6 +15165,7 @@
     end: '',
     id: '',
     draftNo: '',
+    selectedLedgerIds: [],
     canWrite: false,
   };
 
@@ -15122,25 +15233,106 @@
     mtBuilderTbody.innerHTML = html;
   }
 
+  function getMtBuilderEligibleRows(year, start, end, { excludeTransferId, includeLedgerIds } = {}) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const includeSet = new Set((includeLedgerIds || []).map((x) => String(x || '').trim()).filter(Boolean));
+    const assignedSet = getAssignedMoneyTransferLedgerIdsForYear(y, { excludeTransferId });
+
+    return buildGsLedgerRowsForYear(y)
+      .filter((r) => {
+        if (!isMtEligibleLedgerIncomeRow(r)) return false;
+
+        const d = String(r && r.date ? r.date : '').trim();
+        if (isIsoDateOnly(start) && d < start) return false;
+        if (isIsoDateOnly(end) && d > end) return false;
+
+        const ledgerId = String(r && r.ledgerId ? r.ledgerId : '').trim();
+        if (!ledgerId) return false;
+        if (includeSet.has(ledgerId)) return true;
+        return !assignedSet.has(ledgerId);
+      })
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  }
+
+  function getMtBuilderRowsFromSelectedIds(year, selectedLedgerIds) {
+    const selectedSet = new Set((selectedLedgerIds || []).map((x) => String(x || '').trim()).filter(Boolean));
+    if (selectedSet.size === 0) return [];
+
+    return buildGsLedgerRowsForYear(year)
+      .filter((r) => selectedSet.has(String(r && r.ledgerId ? r.ledgerId : '').trim()))
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  }
+
+  function renderMtEntrySelectRows(rows, year, selectedLedgerIds) {
+    if (!mtEntrySelectTbody || !mtEntrySelectEmptyState) return;
+
+    const selectedSet = new Set((selectedLedgerIds || []).map((x) => String(x || '').trim()).filter(Boolean));
+
+    const html = (rows || [])
+      .map((r) => {
+        const ledgerId = String(r && r.ledgerId ? r.ledgerId : '').trim();
+        const checked = selectedSet.has(ledgerId);
+
+        const date = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'date'));
+        const budgetCode = getGsLedgerDisplayValueForColumn(r, 'budgetNumber');
+        const code = extractInCodeFromBudgetNumberText(budgetCode);
+        const outMap = getOutDescMapForYear(year);
+        const inMap = getInDescMapForYear(year);
+        const desc = (code && outMap ? outMap.get(code) : '') || (code && inMap ? inMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(budgetCode);
+        const budgetNumber = renderBudgetNumberSpanHtml(code || budgetCode, desc);
+        const source = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'source'));
+        const creditorDebtor = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'creditorDebtor'));
+        const euro = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'euro'));
+        const usd = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'usd'));
+        const details = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'details'));
+
+        return `
+          <tr>
+            <td class="num">
+              <input type="checkbox" data-mt-entry-select="1" data-ledger-id="${escapeHtml(ledgerId)}" ${checked ? 'checked' : ''} />
+            </td>
+            <td>${date}</td>
+            <td>${budgetNumber}</td>
+            <td>${source}</td>
+            <td>${creditorDebtor}</td>
+            <td class="num">${euro}</td>
+            <td class="num">${usd}</td>
+            <td>${details}</td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    mtEntrySelectTbody.innerHTML = html;
+    mtEntrySelectEmptyState.hidden = (rows || []).length > 0;
+  }
+
+  function openMtEntrySelectModal({ year, start, end, excludeTransferId } = {}) {
+    if (!mtEntrySelectModal || !mtEntrySelectTbody || !mtEntrySelectAddBtn) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+
+    const rows = getMtBuilderEligibleRows(y, start, end, {
+      excludeTransferId,
+      includeLedgerIds: mtBuilderViewState.selectedLedgerIds,
+    });
+
+    renderMtEntrySelectRows(rows, y, mtBuilderViewState.selectedLedgerIds);
+    mtEntrySelectModal.classList.add('is-open');
+    mtEntrySelectModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeMtEntrySelectModal() {
+    if (!mtEntrySelectModal) return;
+    mtEntrySelectModal.classList.remove('is-open');
+    mtEntrySelectModal.setAttribute('aria-hidden', 'true');
+  }
+
   function applyMtBuilderView() {
     if (!mtBuilderTbody || !mtBuilderEmptyState) return;
     ensureMtBuilderDefaultEmptyText();
 
     const year = Number.isInteger(Number(mtBuilderViewState.year)) ? Number(mtBuilderViewState.year) : getActiveBudgetYear();
-    const start = String(mtBuilderViewState.start || '').trim();
-    const end = String(mtBuilderViewState.end || '').trim();
-
-    const all = buildGsLedgerRowsForYear(year)
-      .filter((r) => {
-        const d = String(r && r.date ? r.date : '').trim();
-        if (!isIsoDateOnly(d)) return false;
-        if (isIsoDateOnly(start) && d < start) return false;
-        if (isIsoDateOnly(end) && d > end) return false;
-        const e = Number(r && r.euro);
-        const u = Number(r && r.usd);
-        return (Number.isFinite(e) && e > 0) || (Number.isFinite(u) && u > 0);
-      })
-      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+    const all = getMtBuilderRowsFromSelectedIds(year, mtBuilderViewState.selectedLedgerIds);
 
     const filtered = filterMtBuilderRows(all, mtBuilderViewState.globalFilter);
 
@@ -15182,6 +15374,9 @@
     const saveBtn = document.getElementById('mtBuilderSaveBtn');
     const cancelBtn = document.getElementById('mtBuilderCancelBtn');
     const globalInput = document.getElementById('mtBuilderGlobalSearch');
+    const rangeStartInput = mtBuilderRangeStartInput;
+    const rangeEndInput = mtBuilderRangeEndInput;
+    const rangeErrorEl = mtBuilderRangeInlineError;
 
     const year = getActiveBudgetYear();
 
@@ -15230,7 +15425,36 @@
         if (!mtBuilderViewState.start) mtBuilderViewState.start = normalizeMoneyTransferRangeStart(existing);
         if (!mtBuilderViewState.end) mtBuilderViewState.end = normalizeMoneyTransferRangeEnd(existing);
         if (commentsEl) commentsEl.value = String(existing.comments || existing.comment || '');
+
+        const explicitIds = normalizeMoneyTransferEntryLedgerIds(existing);
+        if (hasExplicitMoneyTransferSelection(existing)) {
+          mtBuilderViewState.selectedLedgerIds = explicitIds;
+        } else {
+          const fallbackIds = getMtBuilderEligibleRows(
+            resolvedYear,
+            mtBuilderViewState.start,
+            mtBuilderViewState.end,
+            { excludeTransferId: normalizeMoneyTransferId(existing.id), includeLedgerIds: [] }
+          ).map((r) => String(r && r.ledgerId ? r.ledgerId : '').trim()).filter(Boolean);
+          mtBuilderViewState.selectedLedgerIds = fallbackIds;
+          // Auto-migrate: immediately persist entryLedgerIds so the Ledger uses explicit
+          // mode without requiring the user to manually re-save this legacy MT.
+          if (!isViewOnly && mtBuilderViewState.canWrite) {
+            try {
+              const migId = normalizeMoneyTransferId(existing.id);
+              const migAll = ensureMoneyTransfersHaveIdsForYear(resolvedYear);
+              const migNext = (migAll || []).map((t) =>
+                normalizeMoneyTransferId(t && t.id) !== migId ? t : { ...t, entryLedgerIds: fallbackIds }
+              );
+              saveMoneyTransfers(migNext, resolvedYear);
+            } catch {
+              // ignore — migration is best-effort
+            }
+          }
+        }
       }
+    } else {
+      mtBuilderViewState.selectedLedgerIds = [];
     }
 
     const mtNo = (() => {
@@ -15251,14 +15475,68 @@
       mtBackLink.title = `Back to ${resolvedYear} Money Transfers`;
     }
     const subheadEl = document.querySelector('[data-mt-builder-subhead]');
-    if (subheadEl) {
-      const start = mtBuilderViewState.start;
-      const end = mtBuilderViewState.end;
+    function syncBuilderRangeSubhead() {
+      if (!subheadEl) return;
+      const start = String(mtBuilderViewState.start || '').trim();
+      const end = String(mtBuilderViewState.end || '').trim();
       subheadEl.textContent = start && end
-        ? `Positive income entries from ${start} to ${end} (inclusive).`
-        : 'Positive income entries for the selected date range.';
+        ? `Selected income entries from ${start} to ${end} (inclusive).`
+        : 'Selected income entries for the selected date range.';
     }
+    syncBuilderRangeSubhead();
     applyAppTabTitle();
+
+    function syncBuilderRangeControlsAndValidation() {
+      const start = String(mtBuilderViewState.start || '').trim();
+      const end = String(mtBuilderViewState.end || '').trim();
+      const excludeId = existing ? normalizeMoneyTransferId(existing.id) : '';
+
+      if (rangeStartInput) {
+        rangeStartInput.value = start;
+        rangeStartInput.min = getDerivedBudgetCreatedDateOnlyForYear(resolvedYear) || '';
+      }
+      if (rangeEndInput) {
+        rangeEndInput.value = end;
+        rangeEndInput.min = start || (getDerivedBudgetCreatedDateOnlyForYear(resolvedYear) || '');
+      }
+
+      const msg = validateMoneyTransferDateRange(resolvedYear, start, end, { excludeId });
+      if (rangeErrorEl) rangeErrorEl.textContent = msg || '';
+
+      if (saveBtn && !isViewOnly) {
+        const baseDisabled = !mtBuilderViewState.canWrite;
+        saveBtn.disabled = baseDisabled || Boolean(msg);
+        if (baseDisabled) saveBtn.setAttribute('data-tooltip', 'Read only access.');
+        else if (msg) saveBtn.setAttribute('data-tooltip', msg);
+        else saveBtn.removeAttribute('data-tooltip');
+      }
+
+      syncBuilderRangeSubhead();
+    }
+
+    if (rangeStartInput && rangeEndInput) {
+      rangeStartInput.disabled = isViewOnly;
+      rangeEndInput.disabled = isViewOnly;
+
+      if (!isViewOnly && !rangeStartInput.dataset.bound) {
+        rangeStartInput.dataset.bound = '1';
+        rangeStartInput.addEventListener('change', () => {
+          mtBuilderViewState.start = String(rangeStartInput.value || '').trim();
+          if (rangeEndInput) rangeEndInput.min = mtBuilderViewState.start || (getDerivedBudgetCreatedDateOnlyForYear(resolvedYear) || '');
+          syncBuilderRangeControlsAndValidation();
+        });
+      }
+
+      if (!isViewOnly && !rangeEndInput.dataset.bound) {
+        rangeEndInput.dataset.bound = '1';
+        rangeEndInput.addEventListener('change', () => {
+          mtBuilderViewState.end = String(rangeEndInput.value || '').trim();
+          syncBuilderRangeControlsAndValidation();
+        });
+      }
+    }
+
+    syncBuilderRangeControlsAndValidation();
 
     if (globalInput) {
       globalInput.value = mtBuilderViewState.globalFilter || '';
@@ -15298,11 +15576,23 @@
 
       if (!isViewOnly && !saveBtn.dataset.bound) {
         saveBtn.dataset.bound = '1';
-        saveBtn.addEventListener('click', () => {
+        saveBtn.addEventListener('click', async () => {
           if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
 
           const start = String(mtBuilderViewState.start || '').trim();
           const end = String(mtBuilderViewState.end || '').trim();
+          const selectedLedgerIds = Array.from(new Set((mtBuilderViewState.selectedLedgerIds || []).map((v) => String(v || '').trim()).filter(Boolean)));
+          if (selectedLedgerIds.length === 0) {
+            window.alert('Select at least one eligible income transaction first.');
+            return;
+          }
+
+          const selectedRows = getMtBuilderRowsFromSelectedIds(resolvedYear, selectedLedgerIds);
+          if (selectedRows.length === 0) {
+            window.alert('Selected transactions are no longer available. Please reselect from eligible transactions.');
+            return;
+          }
+
           const excludeId = existing ? normalizeMoneyTransferId(existing.id) : '';
           const msg = validateMoneyTransferDateRange(resolvedYear, start, end, { excludeId });
           if (msg) {
@@ -15323,6 +15613,7 @@
                 ...t,
                 rangeStart: start,
                 rangeEnd: end,
+                entryLedgerIds: selectedLedgerIds,
                 comments,
                 grandSecretaryName: String(gl && gl.grandSecretary ? gl.grandSecretary : ''),
                 grandTreasurerName: String(gl && gl.grandTreasurer ? gl.grandTreasurer : ''),
@@ -15343,6 +15634,7 @@
               gsVerified: false,
               gtVerified: false,
               comments,
+              entryLedgerIds: selectedLedgerIds,
               rangeStart: start,
               rangeEnd: end,
               createdAt: nowIso,
@@ -15352,10 +15644,15 @@
             advanceMoneyTransferSequence();
           }
 
+          if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
+            try { await window.acglFmsWpFlushNow(); } catch { /* ignore */ }
+          }
           window.location.href = withWpEmbedParams(`money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`);
         });
       }
     }
+
+    syncBuilderRangeControlsAndValidation();
 
     if (commentsEl) {
       commentsEl.disabled = isViewOnly;
@@ -15374,7 +15671,61 @@
       });
     }
 
+    if (mtBuilderSelectItemsBtn) {
+      mtBuilderSelectItemsBtn.hidden = isViewOnly;
+      mtBuilderSelectItemsBtn.disabled = isViewOnly || !mtBuilderViewState.canWrite;
+      if (!isViewOnly && !mtBuilderViewState.canWrite) mtBuilderSelectItemsBtn.setAttribute('data-tooltip', 'Read only access.');
+      else mtBuilderSelectItemsBtn.removeAttribute('data-tooltip');
+
+      if (!isViewOnly && !mtBuilderSelectItemsBtn.dataset.bound) {
+        mtBuilderSelectItemsBtn.dataset.bound = '1';
+        mtBuilderSelectItemsBtn.addEventListener('click', () => {
+          if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
+          openMtEntrySelectModal({
+            year: resolvedYear,
+            start: mtBuilderViewState.start,
+            end: mtBuilderViewState.end,
+            excludeTransferId: existing ? normalizeMoneyTransferId(existing.id) : '',
+          });
+        });
+      }
+    }
+
+    if (mtEntrySelectModal && !mtEntrySelectModal.dataset.bound) {
+      mtEntrySelectModal.dataset.bound = '1';
+      mtEntrySelectModal.addEventListener('click', (e) => {
+        const closeTarget = e.target && e.target.closest ? e.target.closest('[data-mt-entry-select-close]') : null;
+        if (closeTarget) closeMtEntrySelectModal();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (!mtEntrySelectModal.classList.contains('is-open')) return;
+        closeMtEntrySelectModal();
+      });
+
+      if (mtEntrySelectAddBtn) {
+        mtEntrySelectAddBtn.addEventListener('click', () => {
+          const checked = Array.from(mtEntrySelectTbody ? mtEntrySelectTbody.querySelectorAll('input[type="checkbox"][data-mt-entry-select][data-ledger-id]:checked') : [])
+            .map((el) => String(el.getAttribute('data-ledger-id') || '').trim())
+            .filter(Boolean);
+          mtBuilderViewState.selectedLedgerIds = Array.from(new Set(checked));
+          closeMtEntrySelectModal();
+          applyMtBuilderView();
+        });
+      }
+    }
+
     applyMtBuilderView();
+
+    if (!isViewOnly && mtBuilderViewState.canWrite && !existing && mtBuilderViewState.selectedLedgerIds.length === 0) {
+      openMtEntrySelectModal({
+        year: resolvedYear,
+        start: mtBuilderViewState.start,
+        end: mtBuilderViewState.end,
+        excludeTransferId: '',
+      });
+    }
   }
 
   /** @returns {Array<Object>} */

@@ -13880,17 +13880,17 @@
     }
   }
 
-  function getMoneyTransferNoForLedgerRow(year, row) {
+  function getMoneyTransferForLedgerRow(year, row) {
     const ledgerId = String(row && row.ledgerId ? row.ledgerId : '');
-    if (ledgerId.startsWith('po:')) return '';
+    if (ledgerId.startsWith('po:')) return null;
 
     const d = String(row && row.date ? row.date : '').trim();
-    if (!isIsoDateOnly(d)) return '';
+    if (!isIsoDateOnly(d)) return null;
 
     const e = Number(row && row.euro);
     const u = Number(row && row.usd);
     const isPositive = (Number.isFinite(e) && e > 0) || (Number.isFinite(u) && u > 0);
-    if (!isPositive) return '';
+    if (!isPositive) return null;
 
     const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
     const transfers = ensureMoneyTransfersHaveIdsForYear(y);
@@ -13899,9 +13899,15 @@
       if (!no) continue;
 
       const explicitIds = normalizeMoneyTransferEntryLedgerIds(t);
-      if (explicitIds.includes(ledgerId)) return no;
+      if (explicitIds.includes(ledgerId)) return t;
     }
-    return '';
+    return null;
+  }
+
+  function getMoneyTransferNoForLedgerRow(year, row) {
+    const mt = getMoneyTransferForLedgerRow(year, row);
+    if (!mt) return '';
+    return String(mt.moneyTransferNo || mt.mtNo || mt.no || '').trim();
   }
 
   function getGsLedgerSortValueForColumn(row, colKey, colType) {
@@ -13992,11 +13998,28 @@
           ? `<a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderId}" title="Download PDF">${poNo}</a>`
           : poNo;
 
-        const mtNo = String(getMoneyTransferNoForLedgerRow(year, r) || '').trim();
+        const mtRecord = getMoneyTransferForLedgerRow(year, r);
+        const mtNo = String(mtRecord && (mtRecord.moneyTransferNo || mtRecord.mtNo || mtRecord.no) ? (mtRecord.moneyTransferNo || mtRecord.mtNo || mtRecord.no) : '').trim();
+        let mtNoHtml = '';
+        if (mtNo) {
+          const mtId = normalizeMoneyTransferId(mtRecord && mtRecord.id);
+          if (mtId) {
+            const mtParams = new URLSearchParams();
+            mtParams.set('year', String(year));
+            mtParams.set('mode', 'view');
+            mtParams.set('id', mtId);
+            const mtDate = normalizeMoneyTransferDate(mtRecord);
+            if (mtDate) mtParams.set('mtDate', mtDate);
+            const mtHref = withWpEmbedParams(`money_transfer.html?${mtParams.toString()}`);
+            mtNoHtml = `<a href="${escapeHtml(mtHref)}" title="View Money Transfer">${escapeHtml(mtNo)}</a>`;
+          } else {
+            mtNoHtml = escapeHtml(mtNo);
+          }
+        }
         const isMissingMtNo = isMtEligibleLedgerIncomeRow(r) && !mtNo;
         if (isMissingMtNo) rowClasses.push('gsLedgerRow--missingMt');
 
-        const docNrHtml = poNoHtml || (mtNo ? escapeHtml(mtNo) : '');
+        const docNrHtml = poNoHtml || mtNoHtml;
 
         const checked = r.verified ? 'checked' : '';
         const verifyDisabled = canVerify ? '' : 'disabled';

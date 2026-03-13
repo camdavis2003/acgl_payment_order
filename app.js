@@ -8015,14 +8015,14 @@
 
     const currentUser = getCurrentUser();
     const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
-    const canDeleteOrders = currentUser ? canDelete(currentUser, 'orders') : false;
+    const canDeleteOrders = currentUser ? canWrite(currentUser, 'orders') : false;
     const canViewItems = currentUser ? canOrdersViewEdit(currentUser) : false;
     const editDisabledAttr = canEditOrders ? '' : ' disabled';
     const editAriaDisabled = canEditOrders ? 'false' : 'true';
     const editTooltipAttr = canEditOrders ? '' : ' data-tooltip="Requires Write access for Payment Orders."';
     const deleteDisabledAttr = canDeleteOrders ? '' : ' disabled';
     const deleteAriaDisabled = canDeleteOrders ? 'false' : 'true';
-    const deleteTooltipAttr = canDeleteOrders ? '' : ' data-tooltip="Requires Delete access for Payment Orders."';
+    const deleteTooltipAttr = canDeleteOrders ? '' : ' data-tooltip="Requires Write access for Payment Orders."';
 
     const itemsDisabledAttr = canViewItems ? '' : ' disabled';
     const itemsAriaDisabled = canViewItems ? 'false' : 'true';
@@ -8057,7 +8057,7 @@
                 class="btn btn--x"
                 data-action="delete"
                 aria-label="Delete request"
-                title="${canDeleteOrders ? 'Delete' : 'Requires Delete access for Payment Orders.'}"
+                title="${canDeleteOrders ? 'Delete' : 'Requires Write access for Payment Orders.'}"
                 aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}
               >
                 X
@@ -25010,7 +25010,7 @@
         beginEditingOrder(order);
         window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
       } else if (action === 'delete') {
-        if (!requireDeleteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
         const ok = window.confirm('Delete this request?');
         if (!ok) return;
         deleteOrderById(id);

@@ -1079,6 +1079,14 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
   filter: brightness(0.95);
 }
 
+html[data-theme="dark"] .menu__link--primary,
+html[data-theme="dark"] .menu__link--primary:hover,
+html[data-theme="dark"] .menu__link--primary:focus-visible {
+  background: #334155;
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
 .menu__button {
   border-radius: 999px;
 }
@@ -1428,6 +1436,28 @@ input:focus, textarea:focus, select:focus, button:focus {
 #ordersTable tr.ordersRow--approved a,
 #ordersTable tr.ordersRow--gtReview a {
   color: var(--primary-bg) !important;
+}
+
+html[data-theme="dark"] #ordersTable tr.ordersRow--approved td,
+html[data-theme="dark"] #ordersTable tr.ordersRow--gtReview td,
+html[data-theme="dark"] #ordersTable tr.ordersRow--approved a,
+html[data-theme="dark"] #ordersTable tr.ordersRow--gtReview a {
+  color: #000000 !important;
+}
+
+/* Dark mode: PO and MT links should be white on regular rows. */
+html[data-theme="dark"] a.poNoDownloadLink,
+html[data-theme="dark"] #gsLedgerTable a[href*="money_transfer.html"] {
+  color: #ffffff;
+}
+
+/* Dark mode: PO and MT links on yellow-highlighted rows should be blue. */
+html[data-theme="dark"] #ordersTable tr.ordersRow--approved a,
+html[data-theme="dark"] #ordersTable tr.ordersRow--gtReview a,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--approved a,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--gtReview a,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
+  color: #1e3a8a !important;
 }
 
 .budgetTable th,
@@ -1861,6 +1891,14 @@ input:focus, textarea:focus, select:focus, button:focus {
   background: var(--primary-bg);
   color: var(--primary-text);
   border-color: var(--primary-bg);
+}
+
+html[data-theme="dark"] .btn--primary,
+html[data-theme="dark"] .btn--primary:hover,
+html[data-theme="dark"] .btn--primary:focus-visible {
+  background: #334155;
+  border-color: #ffffff;
+  color: #ffffff;
 }
 
 /* Blue filled Edit button (Payment Orders list) */
@@ -3036,6 +3074,15 @@ input[type='checkbox'].cb {
   background: #fff6bf;
 }
 
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--approved td,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--gtReview td,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--approved a,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--gtReview a,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt td,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
+  color: #000000;
+}
+
 /* Keep Ledger totals visually distinct while sticky */
 #gsLedgerTable tfoot td,
 #gsLedgerTable tfoot th {
@@ -3103,6 +3150,29 @@ input[type='checkbox'].cb {
 .btn--x:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+/* Dark mode: delete X defaults to white unless row is highlighted. */
+html[data-theme="dark"] .btn--x,
+html[data-theme="dark"] .btn--x:hover {
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .incomeRow--missingBudget .btn--x,
+html[data-theme="dark"] .incomeRow--missingBudget .btn--x:hover,
+html[data-theme="dark"] .ordersRow--missingRequired .btn--x,
+html[data-theme="dark"] .ordersRow--missingRequired .btn--x:hover,
+html[data-theme="dark"] #ordersTable tr.ordersRow--approved .btn--x,
+html[data-theme="dark"] #ordersTable tr.ordersRow--approved .btn--x:hover,
+html[data-theme="dark"] #ordersTable tr.ordersRow--gtReview .btn--x,
+html[data-theme="dark"] #ordersTable tr.ordersRow--gtReview .btn--x:hover,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--approved .btn--x,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--approved .btn--x:hover,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--gtReview .btn--x,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--gtReview .btn--x:hover,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt .btn--x,
+html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt .btn--x:hover {
+  color: #000000;
 }
 
 .table tr:last-child td {

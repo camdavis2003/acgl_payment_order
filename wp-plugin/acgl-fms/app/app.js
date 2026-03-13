@@ -609,6 +609,7 @@
   const LOGIN_AT_KEY = 'payment_order_login_at_v1';
   const LAST_ACTIVITY_AT_KEY = 'payment_order_last_activity_at_v1';
   const AUTH_AUDIT_KEY = 'payment_order_auth_audit_v1';
+  const APP_AUDIT_KEY = 'payment_order_app_audit_v1';
   const LAST_PAGE_KEY = 'acgl_fms_last_page_v1';
 
   const HARD_CODED_ADMIN_USERNAME = 'admin.pass';
@@ -724,8 +725,16 @@
   }
 
   function saveUsers(users) {
+    const before = loadUsers();
     const safe = Array.isArray(users) ? users : [];
     localStorage.setItem(USERS_KEY, JSON.stringify(safe));
+    appendCollectionAuditEvents({
+      module: 'Users',
+      beforeList: before,
+      afterList: safe,
+      idKeys: ['id', 'username'],
+      recordLabelFn: (u) => normalizeUsername(u && u.username),
+    });
   }
 
   async function persistUsersToWpNow() {
@@ -967,6 +976,182 @@
     if (IS_WP_SHARED_MODE) {
       const shouldKeepalive = action === 'Logout' || action === 'Auto log out';
       void persistAuthAuditToWpNow(shouldKeepalive);
+    }
+  }
+
+  function loadAppAuditEvents() {
+    try {
+      const raw = localStorage.getItem(APP_AUDIT_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveAppAuditEvents(events) {
+    try {
+      const safe = Array.isArray(events) ? events : [];
+      localStorage.setItem(APP_AUDIT_KEY, JSON.stringify(safe));
+    } catch {
+      // ignore
+    }
+  }
+
+  function getAuditActorUsername() {
+    const u = getCurrentUser && getCurrentUser();
+    const name = u && u.username ? String(u.username).trim() : '';
+    return name;
+  }
+
+  function auditStableStringify(value) {
+    const seen = new WeakSet();
+    const normalize = (v) => {
+      if (v === null || v === undefined) return v;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      if (typeof v === 'string' || typeof v === 'boolean') return v;
+      if (Array.isArray(v)) return v.map((x) => normalize(x));
+      if (typeof v === 'object') {
+        if (seen.has(v)) return null;
+        seen.add(v);
+        const out = {};
+        const keys = Object.keys(v).sort();
+        for (const k of keys) {
+          out[k] = normalize(v[k]);
+        }
+        return out;
+      }
+      return String(v);
+    };
+    try {
+      return JSON.stringify(normalize(value));
+    } catch {
+      return '';
+    }
+  }
+
+  function getAuditCollectionItemId(item, idKeys) {
+    if (!item || typeof item !== 'object') return '';
+    const keys = Array.isArray(idKeys) ? idKeys : ['id'];
+    for (const key of keys) {
+      const v = String((item && item[key]) || '').trim();
+      if (v) return `${key}:${v}`;
+    }
+    return '';
+  }
+
+  function formatAuditChangeValue(value, field) {
+    const key = String(field || '').trim().toLowerCase();
+    if (key === 'passwordhash' || key === 'passwordplain' || key === 'salt') return '[redacted]';
+    if (key === 'grandlodgesealdataurl' || key === 'grandsecretarysignaturedataurl') return '[updated]';
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '—';
+    if (Array.isArray(value)) return `${value.length} item(s)`;
+    if (typeof value === 'object') return '[updated]';
+    const s = String(value).trim();
+    if (!s) return '—';
+    return s.length > 120 ? `${s.slice(0, 117)}...` : s;
+  }
+
+  function buildAuditChangesSummary(prev, next) {
+    const p = prev && typeof prev === 'object' ? prev : {};
+    const n = next && typeof next === 'object' ? next : {};
+    const ignore = new Set(['createdAt', 'updatedAt', 'timeline']);
+    const keys = Array.from(new Set([...Object.keys(p), ...Object.keys(n)]));
+
+    const rows = [];
+    for (const key of keys) {
+      if (ignore.has(key)) continue;
+      const fromRaw = Object.prototype.hasOwnProperty.call(p, key) ? p[key] : null;
+      const toRaw = Object.prototype.hasOwnProperty.call(n, key) ? n[key] : null;
+      if (auditStableStringify(fromRaw) === auditStableStringify(toRaw)) continue;
+      rows.push({
+        field: key,
+        from: formatAuditChangeValue(fromRaw, key),
+        to: formatAuditChangeValue(toRaw, key),
+      });
+      if (rows.length >= 8) break;
+    }
+
+    if (rows.length === 0) {
+      return [{ field: 'Record', from: '', to: 'Modified' }];
+    }
+    return rows;
+  }
+
+  function appendAppAuditEvent(moduleRaw, recordRaw, actionRaw, changesRaw) {
+    const actor = getAuditActorUsername();
+    if (!actor) return;
+
+    const module = String(moduleRaw || '').trim() || 'App';
+    const record = String(recordRaw || '').trim() || 'Record';
+    const action = String(actionRaw || '').trim() || 'Modified';
+    const changes = Array.isArray(changesRaw) ? changesRaw : [];
+    const at = new Date().toISOString();
+
+    const existing = loadAppAuditEvents();
+    const next = [...existing, { at, module, record, user: actor, action, changes }];
+
+    const MAX = 2000;
+    const trimmed = next.length > MAX ? next.slice(next.length - MAX) : next;
+    saveAppAuditEvents(trimmed);
+  }
+
+  function appendCollectionAuditEvents({ module, year, beforeList, afterList, idKeys, recordLabelFn }) {
+    const actor = getAuditActorUsername();
+    if (!actor) return;
+
+    const beforeArr = Array.isArray(beforeList) ? beforeList : [];
+    const afterArr = Array.isArray(afterList) ? afterList : [];
+    const beforeMap = new Map();
+    const afterMap = new Map();
+
+    for (const item of beforeArr) {
+      const id = getAuditCollectionItemId(item, idKeys);
+      if (!id) continue;
+      beforeMap.set(id, item);
+    }
+    for (const item of afterArr) {
+      const id = getAuditCollectionItemId(item, idKeys);
+      if (!id) continue;
+      afterMap.set(id, item);
+    }
+
+    const moduleLabel = year !== undefined && year !== null && String(year).trim()
+      ? `${String(module || 'App')} (${String(year)})`
+      : String(module || 'App');
+
+    const labelOf = (item, id) => {
+      if (recordLabelFn && typeof recordLabelFn === 'function') {
+        const v = String(recordLabelFn(item) || '').trim();
+        if (v) return v;
+      }
+      const fallback = String(id || '').trim();
+      return fallback || 'Record';
+    };
+
+    for (const [id, afterItem] of afterMap.entries()) {
+      const beforeItem = beforeMap.get(id);
+      if (!beforeItem) {
+        appendAppAuditEvent(moduleLabel, labelOf(afterItem, id), 'Created', []);
+        continue;
+      }
+
+      if (auditStableStringify(beforeItem) !== auditStableStringify(afterItem)) {
+        appendAppAuditEvent(
+          moduleLabel,
+          labelOf(afterItem, id),
+          'Modified',
+          buildAuditChangesSummary(beforeItem, afterItem)
+        );
+      }
+    }
+
+    for (const [id, beforeItem] of beforeMap.entries()) {
+      if (!afterMap.has(id)) {
+        appendAppAuditEvent(moduleLabel, labelOf(beforeItem, id), 'Deleted', []);
+      }
     }
   }
 
@@ -1570,9 +1755,15 @@
     const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
     const key = getBudgetMetaKeyForYear(y);
     if (!key) return;
+    const prev = loadBudgetMeta(y);
     const createdAt = String((meta && meta.createdAt) || '').trim();
     const createdDate = String((meta && meta.createdDate) || '').trim();
-    localStorage.setItem(key, JSON.stringify({ createdAt, createdDate }));
+    const payload = { createdAt, createdDate };
+    localStorage.setItem(key, JSON.stringify(payload));
+    if (auditStableStringify(prev) !== auditStableStringify(payload)) {
+      const action = (prev && (prev.createdAt || prev.createdDate)) ? 'Modified' : 'Created';
+      appendAppAuditEvent(`Budget (${y})`, `Budget ${y}`, action, buildAuditChangesSummary(prev, payload));
+    }
   }
 
   function ensureBudgetMetaExistsForYear(year, { createdAt } = {}) {
@@ -1607,9 +1798,15 @@
   }
 
   function saveBudgetYears(years) {
+    const prev = loadBudgetYears();
     const normalized = Array.from(new Set((years || []).map((v) => Number(v)).filter((v) => Number.isInteger(v))))
       .sort((a, b) => b - a);
     localStorage.setItem(BUDGET_YEARS_KEY, JSON.stringify(normalized));
+    if (auditStableStringify(prev) !== auditStableStringify(normalized)) {
+      appendAppAuditEvent('Budget Years', 'Budget year list', 'Modified', [
+        { field: 'Years', from: prev.join(', ') || '—', to: normalized.join(', ') || '—' },
+      ]);
+    }
     return normalized;
   }
 
@@ -1679,11 +1876,18 @@
   }
 
   function saveBudgetTemplateRows(rows) {
+    const prev = loadBudgetTemplateRows();
     const normalized = Array.isArray(rows) ? rows.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
     try {
       localStorage.setItem(BUDGET_TEMPLATE_ROWS_KEY, JSON.stringify(normalized));
     } catch {
       // ignore
+    }
+    if (auditStableStringify(prev) !== auditStableStringify(normalized)) {
+      const action = prev.length === 0 && normalized.length > 0 ? 'Created' : 'Modified';
+      appendAppAuditEvent('Budget Template', 'Template rows', action, [
+        { field: 'Rows', from: `${prev.length} item(s)`, to: `${normalized.length} item(s)` },
+      ]);
     }
     return normalized;
   }
@@ -4228,7 +4432,17 @@
     const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
     const storageKey = getMoneyTransfersKeyForYear(resolvedYear);
     if (!storageKey) return;
-    localStorage.setItem(storageKey, JSON.stringify(transfers || []));
+    const before = loadMoneyTransfers(resolvedYear);
+    const safe = Array.isArray(transfers) ? transfers : [];
+    localStorage.setItem(storageKey, JSON.stringify(safe));
+    appendCollectionAuditEvents({
+      module: 'Money Transfers',
+      year: resolvedYear,
+      beforeList: before,
+      afterList: safe,
+      idKeys: ['id', 'moneyTransferNo', 'mtNo', 'no'],
+      recordLabelFn: (t) => String((t && (t.moneyTransferNo || t.mtNo || t.no || t.id)) || '').trim(),
+    });
   }
 
   /** @returns {Array<Object>} */
@@ -4303,7 +4517,17 @@
     const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
     const storageKey = getPaymentOrdersReconciliationKeyForYear(resolvedYear);
     if (!storageKey) return;
-    localStorage.setItem(storageKey, JSON.stringify(orders));
+    const before = loadReconciliationOrders(resolvedYear);
+    const safe = Array.isArray(orders) ? orders : [];
+    localStorage.setItem(storageKey, JSON.stringify(safe));
+    appendCollectionAuditEvents({
+      module: 'Reconciliation',
+      year: resolvedYear,
+      beforeList: before,
+      afterList: safe,
+      idKeys: ['id', 'sourceEntryId', 'paymentOrderNo'],
+      recordLabelFn: (o) => formatPaymentOrderNoForDisplay(o && o.paymentOrderNo) || String((o && o.id) || '').trim(),
+    });
   }
 
   function upsertReconciliationOrderBySource(order, year) {
@@ -4614,6 +4838,7 @@
   }
 
   function saveGrandLodgeInfo(info) {
+    const prev = loadGrandLodgeInfo();
     const payload = {
       grandMaster: normalizePersonName(info && info.grandMaster),
       grandSecretary: normalizePersonName(info && info.grandSecretary),
@@ -4626,6 +4851,12 @@
       grandSecretarySignatureFileName: String((info && info.grandSecretarySignatureFileName) || ''),
     };
     localStorage.setItem(GRAND_LODGE_INFO_KEY, JSON.stringify(payload));
+    if (auditStableStringify(prev) !== auditStableStringify(payload)) {
+      const action = (prev && (prev.grandMaster || prev.grandSecretary || prev.grandTreasurer || prev.officialAddress || prev.operationAddress))
+        ? 'Modified'
+        : 'Created';
+      appendAppAuditEvent('Grand Lodge Settings', 'Grand Lodge info', action, buildAuditChangesSummary(prev, payload));
+    }
   }
 
   function readFileAsDataUrl(file) {
@@ -4668,7 +4899,11 @@
     const hasMtNextSeq = Boolean(settings && Object.prototype.hasOwnProperty.call(settings, 'mtNextSeq'));
     const nextSeq = normalizeSequence(hasNextSeq ? settings.nextSeq : (yearChanged ? 1 : prev.nextSeq));
     const mtNextSeq = normalizeSequence(hasMtNextSeq ? settings.mtNextSeq : (yearChanged ? 1 : prev.mtNextSeq));
-    localStorage.setItem(NUMBERING_KEY, JSON.stringify({ year2, nextSeq, mtNextSeq }));
+    const payload = { year2, nextSeq, mtNextSeq };
+    localStorage.setItem(NUMBERING_KEY, JSON.stringify(payload));
+    if (auditStableStringify(prev) !== auditStableStringify(payload)) {
+      appendAppAuditEvent('Numbering', 'Payment Order / Money Transfer numbering', 'Modified', buildAuditChangesSummary(prev, payload));
+    }
   }
 
   function canonicalizePaymentOrderNo(value) {
@@ -5294,7 +5529,11 @@
     if (!res.ok) throw new Error(`upload_failed_${res.status}`);
     const payload = await readJsonResponse(res);
     if (!payload || payload.ok !== true) throw new Error('upload_failed');
-    return payload.item && typeof payload.item === 'object' ? payload.item : null;
+    const item = payload.item && typeof payload.item === 'object' ? payload.item : null;
+    appendAppAuditEvent('Backlog Attachments', `Item ${id}`, 'Created', [
+      { field: 'Attachment', from: '', to: String((item && item.name) || (file && file.name) || 'attachment') },
+    ]);
+    return item;
   }
 
   async function wpDeleteAttachmentById(id) {
@@ -5367,7 +5606,11 @@
 
   async function addAttachment(targetKey, file, context) {
     if (IS_WP_SHARED_MODE) {
-      return wpUploadAttachment(targetKey, file, context);
+      const uploaded = await wpUploadAttachment(targetKey, file, context);
+      appendAppAuditEvent('Attachments', String(targetKey || 'Attachment'), 'Created', [
+        { field: 'Attachment', from: '', to: String((uploaded && uploaded.name) || (file && file.name) || 'attachment') },
+      ]);
+      return uploaded;
     }
 
     const db = await openAttachmentsDb();
@@ -5384,18 +5627,38 @@
       blob: file, // File is a Blob; IndexedDB can store Blobs.
     };
     await idbRequestToPromise(store.put(record));
+    appendAppAuditEvent('Attachments', String(targetKey || 'Attachment'), 'Created', [
+      { field: 'Attachment', from: '', to: String(record.name || 'attachment') },
+    ]);
     return record;
   }
 
   async function deleteAttachmentById(id) {
+    let existing = null;
+    try {
+      existing = await getAttachmentById(id);
+    } catch {
+      existing = null;
+    }
+
     if (IS_WP_SHARED_MODE) {
       await wpDeleteAttachmentById(id);
+      const target = existing && existing.targetKey ? String(existing.targetKey) : 'Attachment';
+      const name = existing && existing.name ? String(existing.name) : String(id || 'attachment');
+      appendAppAuditEvent('Attachments', target, 'Deleted', [
+        { field: 'Attachment', from: name, to: '' },
+      ]);
       return;
     }
     const db = await openAttachmentsDb();
     const tx = db.transaction(ATTACHMENTS_STORE, 'readwrite');
     const store = tx.objectStore(ATTACHMENTS_STORE);
     await idbRequestToPromise(store.delete(id));
+    const target = existing && existing.targetKey ? String(existing.targetKey) : 'Attachment';
+    const name = existing && existing.name ? String(existing.name) : String(id || 'attachment');
+    appendAppAuditEvent('Attachments', target, 'Deleted', [
+      { field: 'Attachment', from: name, to: '' },
+    ]);
   }
 
   async function deleteAttachmentsByTargetKey(targetKey) {
@@ -9281,8 +9544,14 @@
   function deleteOrderById(id) {
     const year = getActiveBudgetYear();
     const orders = loadOrders(year);
+    const target = orders.find((o) => o && o.id === id);
     const next = orders.filter((o) => o.id !== id);
     saveOrders(next, year);
+    if (target) {
+      const po = formatPaymentOrderNoForDisplay(target.paymentOrderNo);
+      const record = `${po}${target.name ? ` — ${String(target.name).trim()}` : ''}`.trim() || String(id || 'Payment Order');
+      appendAppAuditEvent(`Payment Orders (${year})`, record, 'Deleted', []);
+    }
     applyPaymentOrdersView();
   }
 
@@ -9293,6 +9562,7 @@
     const ok = window.confirm('Clear all payment orders? This cannot be undone.');
     if (!ok) return;
     saveOrders([], year);
+    appendAppAuditEvent(`Payment Orders (${year})`, `All Payment Orders (${orders.length})`, 'Deleted', []);
     applyPaymentOrdersView();
   }
 
@@ -10352,8 +10622,16 @@
   }
 
   function saveBacklogItems(items) {
+    const before = loadBacklogItems();
     const safe = Array.isArray(items) ? items : [];
     localStorage.setItem(BACKLOG_KEY, JSON.stringify(safe));
+    appendCollectionAuditEvents({
+      module: 'Backlog',
+      beforeList: before,
+      afterList: safe,
+      idKeys: ['id', 'refNo'],
+      recordLabelFn: (it) => String((it && (it.refNo || it.id || it.subject)) || '').trim(),
+    });
   }
 
   function normalizeBacklogPriority(valueRaw) {
@@ -10469,6 +10747,16 @@
   function getBacklogDisplayUser() {
     const u = normalizeUsername(getCurrentUsername());
     return u || '—';
+  }
+
+  function getBacklogAuditRecord(item) {
+    if (!item || typeof item !== 'object') return 'Backlog Item';
+    const ref = String(item.refNo || '').trim();
+    const subject = String(item.subject || '').trim();
+    if (ref && subject) return `${ref} - ${subject}`;
+    if (ref) return ref;
+    if (subject) return subject;
+    return String(item.id || 'Backlog Item');
   }
 
   function syncModalPageScrollLock() {
@@ -10933,6 +11221,7 @@
 
           const next = items.filter((x) => x && typeof x === 'object' && String(x.id || '') !== String(id));
           saveBacklogItems(next);
+          appendAppAuditEvent('Backlog', getBacklogAuditRecord(current), 'Deleted', []);
           renderBacklogList(canEdit);
           return;
         }
@@ -10963,6 +11252,13 @@
           const next = items.slice();
           next[idx] = nextItem;
           saveBacklogItems(next);
+          appendAppAuditEvent('Backlog', getBacklogAuditRecord(nextItem), 'Modified', [
+            {
+              field: 'Archived',
+              from: wasArchived ? 'Yes' : 'No',
+              to: wasArchived ? 'No' : 'Yes',
+            },
+          ]);
           renderBacklogList(canEdit);
           return;
         }
@@ -11242,6 +11538,9 @@
             by,
             text,
           };
+          appendAppAuditEvent('Backlog Comment', getBacklogAuditRecord(current), 'Modified', [
+            { field: 'Comment', from: String(existing.text || '').trim() || '—', to: text },
+          ]);
         } else {
           comments.push({
             id: (crypto?.randomUUID ? crypto.randomUUID() : `c_${Date.now()}_${Math.random().toString(16).slice(2)}`),
@@ -11249,6 +11548,9 @@
             by,
             text,
           });
+          appendAppAuditEvent('Backlog Comment', getBacklogAuditRecord(current), 'Created', [
+            { field: 'Comment', from: '', to: text },
+          ]);
         }
 
         const next = items.slice();
@@ -11278,11 +11580,15 @@
         const current = items[idx];
         const comments = Array.isArray(current.comments) ? current.comments.slice() : [];
         if (editIdx >= comments.length) return;
+        const existing = comments[editIdx] && typeof comments[editIdx] === 'object' ? comments[editIdx] : null;
         comments.splice(editIdx, 1);
 
         const next = items.slice();
         next[idx] = { ...current, comments };
         saveBacklogItems(next);
+        appendAppAuditEvent('Backlog Comment', getBacklogAuditRecord(current), 'Deleted', [
+          { field: 'Comment', from: String(existing && existing.text ? existing.text : 'Comment'), to: '' },
+        ]);
 
         closeBacklogCommentModal();
         renderBacklogList(canEdit);
@@ -11889,6 +12195,22 @@
       // Unclosed sessions (login without logout).
       for (const open of openLoginByUser.values()) {
         events.push(makeSessionEvent(open, null));
+      }
+    }
+
+    // Generic app audit events (Users, Backlog, Money Transfers, Wise, Budget, Settings, etc.)
+    {
+      const raw = loadAppAuditEvents();
+      for (const e of Array.isArray(raw) ? raw : []) {
+        if (!e || typeof e !== 'object' || !e.at) continue;
+        const at = String(e.at);
+        const ms = toTimeMs(at) ?? 0;
+        const module = e.module ? String(e.module) : 'App';
+        const record = e.record ? String(e.record) : 'Record';
+        const user = e.user !== undefined ? String(e.user || '—') : '—';
+        const action = e.action !== undefined ? String(e.action || '—') : 'Modified';
+        const changes = Array.isArray(e.changes) ? e.changes : [];
+        events.push({ ms, at, module, record, user, action, changes });
       }
     }
 
@@ -13289,7 +13611,17 @@
     const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getWiseEurYear();
     const key = getWiseEurKeyForYear(resolvedYear);
     if (!key) return;
-    localStorage.setItem(key, JSON.stringify(entries || []));
+    const before = loadWiseEur(resolvedYear);
+    const safe = Array.isArray(entries) ? entries : [];
+    localStorage.setItem(key, JSON.stringify(safe));
+    appendCollectionAuditEvents({
+      module: 'Wise EUR',
+      year: resolvedYear,
+      beforeList: before,
+      afterList: safe,
+      idKeys: ['id', 'idTrack'],
+      recordLabelFn: (e) => String((e && (e.idTrack || e.id)) || '').trim(),
+    });
 
     // Budget updates are ledger-driven only.
     syncBudgetFromLedger(resolvedYear);
@@ -13369,7 +13701,17 @@
     const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getWiseUsdYear();
     const key = getWiseUsdKeyForYear(resolvedYear);
     if (!key) return;
-    localStorage.setItem(key, JSON.stringify(entries || []));
+    const before = loadWiseUsd(resolvedYear);
+    const safe = Array.isArray(entries) ? entries : [];
+    localStorage.setItem(key, JSON.stringify(safe));
+    appendCollectionAuditEvents({
+      module: 'Wise USD',
+      year: resolvedYear,
+      beforeList: before,
+      afterList: safe,
+      idKeys: ['id', 'idTrack'],
+      recordLabelFn: (e) => String((e && (e.idTrack || e.id)) || '').trim(),
+    });
 
     // Budget updates are ledger-driven only.
     syncBudgetFromLedger(resolvedYear);
@@ -13429,8 +13771,17 @@
   function saveGsLedgerVerifiedMap(map, year) {
     const key = getGsLedgerVerifiedKeyForYear(year);
     if (!key) return;
+    const prev = loadGsLedgerVerifiedMap(year);
     const safe = map && typeof map === 'object' ? map : {};
     localStorage.setItem(key, JSON.stringify(safe));
+    if (auditStableStringify(prev) !== auditStableStringify(safe)) {
+      appendAppAuditEvent(
+        `Ledger Verification (${Number(year)})`,
+        `Verified map ${Number(year)}`,
+        'Modified',
+        [{ field: 'Entries', from: `${Object.keys(prev || {}).length} item(s)`, to: `${Object.keys(safe || {}).length} item(s)` }]
+      );
+    }
   }
 
   function buildGsLedgerRowsForYear(year) {
@@ -15414,8 +15765,15 @@
     if (!id) return;
     const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
     const all = loadIncome(y);
+    const target = all.find((e) => e && e.id === id);
     const next = all.filter((e) => e && e.id !== id);
     saveIncome(next, y);
+    if (target) {
+      const tx = formatDate(target.date);
+      const remitter = String(target.remitter || '').trim();
+      const record = `${tx}${remitter ? ` — ${remitter}` : ''}`.trim() || String(id || 'Income');
+      appendAppAuditEvent(`Income (${y})`, record, 'Deleted', []);
+    }
   }
 
   const INCOME_COL_TYPES = {
@@ -21263,6 +21621,9 @@
       }
 
       if (budgetKey) localStorage.setItem(budgetKey, clone.innerHTML);
+      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Modified', [
+        { field: 'Table', from: '', to: 'Edited' },
+      ]);
     }
 
     function promptForBudgetYear(defaultYear) {
@@ -21299,6 +21660,7 @@
       const initial = buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows) || templateHtml;
       localStorage.setItem(key, initial);
       saveBudgetYears([y, ...years]);
+      appendAppAuditEvent(`Budget (${y})`, `Budget ${y}`, 'Created', []);
       openBudgetYear(y);
     }
 
@@ -22105,6 +22467,8 @@
 
       // If this was the active budget year, clear the active setting.
       if (loadActiveBudgetYear() === budgetYear) clearActiveBudgetYear();
+
+      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Deleted', []);
 
       // Exit edit mode and navigate away (staying on this page would recreate the year on reload).
       setSelectedRow(null);

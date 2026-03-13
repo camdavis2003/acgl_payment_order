@@ -16,6 +16,10 @@
   --danger-text: #991b1b;
   --chart-balance: #60a5fa;
   --chart-expenditures: #fdba74;
+  --z-popover: 30020;
+  --z-tooltip: 30040;
+  --z-tooltip-arrow: 30041;
+  --z-floating-tooltip: 30060;
 }
 
 html[data-theme="dark"] {
@@ -1392,7 +1396,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
   padding: 6px;
   min-width: 220px;
-  z-index: 10;
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1433,7 +1437,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-radius: 10px;
   padding: 6px;
   min-width: 170px;
-  z-index: 10;
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1466,7 +1470,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
-  z-index: 20;
+  z-index: var(--z-tooltip);
 }
 
 .budgetMenu__panel .actionLink[data-tooltip]:hover::before,
@@ -1481,7 +1485,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;
   border-left: 7px solid var(--border);
-  z-index: 21;
+  z-index: var(--z-tooltip-arrow);
 }
 
 .budgetTable tr.budgetRow--selected td {
@@ -1663,7 +1667,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
   box-sizing: border-box;
-  z-index: 30;
+  z-index: var(--z-tooltip);
 }
 
 .btn[data-tooltip]:hover::before,
@@ -1678,7 +1682,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-top: 7px solid var(--border);
-  z-index: 31;
+  z-index: var(--z-tooltip-arrow);
 }
 
 /* Tooltip popup for displayed Budget Numbers */
@@ -1691,7 +1695,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .budgetCode[data-tooltip]:hover::after,
 .budgetCode[data-tooltip]:focus-visible::after {
-  content: attr(data-tooltip);
+  content: none;
   position: absolute;
   left: 0;
   bottom: calc(100% + 10px);
@@ -1704,12 +1708,12 @@ input:focus, textarea:focus, select:focus, button:focus {
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
-  z-index: 40;
+  z-index: var(--z-tooltip);
 }
 
 .budgetCode[data-tooltip]:hover::before,
 .budgetCode[data-tooltip]:focus-visible::before {
-  content: '';
+  content: none;
   position: absolute;
   left: 18px;
   bottom: calc(100% + 4px);
@@ -1718,7 +1722,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-top: 7px solid var(--border);
-  z-index: 41;
+  z-index: var(--z-tooltip-arrow);
 }
 
 .btn--primary {
@@ -1930,13 +1934,18 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .rolesGrid__row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(160px, 1fr) repeat(5, minmax(0, 1fr));
   align-items: center;
   gap: 10px 12px;
 }
 
 .rolesGrid__label {
   font-weight: 800;
+}
+
+.rolesGrid__row--sub .rolesGrid__label--sub {
+  font-weight: 600;
+  padding-left: 16px;
 }
 
 .rolesGrid__check {
@@ -1978,7 +1987,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   white-space: normal;
   box-sizing: border-box;
-  z-index: 40;
+  z-index: var(--z-tooltip);
 }
 
 .rolesGrid__check[data-tooltip]:hover::before,
@@ -1992,7 +2001,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-bottom: 7px solid var(--border);
-  z-index: 41;
+  z-index: var(--z-tooltip-arrow);
 }
 
 /* Add User modal: use JS-driven tooltips so hovering does not expand scroll area */
@@ -2005,7 +2014,7 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .floatingTooltip {
   position: fixed;
-  z-index: 2005;
+  z-index: var(--z-floating-tooltip);
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--surface);
@@ -2154,6 +2163,7 @@ main.archive__grid > section.card > .settingsCardBody .table-wrap {
 /* Settings: Users table should fit without horizontal scroll */
 #usersTable {
   min-width: 0;
+  width: 100%;
   table-layout: auto;
 }
 
@@ -2231,35 +2241,55 @@ body.isTableResizing {
   min-width: 0;
 }
 
-/* Settings: Users table column sizing (keep Actions on one line) */
-#usersTable th:first-child,
-#usersTable td:first-child {
-  width: 220px;
+#usersTable th {
+  white-space: nowrap;
 }
 
-/* Settings: Bring permission columns closer together */
+#usersTable th,
+#usersTable td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#usersTable th:first-child,
+#usersTable td:first-child {
+  width: 1%;
+}
+
 #usersTable th:nth-child(2),
 #usersTable td:nth-child(2),
 #usersTable th:nth-child(3),
 #usersTable td:nth-child(3),
 #usersTable th:nth-child(4),
-#usersTable td:nth-child(4),
+#usersTable td:nth-child(4) {
+  width: 1%;
+}
+
 #usersTable th:nth-child(5),
 #usersTable td:nth-child(5) {
-  width: 96px;
-  padding-left: 8px;
-  padding-right: 8px;
+  width: 1%;
+  padding-right: 20px;
 }
 
-#usersTable th:nth-child(6),
-#usersTable td:nth-child(6) {
-  width: 130px;
-  padding-left: 8px;
-  padding-right: 8px;
+#usersTable th:nth-child(5) {
+  text-align: left;
 }
 
-#usersTable th:nth-child(6) {
-  white-space: normal;
+#usersTable td:nth-child(5) {
+  text-align: right;
+}
+
+#usersTable .usersTable__actionsHeader,
+#usersTable .usersTable__actions {
+  width: 190px;
+  max-width: 100%;
+}
+
+#usersTable .usersTable__actionsHeader {
+  display: block;
+  margin-left: auto;
+  text-align: left;
 }
 
 
@@ -2271,15 +2301,18 @@ body.isTableResizing {
   text-overflow: ellipsis;
 }
 
-/* Settings: Users table action buttons should wrap (no horizontal scroll) */
+/* Settings: action buttons may wrap to avoid colliding with adjacent columns. */
 #usersTable td.actions {
   white-space: nowrap;
+  text-align: right;
 }
 
 #usersTable .usersTable__actions {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
+  justify-content: flex-start;
+  margin-left: auto;
   gap: 8px;
 }
 
@@ -2667,88 +2700,44 @@ input[type='checkbox'].cb {
   text-align: left;
 }
 
-/* Money Transfers: center selected columns (MT No, MT Date, Verified, Names) */
-#moneyTransfersTable th:nth-child(2),
-#moneyTransfersTable td:nth-child(2),
-#moneyTransfersTable th:nth-child(3),
-#moneyTransfersTable td:nth-child(3),
-#moneyTransfersTable th:nth-child(4),
-#moneyTransfersTable td:nth-child(4),
-#moneyTransfersTable th:nth-child(5),
-#moneyTransfersTable td:nth-child(5),
-#moneyTransfersTable th:nth-child(6),
-#moneyTransfersTable td:nth-child(6),
-#moneyTransfersTable th:nth-child(7),
-#moneyTransfersTable td:nth-child(7) {
-  text-align: center;
-}
-
-/* Money Transfers: keep non-comment columns tight; give Comments the space */
+/* Money Transfers: responsive layout with Comments prioritized */
 #moneyTransfersTable {
-  table-layout: fixed;
+  width: 100%;
+  table-layout: auto;
 }
 
 #moneyTransfersTable th,
 #moneyTransfersTable td {
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-left: 6px;
+  padding-right: 6px;
+  text-align: center;
+  vertical-align: top;
 }
 
-/* Default: keep most columns on one line */
-#moneyTransfersTable td:not(:nth-child(8)),
-#moneyTransfersTable th:not(:nth-child(8)) {
+/* Keep compact columns tight so Comments can expand */
+#moneyTransfersTable th:not(:nth-child(8)):not(:nth-child(9)),
+#moneyTransfersTable td:not(:nth-child(8)):not(:nth-child(9)) {
+  width: 1%;
   white-space: nowrap;
 }
 
-/* Column widths (1=delete, 8=comments, 9=actions) */
-#moneyTransfersTable th:nth-child(1),
-#moneyTransfersTable td:nth-child(1) {
-  width: 44px;
-}
-
-#moneyTransfersTable th:nth-child(2),
-#moneyTransfersTable td:nth-child(2) {
-  width: 150px;
-}
-
-#moneyTransfersTable th:nth-child(3),
-#moneyTransfersTable td:nth-child(3) {
-  width: 120px;
-}
-
-/* Verified columns (4 and 6) */
-#moneyTransfersTable th:nth-child(4),
-#moneyTransfersTable td:nth-child(4),
-#moneyTransfersTable th:nth-child(6),
-#moneyTransfersTable td:nth-child(6) {
-  width: 95px;
-}
-
-/* Name columns (5 and 7) */
-#moneyTransfersTable th:nth-child(5),
-#moneyTransfersTable td:nth-child(5),
-#moneyTransfersTable th:nth-child(7),
-#moneyTransfersTable td:nth-child(7) {
-  width: 200px;
-}
-
-#moneyTransfersTable th:nth-child(9),
-#moneyTransfersTable td:nth-child(9) {
-  width: 120px;
-}
-
-/* Comments: allow wrapping */
+/* Comments grows with screen size and takes remaining room */
 #moneyTransfersTable th:nth-child(8),
 #moneyTransfersTable td:nth-child(8) {
+  width: 40%;
+  min-width: clamp(260px, 34vw, 620px);
+  text-align: left;
   white-space: normal;
   word-break: break-word;
 }
 
-/* Actions far right */
+/* Actions stays on the far right and remains button-friendly */
 #moneyTransfersTable th:nth-child(9),
-#moneyTransfersTable td:nth-child(9),
-#moneyTransfersTable td.actions {
-  text-align: right;
+#moneyTransfersTable td:nth-child(9) {
+  width: 1%;
+  min-width: 170px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 /* Description column (7th) stays left-aligned */
@@ -2897,6 +2886,16 @@ input[type='checkbox'].cb {
   inset: 0;
   display: none;
   z-index: 2500;
+  overscroll-behavior: contain;
+}
+
+html.is-modal-open,
+body.is-modal-open {
+  overflow: hidden;
+}
+
+body.is-modal-open {
+  overscroll-behavior: none;
 }
 
 .modal.is-open {
@@ -2975,9 +2974,41 @@ input[type='checkbox'].cb {
 .modal__body {
   padding: 14px;
   overflow: auto;
+  overscroll-behavior: contain;
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+}
+
+/* Add User modal: keep identity fields fixed and scroll only role selections */
+#createUserModal .modal__body {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#createUserForm {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#createUserForm > .grid {
+  flex: 0 0 auto;
+}
+
+#createUserForm > .rolesGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 12px;
 }
 
 .modal__poHeader {

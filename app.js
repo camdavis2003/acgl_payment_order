@@ -10242,7 +10242,7 @@
       }
 
       if (action === 'delete') {
-        if (!requireDeleteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
         const ok = window.confirm('Delete this reconciliation entry?');
         if (!ok) return;
         deleteReconciliationOrderById(id);
@@ -24197,7 +24197,7 @@
       }
     }
 
-    numberingForm.addEventListener('submit', (e) => {
+    numberingForm.addEventListener('submit', async (e) => {
       e.preventDefault();
 
       if (!requireSettingsEditAccess('Numbering is view only for your account.', 'settings_numbering')) return;
@@ -24252,10 +24252,14 @@
         if (firstMoneyTransferNumberInput) firstMoneyTransferNumberInput.value = String(next.mtNextSeq);
       }
 
-      // Close settings after save
-      {
-        const year = getActiveBudgetYear();
-        window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
+      // In WP shared mode, save is debounced; flush now so the value persists
+      // even if the user navigates right after saving.
+      if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
+        try {
+          await window.acglFmsWpFlushNow();
+        } catch {
+          // ignore
+        }
       }
     });
   }

@@ -22484,7 +22484,7 @@
     const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
     const secondTotalIndex = totals.length >= 2 ? allRows.indexOf(totals[1]) : -1;
 
-    /** @type {Array<{outCode:string, desc:string, exp:number, bal:number, section:'anticipated'|'budget'}>} */
+    /** @type {Array<{outCode:string, desc:string, approved:number, receipts:number, exp:number, bal:number, section:'anticipated'|'budget'}>} */
     const items = [];
     for (const tr of allRows) {
       if (tr.classList.contains('budgetTable__spacer')) continue;
@@ -22519,11 +22519,96 @@
         section = 'budget';
       }
 
-      items.push({ outCode, desc, exp, bal, section });
+      items.push({ outCode, desc, approved, receipts, exp, bal, section });
     }
 
     const anticipatedItems = items.filter((i) => i.section === 'anticipated');
     const budgetItems = items.filter((i) => i.section === 'budget');
+
+    function renderAnticipatedTotalsSummary() {
+      const anticipatedSection = root.querySelector('section[aria-label="Anticipated Values"]');
+      if (!anticipatedSection) return;
+
+      let summaryEl = root.querySelector('[data-budget-dashboard-anticipated-summary]');
+      if (!summaryEl) {
+        summaryEl = document.createElement('section');
+        summaryEl.className = 'budgetDash__summary';
+        summaryEl.setAttribute('data-budget-dashboard-anticipated-summary', '1');
+        summaryEl.setAttribute('aria-label', 'Anticipated totals');
+        root.insertBefore(summaryEl, anticipatedSection);
+      }
+
+      const anticipatedApproved = anticipatedItems.reduce((sum, it) => sum + Math.abs(Number(it && it.approved) || 0), 0);
+      const anticipatedReceipts = anticipatedItems.reduce((sum, it) => sum + Math.abs(Number(it && it.receipts) || 0), 0);
+      const anticipatedExpenditures = anticipatedItems.reduce((sum, it) => sum + Math.max(0, Number(it && it.exp) || 0), 0);
+      const anticipatedBalance = anticipatedItems.reduce((sum, it) => sum + (Number(it && it.bal) || 0), 0);
+
+      const budgetApproved = budgetItems.reduce((sum, it) => sum + Math.abs(Number(it && it.approved) || 0), 0);
+      const budgetReceipts = budgetItems.reduce((sum, it) => sum + Math.abs(Number(it && it.receipts) || 0), 0);
+      const budgetExpenditures = budgetItems.reduce((sum, it) => sum + Math.max(0, Number(it && it.exp) || 0), 0);
+
+      const totalBudget = anticipatedApproved + budgetApproved;
+      const totalReceipts = anticipatedReceipts + budgetReceipts;
+      const totalExpenditures = anticipatedExpenditures + budgetExpenditures;
+      const totalBalance = anticipatedBalance + budgetReceipts;
+      const totalRemaining = totalBalance - totalExpenditures;
+
+      const overspent = totalRemaining < 0;
+      const totalRemainingAbs = Math.abs(totalRemaining);
+      const balanceBase = Math.max(0, totalBalance);
+      const expendituresBase = Math.max(0, totalExpenditures);
+      const donutTotal = balanceBase + expendituresBase;
+      const { svg } = createDonutSvg(balanceBase, expendituresBase);
+      if (overspent) svg.classList.add('budgetDash__donut--overspent');
+
+      const remainingFundsPctOfBalance = balanceBase > 0
+        ? Math.round((Math.max(0, totalRemaining) / balanceBase) * 100)
+        : 0;
+      const remainingFundsStateClass = remainingFundsPctOfBalance <= 10
+        ? 'budgetDash__summaryFill--remainingLow'
+        : (remainingFundsPctOfBalance <= 25 ? 'budgetDash__summaryFill--remainingWarn' : 'budgetDash__summaryFill--remainingGood');
+      if (remainingFundsStateClass === 'budgetDash__summaryFill--remainingLow') svg.classList.add('budgetDash__donut--remainingLow');
+      else if (remainingFundsStateClass === 'budgetDash__summaryFill--remainingWarn') svg.classList.add('budgetDash__donut--remainingWarn');
+      else svg.classList.add('budgetDash__donut--remainingGood');
+
+      const maxMetric = Math.max(totalBudget, totalReceipts, totalExpenditures, Math.abs(totalRemaining), 1);
+      const pctBudget = Math.round((totalBudget / maxMetric) * 100);
+      const pctReceipts = Math.round((totalReceipts / maxMetric) * 100);
+      const pctExpenditures = Math.round((totalExpenditures / maxMetric) * 100);
+      const pctRemaining = Math.round((Math.abs(totalRemaining) / maxMetric) * 100);
+      const remainingApprovedBudget = totalBudget - totalExpenditures;
+      const remainingApprovedPct = Math.round((Math.max(0, remainingApprovedBudget) / Math.max(totalBudget, 1)) * 100);
+      const remainingApprovedFillClass = remainingApprovedPct <= 10
+        ? 'budgetDash__summaryFill--remainingLow'
+        : (remainingApprovedPct <= 25 ? 'budgetDash__summaryFill--remainingWarn' : 'budgetDash__summaryFill--remainingGood');
+
+      summaryEl.innerHTML = `
+        <article class="budgetDash__summaryCard">
+          <h3 class="budgetDash__summaryTitle budgetCode" tabindex="0" data-tooltip="This graph compares Total Balance and Total Expenditures. Total Balance = Total Anticipated Balance + Budget Receipts. Remaining Funds of Balance is shown in the bar graph as Total Balance - Total Expenditures.">Total Balance vs Total Expenditures</h3>
+          <div class="budgetDash__summaryDonut">
+            <div class="budgetDash__donutWrap">${svg.outerHTML}</div>
+            <div class="budgetDash__summaryLegend">
+              <span class="budgetDash__swatch budgetDash__swatch--a${remainingFundsStateClass === 'budgetDash__summaryFill--remainingLow' ? ' budgetDash__swatch--remainingLow' : (remainingFundsStateClass === 'budgetDash__summaryFill--remainingWarn' ? ' budgetDash__swatch--remainingWarn' : ' budgetDash__swatch--remainingGood')}" aria-hidden="true"></span>
+              <span class="budgetCode" tabindex="0" data-tooltip="Total Balance = Total Anticipated Balance + Budget Receipts. Current value: ${formatEuro(balanceBase)}.">Total Balance (${donutTotal > 0 ? pct(balanceBase, donutTotal) : 0}%)</span>
+              <span class="budgetDash__swatch budgetDash__swatch--b" aria-hidden="true"></span>
+              <span class="budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro). Current value: ${formatEuro(expendituresBase)}.">Total Expenditures (${donutTotal > 0 ? pct(expendituresBase, donutTotal) : 0}%)</span>
+            </div>
+          </div>
+        </article>
+        <article class="budgetDash__summaryCard">
+          <h3 class="budgetDash__summaryTitle">Total Approved Budget</h3>
+          <div class="budgetDash__summaryBars">
+            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Approved Budget = Total Anticipated Values (Amount Approved Euro) + Total Budget, Receipts, Expenditures (Amount Approved Euro).">Total Approved Budget</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Approved Budget = Total Anticipated Values (Amount Approved Euro) + Total Budget, Receipts, Expenditures (Amount Approved Euro).">${escapeHtml(formatEuro(totalBudget))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--budget" style="width:${pctBudget}%;"></span></span></div>
+            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Remaining Approved Budget = Total Approved Budget - Total Expenditures.">Remaining Approved Budget</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Remaining Approved Budget = Total Approved Budget - Total Expenditures.">${escapeHtml(formatEuro(remainingApprovedBudget))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill ${remainingApprovedFillClass}" style="width:${remainingApprovedPct}%;"></span></span></div>
+            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Receipts = Total Anticipated Values (Receipts Euro) + Total Budget, Receipts, Expenditures (Receipts Euro).">Total Receipts</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Receipts = Total Anticipated Values (Receipts Euro) + Total Budget, Receipts, Expenditures (Receipts Euro).">${escapeHtml(formatEuro(totalReceipts))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--receipts" style="width:${pctReceipts}%;"></span></span></div>
+            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro).">Total Expenditures</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro).">${escapeHtml(formatEuro(totalExpenditures))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--expenditures" style="width:${pctExpenditures}%;"></span></span></div>
+            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Balance - Total Expenditures.">Remaining Funds of Balance</span><span class="budgetDash__summaryValue budgetCode${overspent ? ' is-negative' : ''}" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Balance - Total Expenditures.">${escapeHtml(formatEuro(totalRemaining))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill ${remainingFundsStateClass}" style="width:${remainingFundsPctOfBalance}%;"></span></span></div>
+          </div>
+        </article>
+      `.trim();
+    }
+
+    renderAnticipatedTotalsSummary();
 
     const anticipatedCount = anticipatedItems.length;
     const budgetCount = budgetItems.length;
@@ -22551,14 +22636,21 @@
       const labelA = isOverspent ? 'Overspent' : 'Balance';
       const labelB = 'Expenditures';
 
-      const { svg, total, meta } = createDonutSvg(balVal, expVal);
+      if (isOverspent) card.classList.add('budgetDash__card--overspent');
 
-      function createMetricBlock(side, valueText, percentText) {
+      const { svg, total, meta } = createDonutSvg(balVal, expVal);
+      if (isOverspent) svg.classList.add('budgetDash__donut--overspent');
+
+      function createMetricBlock(side, valueText, percentText, valueTooltip) {
         const el = document.createElement('div');
         el.className = `budgetDash__metric budgetDash__metric--${side}`;
         const valEl = document.createElement('div');
-        valEl.className = 'budgetDash__metricVal';
+        valEl.className = 'budgetDash__metricVal budgetCode';
         valEl.textContent = valueText;
+        if (valueTooltip) {
+          valEl.setAttribute('tabindex', '0');
+          valEl.setAttribute('data-tooltip', valueTooltip);
+        }
         const pctEl = document.createElement('div');
         pctEl.className = 'budgetDash__metricPct';
         pctEl.textContent = percentText;
@@ -22575,8 +22667,15 @@
       const rightCol = document.createElement('div');
       rightCol.className = 'budgetDash__metricCol';
 
-      const balBlock = createMetricBlock(balanceSide === 'left' ? 'left' : 'right', formatEuro(isOverspent ? -balVal : balVal), `${pct(balVal, total)}%`);
-      const expBlock = createMetricBlock(expSide === 'left' ? 'left' : 'right', formatEuro(expVal), `${pct(expVal, total)}%`);
+      const receiptsVal = Number(item.receipts) || 0;
+      const balanceTooltip = isOverspent
+        ? `Overspent = Receipts Euro (${formatEuro(receiptsVal)}) - Expenditures Euro (${formatEuro(expVal)}). Displayed value: ${formatEuro(-balVal)}.`
+        : `Balance = Receipts Euro (${formatEuro(receiptsVal)}) - Expenditures Euro (${formatEuro(expVal)}). Displayed value: ${formatEuro(balVal)}.`;
+      const expendituresTooltip = `Expenditures = Expenditures Euro for this row. Displayed value: ${formatEuro(expVal)}.`;
+
+      const balBlock = createMetricBlock(balanceSide === 'left' ? 'left' : 'right', formatEuro(isOverspent ? -balVal : balVal), `${pct(balVal, total)}%`, balanceTooltip);
+      const expBlock = createMetricBlock(expSide === 'left' ? 'left' : 'right', formatEuro(expVal), `${pct(expVal, total)}%`, expendituresTooltip);
+      if (isOverspent) balBlock.valEl.classList.add('is-negative');
 
       function sortKeyForAngle(angleRad) {
         // Smaller y first (top). In screen coords, y = sin(angle).
@@ -22622,7 +22721,7 @@
       const legend = document.createElement('div');
       legend.className = 'budgetDash__legend';
       legend.innerHTML = `
-        <span class="budgetDash__swatch budgetDash__swatch--a" aria-hidden="true"></span>
+        <span class="budgetDash__swatch budgetDash__swatch--a${isOverspent ? ' budgetDash__swatch--overspent' : ''}" aria-hidden="true"></span>
         <span>${labelA}</span>
         <span class="budgetDash__swatch budgetDash__swatch--b" aria-hidden="true"></span>
         <span>${labelB}</span>

@@ -22557,8 +22557,10 @@
       const totalRemainingAbs = Math.abs(totalRemaining);
       const balanceBase = Math.max(0, totalBalance);
       const expendituresBase = Math.max(0, totalExpenditures);
-      const donutTotal = balanceBase + expendituresBase;
-      const { svg } = createDonutSvg(balanceBase, expendituresBase);
+      const balanceLegendLabel = overspent ? 'Overspent' : 'Total Balance';
+      const balanceLegendValue = overspent ? totalRemainingAbs : balanceBase;
+      const donutTotal = balanceLegendValue + expendituresBase;
+      const { svg } = createDonutSvg(balanceLegendValue, expendituresBase);
       if (overspent) svg.classList.add('budgetDash__donut--overspent');
 
       const remainingFundsPctOfBalance = balanceBase > 0
@@ -22567,9 +22569,6 @@
       const remainingFundsStateClass = remainingFundsPctOfBalance <= 10
         ? 'budgetDash__summaryFill--remainingLow'
         : (remainingFundsPctOfBalance <= 25 ? 'budgetDash__summaryFill--remainingWarn' : 'budgetDash__summaryFill--remainingGood');
-      if (remainingFundsStateClass === 'budgetDash__summaryFill--remainingLow') svg.classList.add('budgetDash__donut--remainingLow');
-      else if (remainingFundsStateClass === 'budgetDash__summaryFill--remainingWarn') svg.classList.add('budgetDash__donut--remainingWarn');
-      else svg.classList.add('budgetDash__donut--remainingGood');
 
       const maxMetric = Math.max(totalBudget, totalReceipts, totalExpenditures, Math.abs(totalRemaining), 1);
       const pctBudget = Math.round((totalBudget / maxMetric) * 100);
@@ -22588,8 +22587,8 @@
           <div class="budgetDash__summaryDonut">
             <div class="budgetDash__donutWrap">${svg.outerHTML}</div>
             <div class="budgetDash__summaryLegend">
-              <span class="budgetDash__swatch budgetDash__swatch--a${remainingFundsStateClass === 'budgetDash__summaryFill--remainingLow' ? ' budgetDash__swatch--remainingLow' : (remainingFundsStateClass === 'budgetDash__summaryFill--remainingWarn' ? ' budgetDash__swatch--remainingWarn' : ' budgetDash__swatch--remainingGood')}" aria-hidden="true"></span>
-              <span class="budgetCode" tabindex="0" data-tooltip="Total Balance = Total Anticipated Balance + Budget Receipts. Current value: ${formatEuro(balanceBase)}.">Total Balance (${donutTotal > 0 ? pct(balanceBase, donutTotal) : 0}%)</span>
+              <span class="budgetDash__swatch budgetDash__swatch--a${overspent ? ' budgetDash__swatch--overspent' : ''}" aria-hidden="true"></span>
+              <span class="budgetCode" tabindex="0" data-tooltip="${overspent ? `Overspent = Total Expenditures (${formatEuro(expendituresBase)}) - Total Balance (${formatEuro(balanceBase)}). Current value: ${formatEuro(balanceLegendValue)}.` : `Total Balance = Total Anticipated Balance + Budget Receipts. Current value: ${formatEuro(balanceLegendValue)}.`}">${balanceLegendLabel} (${donutTotal > 0 ? pct(balanceLegendValue, donutTotal) : 0}%)</span>
               <span class="budgetDash__swatch budgetDash__swatch--b" aria-hidden="true"></span>
               <span class="budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro). Current value: ${formatEuro(expendituresBase)}.">Total Expenditures (${donutTotal > 0 ? pct(expendituresBase, donutTotal) : 0}%)</span>
             </div>

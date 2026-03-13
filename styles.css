@@ -517,6 +517,11 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   gap: 12px;
 }
 
+.budgetDash__summaryDonut .budgetDash__donutWrap {
+  width: 158px;
+  height: 158px;
+}
+
 .budgetDash__summaryLegend {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -547,6 +552,9 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
 .budgetDash__summaryValue {
   font-variant-numeric: tabular-nums;
   font-weight: 800;
+  font-size: clamp(0.8rem, 0.9vw, 0.94rem);
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .budgetDash__summaryValue.is-negative {
@@ -607,6 +615,7 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   margin: 0 0 12px;
   font-size: 2.4rem;
   font-weight: 900;
+  text-align: center;
 }
 
 .budgetDash__topbar {
@@ -672,6 +681,7 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   border-radius: 14px;
   background: var(--surface);
   padding: 14px;
+  overflow: hidden;
 }
 
 .budgetDash__title {
@@ -680,14 +690,19 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   line-height: 1.2;
   font-weight: 800;
   text-align: center;
+  min-height: calc(1.2em * 2);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .budgetDash__chartRow {
   display: grid;
-  grid-template-columns: 1fr 170px 1fr;
+  grid-template-columns: 1fr 124px 1fr;
   align-items: center;
   gap: 10px;
   position: relative;
+  overflow: hidden;
 }
 
 .budgetDash__metricCol {
@@ -722,17 +737,21 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
 }
 
 .budgetDash__metric--left {
-  align-items: flex-start;
-  text-align: left;
-}
-
-.budgetDash__metric--right {
   align-items: flex-end;
   text-align: right;
 }
 
+.budgetDash__metric--right {
+  align-items: flex-start;
+  text-align: left;
+}
+
 .budgetDash__metricVal {
   font-variant-numeric: tabular-nums;
+  font-size: clamp(0.78rem, 0.96vw, 0.98rem);
+  line-height: 1.15;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .budgetDash__metricVal.is-negative {
@@ -745,8 +764,8 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
 }
 
 .budgetDash__donutWrap {
-  width: 170px;
-  height: 170px;
+  width: 124px;
+  height: 124px;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -30,7 +30,7 @@
                 <div class="headerTitleBlock">
                   <h1 data-mt-builder-title>Money Transfer</h1>
                   <p class="subhead" data-mt-builder-subhead>
-                    Money Transfer entries for the selected date range.
+                    Money Transfer date not set.
                   </p>
                   <a
                     id="mtBuilderBackToTransfersLink"
@@ -73,14 +73,12 @@
               </h2>
               <div
                 class="mtBuilderRangeInline"
-                aria-label="Money Transfer date range"
+                aria-label="Money Transfer date"
               >
-                <label for="mtBuilderRangeStart">Start</label>
-                <input id="mtBuilderRangeStart" type="date" />
-                <label for="mtBuilderRangeEnd">End</label>
-                <input id="mtBuilderRangeEnd" type="date" />
+                <label for="mtBuilderDate">MT Date</label>
+                <input id="mtBuilderDate" type="date" />
                 <div
-                  id="mtBuilderRangeInlineError"
+                  id="mtBuilderDateInlineError"
                   class="error"
                   aria-live="polite"
                 ></div>
@@ -147,8 +145,8 @@
                 aria-describedby="mt-builder-help"
               >
                 <caption id="mt-builder-help" class="sr-only">
-                  Ledger-like list filtered to the selected date range. Only
-                  positive income entries are shown.
+                  Ledger-like list of selected eligible income entries. Only
+                  positive income entries can be selected.
                 </caption>
                 <thead>
                   <tr>
@@ -176,7 +174,7 @@
             </div>
 
             <div id="mtBuilderEmptyState" class="empty" hidden>
-              No ledger entries for this date range.
+              No selected income entries yet.
             </div>
 
             <div class="field field--span2">
@@ -232,7 +230,7 @@
           </div>
 
           <div id="mtEntrySelectEmptyState" class="empty" hidden>
-            No eligible income transactions found for this date range.
+            No eligible income transactions found.
           </div>
         </div>
 

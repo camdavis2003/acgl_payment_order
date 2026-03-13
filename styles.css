@@ -3111,6 +3111,11 @@ input[type='checkbox'].cb {
   color: var(--primary-bg);
 }
 
+/* Ledger: highlight eligible income rows that are missing an MT number */
+#gsLedgerTable tr.gsLedgerRow--missingMt td {
+  background: #fff6bf;
+}
+
 /* Keep Ledger totals visually distinct while sticky */
 #gsLedgerTable tfoot td,
 #gsLedgerTable tfoot th {

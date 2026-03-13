@@ -13787,8 +13787,6 @@
 
         const docNrHtml = poNoHtml || mtNoHtml;
 
-        const checked = r.verified ? 'checked' : '';
-        const verifyDisabled = canVerify ? '' : 'disabled';
         return `
           <tr data-ledger-id="${ledgerId}" class="${rowClasses.join(' ')}">
             <td>${date}</td>
@@ -13798,9 +13796,6 @@
             <td>${docNrHtml}</td>
             <td class="num">${euro}</td>
             <td class="num">${usd}</td>
-            <td class="num">
-              <input type="checkbox" data-ledger-verify="1" data-ledger-id="${ledgerId}" aria-label="Verified" ${checked} ${verifyDisabled} />
-            </td>
             <td>${statusHtml}</td>
             <td>${details}</td>
           </tr>

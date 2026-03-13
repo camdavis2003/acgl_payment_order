@@ -3005,11 +3005,11 @@ input[type='checkbox'].cb {
   text-align: center;
 }
 
-/* Creditor/Debtor (4th) and Details (10th) stay left-aligned */
+/* Creditor/Debtor (4th) and Details (9th) stay left-aligned */
 #gsLedgerTable th:nth-child(4),
 #gsLedgerTable td:nth-child(4),
-#gsLedgerTable th:nth-child(10),
-#gsLedgerTable td:nth-child(10) {
+#gsLedgerTable th:nth-child(9),
+#gsLedgerTable td:nth-child(9) {
   text-align: left;
 }
 

@@ -2890,7 +2890,8 @@ input[type='checkbox'].cb {
 /* Money Transfers: responsive layout with Comments prioritized */
 #moneyTransfersTable {
   width: 100%;
-  table-layout: auto;
+  min-width: 0;
+  table-layout: fixed;
 }
 
 #moneyTransfersTable th,
@@ -2899,32 +2900,117 @@ input[type='checkbox'].cb {
   padding-right: 6px;
   text-align: center;
   vertical-align: top;
-}
-
-/* Keep compact columns tight so Comments can expand */
-#moneyTransfersTable th:not(:nth-child(8)):not(:nth-child(9)),
-#moneyTransfersTable td:not(:nth-child(8)):not(:nth-child(9)) {
-  width: 1%;
-  white-space: nowrap;
-}
-
-/* Comments grows with screen size and takes remaining room */
-#moneyTransfersTable th:nth-child(8),
-#moneyTransfersTable td:nth-child(8) {
-  width: 40%;
-  min-width: clamp(260px, 34vw, 620px);
-  text-align: left;
   white-space: normal;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-/* Actions stays on the far right and remains button-friendly */
+/* Fixed distribution keeps columns inside the container width. */
+#moneyTransfersTable th:nth-child(1),
+#moneyTransfersTable td:nth-child(1) { width: 3%; }
+#moneyTransfersTable th:nth-child(2),
+#moneyTransfersTable td:nth-child(2) { width: 10%; }
+#moneyTransfersTable th:nth-child(3),
+#moneyTransfersTable td:nth-child(3) { width: 9%; }
+#moneyTransfersTable th:nth-child(4),
+#moneyTransfersTable td:nth-child(4) { width: 7%; }
+#moneyTransfersTable th:nth-child(5),
+#moneyTransfersTable td:nth-child(5) { width: 12%; }
+#moneyTransfersTable th:nth-child(6),
+#moneyTransfersTable td:nth-child(6) { width: 7%; }
+#moneyTransfersTable th:nth-child(7),
+#moneyTransfersTable td:nth-child(7) { width: 12%; }
+#moneyTransfersTable th:nth-child(8),
+#moneyTransfersTable td:nth-child(8) {
+  width: 24%;
+  text-align: left;
+}
 #moneyTransfersTable th:nth-child(9),
 #moneyTransfersTable td:nth-child(9) {
-  width: 1%;
-  min-width: 170px;
+  width: 16%;
   text-align: center;
+}
+
+#moneyTransfersTable td.actions {
   white-space: nowrap;
+}
+
+#moneyTransfersTable td.actions .btn {
+  display: inline-flex;
+  width: auto;
+  min-width: 0;
+}
+
+#moneyTransfersTable td.actions .btn + .btn {
+  margin-left: 4px;
+  margin-top: 0;
+}
+
+@media (max-width: 1200px) {
+  #moneyTransfersTable th,
+  #moneyTransfersTable td {
+    padding-left: 4px;
+    padding-right: 4px;
+    font-size: 0.88rem;
+  }
+
+  #moneyTransfersTable th:nth-child(5),
+  #moneyTransfersTable td:nth-child(5),
+  #moneyTransfersTable th:nth-child(7),
+  #moneyTransfersTable td:nth-child(7) {
+    width: 11%;
+  }
+
+  #moneyTransfersTable th:nth-child(8),
+  #moneyTransfersTable td:nth-child(8) {
+    width: 25%;
+  }
+
+  #moneyTransfersTable th:nth-child(9),
+  #moneyTransfersTable td:nth-child(9) {
+    width: 17%;
+  }
+}
+
+@media (max-width: 900px) {
+  #moneyTransfersTable th,
+  #moneyTransfersTable td { font-size: 0.83rem; }
+
+  #moneyTransfersTable th:nth-child(8),
+  #moneyTransfersTable td:nth-child(8) {
+    width: 27%;
+  }
+
+  #moneyTransfersTable th:nth-child(9),
+  #moneyTransfersTable td:nth-child(9) {
+    width: 17%;
+  }
+
+  #moneyTransfersTable th:nth-child(5),
+  #moneyTransfersTable td:nth-child(5),
+  #moneyTransfersTable th:nth-child(7),
+  #moneyTransfersTable td:nth-child(7) {
+    width: 10%;
+  }
+}
+
+@media (max-width: 760px) {
+  #moneyTransfersTable th,
+  #moneyTransfersTable td {
+    padding-left: 3px;
+    padding-right: 3px;
+    font-size: 0.8rem;
+  }
+
+  #moneyTransfersTable th:nth-child(8),
+  #moneyTransfersTable td:nth-child(8) {
+    width: 28%;
+    max-width: none;
+  }
+
+  #moneyTransfersTable td:nth-child(9) .btn {
+    white-space: nowrap;
+  }
 }
 
 /* Description column (7th) stays left-aligned */

@@ -1136,8 +1136,6 @@
 
   const STRICT_EXPLICIT_PERMISSION_KEYS = new Set([
     'income_bankeur',
-    'ledger_wiseeur',
-    'ledger_wiseusd',
     'ledger_money_transfers',
     'orders_itemize',
     'orders_reconciliation',

@@ -22504,9 +22504,6 @@
 
       const approved = parseMoney(tds[3].textContent);
       const receipts = parseMoney(tds[4].textContent);
-      const total = Math.abs(approved) + Math.abs(receipts);
-      const hasAny = total !== 0 || exp !== 0 || bal !== 0;
-      if (!hasAny) continue;
 
       const rowIndex = allRows.indexOf(tr);
       /** @type {'anticipated'|'budget'} */
@@ -22546,22 +22543,25 @@
       const budgetApproved = budgetItems.reduce((sum, it) => sum + Math.abs(Number(it && it.approved) || 0), 0);
       const budgetReceipts = budgetItems.reduce((sum, it) => sum + Math.abs(Number(it && it.receipts) || 0), 0);
       const budgetExpenditures = budgetItems.reduce((sum, it) => sum + Math.max(0, Number(it && it.exp) || 0), 0);
+      const budgetBalance = budgetItems.reduce((sum, it) => sum + (Number(it && it.bal) || 0), 0);
 
       const totalBudget = anticipatedApproved + budgetApproved;
       const totalReceipts = anticipatedReceipts + budgetReceipts;
       const totalExpenditures = anticipatedExpenditures + budgetExpenditures;
-      const totalBalance = anticipatedBalance + budgetReceipts;
-      const totalRemaining = totalBalance - totalExpenditures;
+      const totalBalance = anticipatedBalance + budgetBalance;
+      const totalRemaining = anticipatedBalance + budgetReceipts - budgetExpenditures;
 
       const overspent = totalRemaining < 0;
       const totalRemainingAbs = Math.abs(totalRemaining);
       const balanceBase = Math.max(0, totalBalance);
       const expendituresBase = Math.max(0, totalExpenditures);
-      const balanceLegendLabel = overspent ? 'Overspent' : 'Total Balance';
-      const balanceLegendValue = overspent ? totalRemainingAbs : balanceBase;
+      const summaryDonutOverspent = totalBalance < totalExpenditures;
+      const summaryDonutDeficit = Math.abs(totalBalance - totalExpenditures);
+      const balanceLegendLabel = summaryDonutOverspent ? 'Overspent' : 'Total Balance';
+      const balanceLegendValue = summaryDonutOverspent ? summaryDonutDeficit : balanceBase;
       const donutTotal = balanceLegendValue + expendituresBase;
       const { svg } = createDonutSvg(balanceLegendValue, expendituresBase);
-      if (overspent) svg.classList.add('budgetDash__donut--overspent');
+      if (summaryDonutOverspent) svg.classList.add('budgetDash__donut--overspent');
 
       const remainingFundsPctOfBalance = balanceBase > 0
         ? Math.round((Math.max(0, totalRemaining) / balanceBase) * 100)
@@ -22583,12 +22583,12 @@
 
       summaryEl.innerHTML = `
         <article class="budgetDash__summaryCard">
-          <h3 class="budgetDash__summaryTitle budgetCode" tabindex="0" data-tooltip="This graph compares Total Balance and Total Expenditures. Total Balance = Total Anticipated Balance + Budget Receipts. Remaining Funds of Balance is shown in the bar graph as Total Balance - Total Expenditures.">Total Balance vs Total Expenditures</h3>
+          <h3 class="budgetDash__summaryTitle budgetCode" tabindex="0" data-tooltip="This graph compares Total Balance and Total Expenditures. Total Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Balance Euro). Remaining Funds of Balance is shown in the bar graph as Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Receipts Euro) - Total Budget, Receipts, Expenditures (Expenditures Euro).">Total Balance vs Total Expenditures</h3>
           <div class="budgetDash__summaryDonut">
             <div class="budgetDash__donutWrap">${svg.outerHTML}</div>
             <div class="budgetDash__summaryLegend">
-              <span class="budgetDash__swatch budgetDash__swatch--a${overspent ? ' budgetDash__swatch--overspent' : ''}" aria-hidden="true"></span>
-              <span class="budgetCode" tabindex="0" data-tooltip="${overspent ? `Overspent = Total Expenditures (${formatEuro(expendituresBase)}) - Total Balance (${formatEuro(balanceBase)}). Current value: ${formatEuro(balanceLegendValue)}.` : `Total Balance = Total Anticipated Balance + Budget Receipts. Current value: ${formatEuro(balanceLegendValue)}.`}">${balanceLegendLabel} (${donutTotal > 0 ? pct(balanceLegendValue, donutTotal) : 0}%)</span>
+              <span class="budgetDash__swatch budgetDash__swatch--a${summaryDonutOverspent ? ' budgetDash__swatch--overspent' : ''}" aria-hidden="true"></span>
+              <span class="budgetCode" tabindex="0" data-tooltip="${summaryDonutOverspent ? `Overspent = Total Expenditures (${formatEuro(expendituresBase)}) - Total Balance (${formatEuro(balanceBase)}). Current value: ${formatEuro(balanceLegendValue)}.` : `Total Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Balance Euro). Current value: ${formatEuro(balanceLegendValue)}.`}">${balanceLegendLabel} (${donutTotal > 0 ? pct(balanceLegendValue, donutTotal) : 0}%)</span>
               <span class="budgetDash__swatch budgetDash__swatch--b" aria-hidden="true"></span>
               <span class="budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro). Current value: ${formatEuro(expendituresBase)}.">Total Expenditures (${donutTotal > 0 ? pct(expendituresBase, donutTotal) : 0}%)</span>
             </div>
@@ -22601,7 +22601,7 @@
             <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Remaining Approved Budget = Total Approved Budget - Total Expenditures.">Remaining Approved Budget</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Remaining Approved Budget = Total Approved Budget - Total Expenditures.">${escapeHtml(formatEuro(remainingApprovedBudget))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill ${remainingApprovedFillClass}" style="width:${remainingApprovedPct}%;"></span></span></div>
             <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Receipts = Total Anticipated Values (Receipts Euro) + Total Budget, Receipts, Expenditures (Receipts Euro).">Total Receipts</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Receipts = Total Anticipated Values (Receipts Euro) + Total Budget, Receipts, Expenditures (Receipts Euro).">${escapeHtml(formatEuro(totalReceipts))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--receipts" style="width:${pctReceipts}%;"></span></span></div>
             <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro).">Total Expenditures</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro).">${escapeHtml(formatEuro(totalExpenditures))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--expenditures" style="width:${pctExpenditures}%;"></span></span></div>
-            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Balance - Total Expenditures.">Remaining Funds of Balance</span><span class="budgetDash__summaryValue budgetCode${overspent ? ' is-negative' : ''}" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Balance - Total Expenditures.">${escapeHtml(formatEuro(totalRemaining))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill ${remainingFundsStateClass}" style="width:${remainingFundsPctOfBalance}%;"></span></span></div>
+            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Receipts Euro) - Total Budget, Receipts, Expenditures (Expenditures Euro).">Remaining Funds of Balance</span><span class="budgetDash__summaryValue budgetCode${overspent ? ' is-negative' : ''}" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Receipts Euro) - Total Budget, Receipts, Expenditures (Expenditures Euro).">${escapeHtml(formatEuro(totalRemaining))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill ${remainingFundsStateClass}" style="width:${remainingFundsPctOfBalance}%;"></span></span></div>
           </div>
         </article>
       `.trim();

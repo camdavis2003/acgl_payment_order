@@ -8169,11 +8169,11 @@
     };
   }
 
-  function initPoProgressStatusTooltips(progressRoot) {
-    if (!progressRoot || progressRoot.dataset.poProgressTooltipBound) return;
-    progressRoot.dataset.poProgressTooltipBound = '1';
+  function initUnifiedHoverTooltips() {
+    if (window.__acglUnifiedHoverTooltipBound) return;
+    window.__acglUnifiedHoverTooltipBound = true;
 
-    const TOOLTIP_SELECTOR = '[data-po-tooltip]';
+    const TOOLTIP_SELECTOR = '[data-tooltip], [data-po-tooltip], [data-role-tooltip], [title]';
     const margin = 12;
     const gap = 10;
     let tooltipEl = null;
@@ -8192,128 +8192,61 @@
 
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
-    const positionTooltipFor = (target) => {
-      if (!target || !document.contains(target)) return;
-      const text = String(target.getAttribute('data-po-tooltip') || '').trim();
-      if (!text) return;
+    const normalizeTooltipText = (text) => String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-      const el = ensureTooltipEl();
-      el.textContent = text;
-      el.style.display = 'block';
-      el.style.visibility = 'hidden';
-      el.style.left = '0px';
-      el.style.top = '0px';
-
-      const targetRect = target.getBoundingClientRect();
-
-      // Measure tooltip with the new content
-      const tipRect = el.getBoundingClientRect();
-      const maxLeft = window.innerWidth - margin - tipRect.width;
-      const idealLeft = targetRect.left + (targetRect.width / 2) - (tipRect.width / 2);
-      const left = clamp(idealLeft, margin, maxLeft);
-
-      const belowTop = targetRect.bottom + gap;
-      const aboveTop = targetRect.top - gap - tipRect.height;
-      const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
-      const fitsAbove = aboveTop >= margin;
-
-      let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
-      top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
-
-      el.style.left = `${Math.round(left)}px`;
-      el.style.top = `${Math.round(top)}px`;
-      el.style.visibility = 'visible';
+    const isBackLinkTarget = (target) => {
+      if (!target) return false;
+      const label = String((target.textContent || target.getAttribute('aria-label') || '')).trim();
+      return /^\s*(?:←\s*)?back to\b/i.test(label);
     };
 
-    const scheduleReposition = () => {
-      if (!activeTarget) return;
-      if (rafId) return;
-      rafId = window.requestAnimationFrame(() => {
-        rafId = 0;
-        positionTooltipFor(activeTarget);
-      });
+    const isAllowedButtonTooltip = (target) => {
+      if (!target || target.tagName !== 'BUTTON') return true;
+      if (target.id === 'budgetSetActiveBtn') return true;
+      if (target.hasAttribute('data-allow-tooltip')) return true;
+      return false;
     };
 
-    const hide = () => {
-      activeTarget = null;
-      if (rafId) {
-        window.cancelAnimationFrame(rafId);
-        rafId = 0;
+    const getTooltipText = (target) => {
+      if (!target) return '';
+      if (isBackLinkTarget(target)) return '';
+      if (!isAllowedButtonTooltip(target)) return '';
+
+      let text = '';
+      if (target.hasAttribute('data-tooltip')) text = String(target.getAttribute('data-tooltip') || '').trim();
+      else if (target.hasAttribute('data-po-tooltip')) text = String(target.getAttribute('data-po-tooltip') || '').trim();
+      else if (target.hasAttribute('data-role-tooltip')) text = String(target.getAttribute('data-role-tooltip') || '').trim();
+      else if (target.hasAttribute('title')) text = String(target.getAttribute('title') || '').trim();
+
+      if (!text) return '';
+
+      const label = String(target.getAttribute('aria-label') || target.textContent || '').trim();
+      if (normalizeTooltipText(text) && normalizeTooltipText(text) === normalizeTooltipText(label)) return '';
+      return text;
+    };
+
+    const suppressNativeTitle = (target) => {
+      if (!target || !target.hasAttribute || !target.hasAttribute('title')) return;
+      if (!target.dataset.unifiedTooltipTitleBackup) {
+        target.dataset.unifiedTooltipTitleBackup = String(target.getAttribute('title') || '');
       }
-      if (tooltipEl) {
-        tooltipEl.style.display = 'none';
-        tooltipEl.textContent = '';
-      }
+      target.removeAttribute('title');
     };
 
-    hidePoProgressTooltip = hide;
-
-    const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
-
-    progressRoot.addEventListener('mouseover', (e) => {
-      const t = findTarget(e.target);
-      if (!t) return;
-      if (activeTarget === t) return;
-      activeTarget = t;
-      positionTooltipFor(activeTarget);
-    });
-
-    progressRoot.addEventListener('mouseout', (e) => {
-      if (!activeTarget) return;
-      const from = findTarget(e.target);
-      if (!from || from !== activeTarget) return;
-      const to = e.relatedTarget;
-      if (to && from.contains && from.contains(to)) return;
-      hide();
-    });
-
-    progressRoot.addEventListener('focusin', (e) => {
-      const t = findTarget(e.target);
-      if (!t) return;
-      activeTarget = t;
-      positionTooltipFor(activeTarget);
-    });
-
-    progressRoot.addEventListener('focusout', (e) => {
-      const from = findTarget(e.target);
-      if (!from) return;
-      hide();
-    });
-
-    if (!window.__acglPoProgressTooltipResizeBound) {
-      window.__acglPoProgressTooltipResizeBound = true;
-      window.addEventListener('resize', scheduleReposition);
-      window.addEventListener('scroll', scheduleReposition, { passive: true });
-    }
-  }
-
-  function initBudgetCodeHoverTooltips() {
-    if (window.__acglBudgetCodeTooltipBound) return;
-    window.__acglBudgetCodeTooltipBound = true;
-
-    const TOOLTIP_SELECTOR = '.budgetCode[data-tooltip]';
-    const margin = 12;
-    const gap = 10;
-    let tooltipEl = null;
-    let activeTarget = null;
-    let rafId = 0;
-
-    const ensureTooltipEl = () => {
-      if (tooltipEl) return tooltipEl;
-      tooltipEl = document.createElement('div');
-      tooltipEl.className = 'floatingTooltip';
-      tooltipEl.setAttribute('role', 'tooltip');
-      tooltipEl.style.display = 'none';
-      document.body.appendChild(tooltipEl);
-      return tooltipEl;
+    const restoreNativeTitle = (target) => {
+      if (!target || !target.dataset) return;
+      if (!Object.prototype.hasOwnProperty.call(target.dataset, 'unifiedTooltipTitleBackup')) return;
+      const backup = target.dataset.unifiedTooltipTitleBackup;
+      if (backup) target.setAttribute('title', backup);
+      delete target.dataset.unifiedTooltipTitleBackup;
     };
-
-    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
     const positionTooltipFor = (target) => {
       if (!target || !document.contains(target)) return;
-      const text = String(target.getAttribute('data-tooltip') || '').trim();
+      const text = getTooltipText(target);
       if (!text) return;
+
+      suppressNativeTitle(target);
 
       const el = ensureTooltipEl();
       el.textContent = text;
@@ -8351,6 +8284,7 @@
     };
 
     const hide = () => {
+      const lastTarget = activeTarget;
       activeTarget = null;
       if (rafId) {
         window.cancelAnimationFrame(rafId);
@@ -8360,6 +8294,7 @@
         tooltipEl.style.display = 'none';
         tooltipEl.textContent = '';
       }
+      restoreNativeTitle(lastTarget);
     };
 
     const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
@@ -8367,7 +8302,10 @@
     document.addEventListener('mouseover', (e) => {
       const t = findTarget(e.target);
       if (!t) return;
+      const text = getTooltipText(t);
+      if (!text) return;
       if (activeTarget === t) return;
+      if (activeTarget && activeTarget !== t) restoreNativeTitle(activeTarget);
       activeTarget = t;
       positionTooltipFor(activeTarget);
     });
@@ -8384,6 +8322,9 @@
     document.addEventListener('focusin', (e) => {
       const t = findTarget(e.target);
       if (!t) return;
+      const text = getTooltipText(t);
+      if (!text) return;
+      if (activeTarget && activeTarget !== t) restoreNativeTitle(activeTarget);
       activeTarget = t;
       positionTooltipFor(activeTarget);
     });
@@ -8397,8 +8338,43 @@
       hide();
     });
 
+    document.addEventListener('pointermove', (e) => {
+      if (!activeTarget) return;
+      const hoverNode = document.elementFromPoint(e.clientX, e.clientY);
+      if (hoverNode && activeTarget.contains(hoverNode)) return;
+
+      const focused = document.activeElement;
+      if (focused && (focused === activeTarget || activeTarget.contains(focused))) return;
+      hide();
+    }, { passive: true });
+
     window.addEventListener('resize', scheduleReposition);
     window.addEventListener('scroll', scheduleReposition, { passive: true, capture: true });
+    window.__acglHideUnifiedHoverTooltip = hide;
+  }
+
+  function bindUnifiedHoverTooltipScope(scopeEl) {
+    initUnifiedHoverTooltips();
+    if (!scopeEl || !scopeEl.dataset) return;
+    if (!scopeEl.dataset.unifiedTooltipScopeBound) {
+      scopeEl.dataset.unifiedTooltipScopeBound = '1';
+      scopeEl.addEventListener('scroll', () => {
+        if (typeof window.__acglHideUnifiedHoverTooltip === 'function') {
+          window.__acglHideUnifiedHoverTooltip();
+        }
+      }, { passive: true });
+    }
+  }
+
+  function initPoProgressStatusTooltips(progressRoot) {
+    bindUnifiedHoverTooltipScope(progressRoot);
+    hidePoProgressTooltip = (typeof window.__acglHideUnifiedHoverTooltip === 'function')
+      ? window.__acglHideUnifiedHoverTooltip
+      : () => {};
+  }
+
+  function initBudgetCodeHoverTooltips() {
+    initUnifiedHoverTooltips();
   }
 
   initBudgetCodeHoverTooltips();
@@ -9951,7 +9927,7 @@
       reconcileToPaymentOrdersBtn.textContent = `← Back to ${year} Payment Orders`;
       reconcileToPaymentOrdersBtn.setAttribute('href', `menu.html?year=${encodeURIComponent(String(year))}`);
       reconcileToPaymentOrdersBtn.setAttribute('aria-label', `Back to ${year} Payment Orders`);
-      reconcileToPaymentOrdersBtn.title = `Back to ${year} Payment Orders`;
+      reconcileToPaymentOrdersBtn.removeAttribute('title');
     }
 
     const globalInput = document.getElementById('reconcileOrdersGlobalSearch');
@@ -12551,235 +12527,25 @@
       if (!usersTbody || usersTbody.dataset.userRoleTooltipBound) return;
       usersTbody.dataset.userRoleTooltipBound = '1';
 
-      const TOOLTIP_SELECTOR = 'strong[data-role-tooltip]';
-      const margin = 12;
-      const gap = 10;
-      let tooltipEl = null;
-      let activeTarget = null;
-      let rafId = 0;
-
-      const ensureTooltipEl = () => {
-        if (tooltipEl) return tooltipEl;
-        tooltipEl = document.createElement('div');
-        tooltipEl.className = 'floatingTooltip userRoleTooltip';
-        tooltipEl.setAttribute('role', 'tooltip');
-        tooltipEl.style.display = 'none';
-        document.body.appendChild(tooltipEl);
-        return tooltipEl;
-      };
-
-      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-
-      const positionTooltipFor = (target) => {
-        if (!target) return;
-        const text = String(target.getAttribute('data-role-tooltip') || '').trim();
-        if (!text) return;
-
-        const el = ensureTooltipEl();
-        el.textContent = text;
-        el.style.display = 'block';
-        el.style.visibility = 'hidden';
-        el.style.left = '0px';
-        el.style.top = '0px';
-
-        const targetRect = target.getBoundingClientRect();
-
-        // Measure tooltip with the new content
-        const tipRect = el.getBoundingClientRect();
-        const maxLeft = window.innerWidth - margin - tipRect.width;
-        const left = clamp(targetRect.left, margin, maxLeft);
-
-        const belowTop = targetRect.bottom + gap;
-        const aboveTop = targetRect.top - gap - tipRect.height;
-        const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
-        const fitsAbove = aboveTop >= margin;
-
-        let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
-        top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
-
-        el.style.left = `${Math.round(left)}px`;
-        el.style.top = `${Math.round(top)}px`;
-        el.style.visibility = 'visible';
-      };
-
-      const scheduleReposition = () => {
-        if (!activeTarget) return;
-        if (rafId) return;
-        rafId = window.requestAnimationFrame(() => {
-          rafId = 0;
-          positionTooltipFor(activeTarget);
-        });
-      };
-
-      const hide = () => {
-        activeTarget = null;
-        if (rafId) {
-          window.cancelAnimationFrame(rafId);
-          rafId = 0;
-        }
-        if (tooltipEl) {
-          tooltipEl.style.display = 'none';
-          tooltipEl.textContent = '';
-        }
-      };
-
-      hideUsersRoleTooltip = hide;
-
-      const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
-
-      usersTbody.addEventListener('mouseover', (e) => {
-        const t = findTarget(e.target);
-        if (!t) return;
-        if (activeTarget === t) return;
-        activeTarget = t;
-        positionTooltipFor(activeTarget);
-      });
-
-      usersTbody.addEventListener('mouseout', (e) => {
-        if (!activeTarget) return;
-        const from = findTarget(e.target);
-        if (!from || from !== activeTarget) return;
-        const to = e.relatedTarget;
-        if (to && from.contains && from.contains(to)) return;
-        hide();
-      });
-
+      bindUnifiedHoverTooltipScope(usersTbody);
       const tableEl = document.getElementById('usersTable');
       const wrapEl = tableEl && tableEl.closest ? tableEl.closest('.table-wrap') : null;
-      if (wrapEl && !wrapEl.dataset.userRoleTooltipScrollBound) {
-        wrapEl.dataset.userRoleTooltipScrollBound = '1';
-        wrapEl.addEventListener('scroll', scheduleReposition, { passive: true });
-      }
-
-      if (!window.__acglUserRoleTooltipResizeBound) {
-        window.__acglUserRoleTooltipResizeBound = true;
-        window.addEventListener('resize', scheduleReposition);
-      }
+      bindUnifiedHoverTooltipScope(wrapEl);
+      hideUsersRoleTooltip = (typeof window.__acglHideUnifiedHoverTooltip === 'function')
+        ? window.__acglHideUnifiedHoverTooltip
+        : () => {};
     }
 
     function initCreateUserModalTooltips(modalEl) {
       if (!modalEl || modalEl.dataset.rolesTooltipBound) return;
       modalEl.dataset.rolesTooltipBound = '1';
 
-      const TOOLTIP_SELECTOR = '.rolesGrid__check[data-tooltip]';
-      const margin = 12;
-      const gap = 10;
-      let tooltipEl = null;
-      let activeTarget = null;
-      let rafId = 0;
-
-      const ensureTooltipEl = () => {
-        if (tooltipEl) return tooltipEl;
-        tooltipEl = document.createElement('div');
-        tooltipEl.className = 'floatingTooltip';
-        tooltipEl.setAttribute('role', 'tooltip');
-        tooltipEl.style.display = 'none';
-        document.body.appendChild(tooltipEl);
-        return tooltipEl;
-      };
-
-      const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-
-      const positionTooltipFor = (target) => {
-        if (!target) return;
-        const text = String(target.getAttribute('data-tooltip') || '').trim();
-        if (!text) return;
-
-        const el = ensureTooltipEl();
-        el.textContent = text;
-        el.style.display = 'block';
-        el.style.visibility = 'hidden';
-        el.style.left = '0px';
-        el.style.top = '0px';
-
-        const targetRect = target.getBoundingClientRect();
-
-        // Measure tooltip with the new content
-        const tipRect = el.getBoundingClientRect();
-        const maxLeft = window.innerWidth - margin - tipRect.width;
-        const left = clamp(targetRect.left, margin, maxLeft);
-
-        const belowTop = targetRect.bottom + gap;
-        const aboveTop = targetRect.top - gap - tipRect.height;
-        const fitsBelow = belowTop + tipRect.height <= window.innerHeight - margin;
-        const fitsAbove = aboveTop >= margin;
-
-        let top = fitsBelow || !fitsAbove ? belowTop : aboveTop;
-        top = clamp(top, margin, window.innerHeight - margin - tipRect.height);
-
-        el.style.left = `${Math.round(left)}px`;
-        el.style.top = `${Math.round(top)}px`;
-        el.style.visibility = 'visible';
-      };
-
-      const scheduleReposition = () => {
-        if (!activeTarget) return;
-        if (rafId) return;
-        rafId = window.requestAnimationFrame(() => {
-          rafId = 0;
-          positionTooltipFor(activeTarget);
-        });
-      };
-
-      const hide = () => {
-        activeTarget = null;
-        if (rafId) {
-          window.cancelAnimationFrame(rafId);
-          rafId = 0;
-        }
-        if (tooltipEl) {
-          tooltipEl.style.display = 'none';
-          tooltipEl.textContent = '';
-        }
-      };
-
-      hideCreateUserTooltip = hide;
-
-      const findTarget = (node) => (node && node.closest ? node.closest(TOOLTIP_SELECTOR) : null);
-
-      modalEl.addEventListener('mouseover', (e) => {
-        const t = findTarget(e.target);
-        if (!t) return;
-        if (activeTarget === t) return;
-        activeTarget = t;
-        positionTooltipFor(activeTarget);
-      });
-
-      modalEl.addEventListener('mouseout', (e) => {
-        if (!activeTarget) return;
-        const from = findTarget(e.target);
-        if (!from || from !== activeTarget) return;
-        const to = e.relatedTarget;
-        if (to && from.contains && from.contains(to)) return;
-        hide();
-      });
-
-      modalEl.addEventListener('focusin', (e) => {
-        const t = findTarget(e.target);
-        if (!t) return;
-        activeTarget = t;
-        positionTooltipFor(activeTarget);
-      });
-
-      modalEl.addEventListener('focusout', (e) => {
-        if (!activeTarget) return;
-        const from = findTarget(e.target);
-        if (!from || from !== activeTarget) return;
-        const to = e.relatedTarget;
-        if (to && from.contains && from.contains(to)) return;
-        hide();
-      });
-
+      bindUnifiedHoverTooltipScope(modalEl);
       const bodyEl = modalEl.querySelector ? modalEl.querySelector('.modal__body') : null;
-      if (bodyEl && !bodyEl.dataset.rolesTooltipScrollBound) {
-        bodyEl.dataset.rolesTooltipScrollBound = '1';
-        bodyEl.addEventListener('scroll', scheduleReposition, { passive: true });
-      }
-
-      if (!window.__acglRolesTooltipResizeBound) {
-        window.__acglRolesTooltipResizeBound = true;
-        window.addEventListener('resize', scheduleReposition);
-      }
+      bindUnifiedHoverTooltipScope(bodyEl);
+      hideCreateUserTooltip = (typeof window.__acglHideUnifiedHoverTooltip === 'function')
+        ? window.__acglHideUnifiedHoverTooltip
+        : () => {};
     }
 
     function closeCreateUserModal() {
@@ -15277,6 +15043,7 @@
     const commentsEl = document.getElementById('mtBuilderComments');
     const saveBtn = document.getElementById('mtBuilderSaveBtn');
     const cancelBtn = document.getElementById('mtBuilderCancelBtn');
+    const editBtn = document.getElementById('mtBuilderEditBtn');
     const globalInput = document.getElementById('mtBuilderGlobalSearch');
     const mtDateInputEl = mtBuilderDateInput;
     const mtDateErrorEl = mtBuilderDateInlineError;
@@ -15292,6 +15059,8 @@
     })();
 
     const isViewOnly = String(params.get('mode') || '').trim().toLowerCase() === 'view';
+    const canReadLedger = Boolean(user && hasPermission(user, 'ledger'));
+    const canWriteOrCreateLedger = Boolean(user && (canWrite(user, 'ledger') || canCreate(user, 'ledger')));
 
     const fromUrlYear = Number(params.get('year'));
     const resolvedYear = Number.isInteger(fromUrlYear) ? fromUrlYear : year;
@@ -15354,7 +15123,7 @@
       mtBackLink.href = `money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`;
       mtBackLink.textContent = `← Back to ${resolvedYear} Money Transfers`;
       mtBackLink.setAttribute('aria-label', `Back to ${resolvedYear} Money Transfers`);
-      mtBackLink.title = `Back to ${resolvedYear} Money Transfers`;
+      mtBackLink.removeAttribute('title');
     }
     const subheadEl = document.querySelector('[data-mt-builder-subhead]');
     function syncBuilderDateSubhead() {
@@ -15532,6 +15301,30 @@
       cancelBtn.addEventListener('click', () => {
         window.location.href = withWpEmbedParams(`money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`);
       });
+    }
+
+    if (editBtn) {
+      const showEditBtn = isViewOnly && Boolean(existing) && canReadLedger;
+      editBtn.hidden = !showEditBtn;
+      editBtn.disabled = !canWriteOrCreateLedger;
+      if (canWriteOrCreateLedger) editBtn.removeAttribute('data-tooltip');
+      else editBtn.setAttribute('data-tooltip', 'Read only access.');
+
+      if (!editBtn.dataset.bound) {
+        editBtn.dataset.bound = '1';
+        editBtn.addEventListener('click', () => {
+          if (!canWriteOrCreateLedger) return;
+          if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
+
+          if (!existing) return;
+          const editParams = new URLSearchParams();
+          editParams.set('year', String(resolvedYear));
+          editParams.set('id', normalizeMoneyTransferId(existing.id));
+          const mtDate = String(mtBuilderViewState.mtDate || '').trim();
+          if (mtDate) editParams.set('mtDate', mtDate);
+          window.location.href = withWpEmbedParams(`money_transfer.html?${editParams.toString()}`);
+        });
+      }
     }
 
     if (mtBuilderSelectItemsBtn) {
@@ -22469,7 +22262,7 @@
       backLink.href = `budget.html?year=${encodeURIComponent(String(year))}`;
       backLink.textContent = `← Back to ${year} Budget`;
       backLink.setAttribute('aria-label', `Back to ${year} Budget`);
-      backLink.title = `Back to ${year} Budget`;
+      backLink.removeAttribute('title');
     }
 
     initBudgetYearNav();

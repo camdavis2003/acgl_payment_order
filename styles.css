@@ -1640,39 +1640,12 @@ input:focus, textarea:focus, select:focus, button:focus {
   cursor: pointer;
 }
 
-/* Tooltip popup for menu items (e.g., Add line) */
+/* Legacy pseudo-element tooltips are disabled; JS floating tooltip is the single source. */
 .budgetMenu__panel .actionLink[data-tooltip]:hover::after,
-.budgetMenu__panel .actionLink[data-tooltip]:focus-visible::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  right: calc(100% + 10px);
-  top: 50%;
-  transform: translateY(-50%);
-  width: max-content;
-  max-width: 340px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  white-space: normal;
-  z-index: var(--z-tooltip);
-}
-
+.budgetMenu__panel .actionLink[data-tooltip]:focus-visible::after,
 .budgetMenu__panel .actionLink[data-tooltip]:hover::before,
 .budgetMenu__panel .actionLink[data-tooltip]:focus-visible::before {
-  content: '';
-  position: absolute;
-  right: calc(100% + 4px);
-  top: 50%;
-  transform: translateY(-50%);
-  width: 0;
-  height: 0;
-  border-top: 7px solid transparent;
-  border-bottom: 7px solid transparent;
-  border-left: 7px solid var(--border);
-  z-index: var(--z-tooltip-arrow);
+  content: none;
 }
 
 .budgetTable tr.budgetRow--selected td {
@@ -1838,38 +1811,10 @@ input:focus, textarea:focus, select:focus, button:focus {
 }
 
 .btn[data-tooltip]:hover::after,
-.btn[data-tooltip]:focus-visible::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 10px);
-  transform: none;
-  width: min(360px, calc(100vw - 40px));
-  max-width: min(360px, calc(100vw - 40px));
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  white-space: normal;
-  box-sizing: border-box;
-  z-index: var(--z-tooltip);
-}
-
+.btn[data-tooltip]:focus-visible::after,
 .btn[data-tooltip]:hover::before,
 .btn[data-tooltip]:focus-visible::before {
-  content: '';
-  position: absolute;
-  right: 18px;
-  bottom: calc(100% + 4px);
-  transform: none;
-  width: 0;
-  height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-top: 7px solid var(--border);
-  z-index: var(--z-tooltip-arrow);
+  content: none;
 }
 
 /* Tooltip popup for displayed Budget Numbers */
@@ -2159,36 +2104,10 @@ input:focus, textarea:focus, select:focus, button:focus {
 }
 
 .rolesGrid__check[data-tooltip]:hover::after,
-.rolesGrid__check[data-tooltip]:focus-within::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  right: 0;
-  top: calc(100% + 10px);
-  width: min(360px, calc(100vw - 40px));
-  max-width: min(360px, calc(100vw - 40px));
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  white-space: normal;
-  box-sizing: border-box;
-  z-index: var(--z-tooltip);
-}
-
+.rolesGrid__check[data-tooltip]:focus-within::after,
 .rolesGrid__check[data-tooltip]:hover::before,
 .rolesGrid__check[data-tooltip]:focus-within::before {
-  content: '';
-  position: absolute;
-  right: 18px;
-  top: calc(100% + 4px);
-  width: 0;
-  height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-bottom: 7px solid var(--border);
-  z-index: var(--z-tooltip-arrow);
+  content: none;
 }
 
 /* Add User modal: use JS-driven tooltips so hovering does not expand scroll area */
@@ -2216,9 +2135,10 @@ input:focus, textarea:focus, select:focus, button:focus {
   pointer-events: none;
 }
 
+/* Retain selector for compatibility if legacy markup still references it. */
 .floatingTooltip.userRoleTooltip {
-  font-size: 15px;
-  line-height: 1.25;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 @media (max-width: 900px) {

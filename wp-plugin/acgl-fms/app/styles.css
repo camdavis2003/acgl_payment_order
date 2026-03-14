@@ -1982,6 +1982,36 @@ html[data-theme="dark"] .btn--primary:focus-visible {
   text-align: center;
 }
 
+body[data-page="about"] .authGate__brand {
+  padding-bottom: 4px;
+}
+
+body[data-page="about"] {
+  overflow: hidden;
+}
+
+body[data-page="about"] .appMain {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-page="about"] main.container {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body[data-page="about"] main.container > section.card {
+  height: 100%;
+  margin: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .authGate__brandTitle {
   margin: 0;
   font-size: 20px;

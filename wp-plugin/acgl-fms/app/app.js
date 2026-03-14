@@ -920,15 +920,18 @@
     if (IS_WP_SHARED_MODE) clearWpToken();
   }
 
-  async function persistAuthAuditToWpNow(keepalive = false) {
+  async function persistAuthAuditToWpNow(keepalive = false, tokenOverride = '') {
     if (!IS_WP_SHARED_MODE) return { ok: true, skipped: true };
     try {
       const raw = String(localStorage.getItem(AUTH_AUDIT_KEY) || '').trim();
       const value = raw ? raw : '[]';
       const url = wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(AUTH_AUDIT_KEY))}`);
+      const headers = { 'Content-Type': 'application/json' };
+      const auth = String(tokenOverride || '').trim();
+      if (auth) headers.Authorization = `Bearer ${auth}`;
       const res = await wpFetchJson(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ value }),
         keepalive: Boolean(keepalive),
       });
@@ -974,8 +977,8 @@
     // In WP mode, localStorage writes are debounced for performance; ensure auth events
     // are persisted immediately so logout/navigation doesn't drop them.
     if (IS_WP_SHARED_MODE) {
-      const shouldKeepalive = action === 'Logout' || action === 'Auto log out';
-      void persistAuthAuditToWpNow(shouldKeepalive);
+      const tokenAtWrite = getWpToken();
+      void persistAuthAuditToWpNow(true, tokenAtWrite);
     }
   }
 
@@ -2001,6 +2004,14 @@
     return getCurrentBudgetYearFromDate(new Date());
   }
 
+  function getLoginLandingBudgetYear() {
+    const years = migrateLegacyBudgetIfNeeded();
+    const active = loadActiveBudgetYear();
+    if (active && (years.length === 0 || years.includes(active))) return active;
+    if (years.length > 0) return years[0];
+    return getCurrentBudgetYearFromDate(new Date());
+  }
+
   function getNavConfig() {
     const years = migrateLegacyBudgetIfNeeded();
     const navYears = years.length > 0 ? years : [getCurrentBudgetYearFromDate(new Date())];
@@ -2283,12 +2294,10 @@
 
             setCurrentUsername(u);
             const user = getCurrentUser();
-            if (!tryRedirectToRememberedPage(user)) {
-              const _year = getActiveBudgetYear();
-              window.location.href = hasPermission(user, 'budget')
-                ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-                : firstAllowedHrefForUser(user, _year);
-            }
+            const _year = getLoginLandingBudgetYear();
+            window.location.href = hasPermission(user, 'budget')
+              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+              : firstAllowedHrefForUser(user, _year);
           });
         }
         return { blocked: true };
@@ -2384,12 +2393,10 @@
             return;
           }
 
-          if (!tryRedirectToRememberedPage(user)) {
-            const _year = getActiveBudgetYear();
-            window.location.href = hasPermission(user, 'budget')
-              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-              : firstAllowedHrefForUser(user, _year);
-          }
+          const _year = getLoginLandingBudgetYear();
+          window.location.href = hasPermission(user, 'budget')
+            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+            : firstAllowedHrefForUser(user, _year);
         });
       }
       return { blocked: true };
@@ -2483,12 +2490,10 @@
 
           setCurrentUsername(u);
           const user = getCurrentUser();
-          if (!tryRedirectToRememberedPage(user)) {
-            const _year = getActiveBudgetYear();
-            window.location.href = hasPermission(user, 'budget')
-              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-              : firstAllowedHrefForUser(user, _year);
-          }
+          const _year = getLoginLandingBudgetYear();
+          window.location.href = hasPermission(user, 'budget')
+            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+            : firstAllowedHrefForUser(user, _year);
           return;
         }
 
@@ -2517,12 +2522,10 @@
         }
 
         setCurrentUsername(u);
-        if (!tryRedirectToRememberedPage(user)) {
-          const _year = getActiveBudgetYear();
-          window.location.href = hasPermission(user, 'budget')
-            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-            : firstAllowedHrefForUser(user, _year);
-        }
+        const _year = getLoginLandingBudgetYear();
+        window.location.href = hasPermission(user, 'budget')
+          ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+          : firstAllowedHrefForUser(user, _year);
       });
     }
   }

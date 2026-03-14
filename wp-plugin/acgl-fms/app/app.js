@@ -415,26 +415,31 @@
     const kvListUrl = wpJoin('acgl-fms/v1/kv');
     const itemUrl = (key) => wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(key || ''))}`);
 
+    async function hydrateSharedFromWp() {
+      const res = await wpFetchJson(kvListUrl, { method: 'GET' });
+      if (res.status === 401 || res.status === 403) return false;
+      if (!res.ok) throw new Error(`kv_list_failed_${res.status}`);
+
+      const payload = await readJsonResponse(res);
+      const items = payload && Array.isArray(payload.items) ? payload.items : [];
+
+      mem.clear();
+      for (const it of items) {
+        if (!it || typeof it !== 'object') continue;
+        const k = String(it.k || '').trim();
+        if (!isWpSharedKey(k)) continue;
+        const v = it.v === null || it.v === undefined ? null : String(it.v);
+        if (v === null) mem.delete(k);
+        else mem.set(k, v);
+      }
+      return true;
+    }
+
     // 1) Load all shared keys from WP into memory.
     try {
-      const res = await wpFetchJson(kvListUrl, { method: 'GET' });
-      if (res.status === 401 || res.status === 403) {
+      const ok = await hydrateSharedFromWp();
+      if (!ok) {
         // Not signed into the app yet (public mode). Continue with an empty in-memory store.
-      } else if (!res.ok) {
-        // If WP is reachable but the API fails, fall back to local storage.
-        return;
-      }
-      if (res.ok) {
-        const payload = await readJsonResponse(res);
-        const items = payload && Array.isArray(payload.items) ? payload.items : [];
-        for (const it of items) {
-          if (!it || typeof it !== 'object') continue;
-          const k = String(it.k || '').trim();
-          if (!isWpSharedKey(k)) continue;
-          const v = it.v === null || it.v === undefined ? null : String(it.v);
-          if (v === null) mem.delete(k);
-          else mem.set(k, v);
-        }
       }
     } catch {
       // Network errors: fall back to local storage.
@@ -518,6 +523,8 @@
     // Expose a safe way to force persistence before navigation.
     // Used when the UI redirects immediately after writing shared keys.
     window.acglFmsWpFlushNow = flushNow;
+    // Expose a way to refresh shared data after successful token login.
+    window.acglFmsWpHydrateSharedNow = hydrateSharedFromWp;
 
     // 2) Override localStorage for shared keys only.
     storage.getItem = (key) => {
@@ -863,12 +870,17 @@
     }
   }
 
-  function performAutoLogout() {
+  async function performAutoLogout() {
     const prev = normalizeUsername(getCurrentUsername());
     if (!prev) return;
 
     // Record as an auth audit note, excluding hard-coded admin.
     appendAuthAuditEvent('Auto log out', prev);
+
+    // Persist the logout event BEFORE clearing the token so the request arrives authenticated.
+    if (IS_WP_SHARED_MODE) {
+      try { await persistAuthAuditToWpNow(false, getWpToken()); } catch { }
+    }
 
     // Clear session (do not also write a normal Logout record).
     setCurrentUsername('');
@@ -913,9 +925,13 @@
     }, 15 * 1000);
   }
 
-  function performLogout() {
+  async function performLogout() {
     const prev = normalizeUsername(getCurrentUsername());
     if (prev) appendAuthAuditEvent('Logout', prev);
+    // Persist the logout event BEFORE clearing the token so the request arrives authenticated.
+    if (IS_WP_SHARED_MODE) {
+      try { await persistAuthAuditToWpNow(false, getWpToken()); } catch { }
+    }
     setCurrentUsername('');
     if (IS_WP_SHARED_MODE) clearWpToken();
   }
@@ -935,9 +951,13 @@
         body: JSON.stringify({ value }),
         keepalive: Boolean(keepalive),
       });
-      if (!res.ok) return { ok: false, status: res.status };
+      if (!res.ok) {
+        console.error('[ACGL FMS] Auth audit persist failed', res.status, url);
+        return { ok: false, status: res.status };
+      }
       return { ok: true };
-    } catch {
+    } catch (err) {
+      console.error('[ACGL FMS] Auth audit persist error', err);
       return { ok: false, status: 0 };
     }
   }
@@ -970,7 +990,7 @@
     const next = [...existing, { at, module: 'Auth', record: 'Session', user, action, changes: [] }];
 
     // Keep storage bounded.
-    const MAX = 500;
+    const MAX = 200;
     const trimmed = next.length > MAX ? next.slice(next.length - MAX) : next;
     saveAuthAuditEvents(trimmed);
 
@@ -978,7 +998,9 @@
     // are persisted immediately so logout/navigation doesn't drop them.
     if (IS_WP_SHARED_MODE) {
       const tokenAtWrite = getWpToken();
-      void persistAuthAuditToWpNow(true, tokenAtWrite);
+      const actionLower = action.toLowerCase();
+      const shouldKeepalive = actionLower === 'logout' || actionLower === 'auto log out' || actionLower === 'auto logout';
+      void persistAuthAuditToWpNow(shouldKeepalive, tokenAtWrite);
     }
   }
 
@@ -2194,6 +2216,13 @@
 
       setWpToken(token);
       if (data && data.user && data.user.permissions) setWpPerms(data.user.permissions);
+      if (typeof window.acglFmsWpHydrateSharedNow === 'function') {
+        try {
+          await window.acglFmsWpHydrateSharedNow();
+        } catch {
+          // ignore hydrate failures and continue login
+        }
+      }
       return { ok: true };
     } catch {
       return { ok: false, error: 'network' };
@@ -2293,6 +2322,13 @@
             }
 
             setCurrentUsername(u);
+            if (IS_WP_SHARED_MODE) {
+              try {
+                await persistAuthAuditToWpNow(false, getWpToken());
+              } catch {
+                // ignore and continue redirect
+              }
+            }
             const user = getCurrentUser();
             const _year = getLoginLandingBudgetYear();
             window.location.href = hasPermission(user, 'budget')
@@ -2386,6 +2422,13 @@
           }
 
           setCurrentUsername(u);
+          if (IS_WP_SHARED_MODE) {
+            try {
+              await persistAuthAuditToWpNow(false, getWpToken());
+            } catch {
+              // ignore and continue redirect
+            }
+          }
 
           const required = requiredPermissionForPage(window.location.pathname);
           if (!hasPermission(user, required)) {
@@ -2489,6 +2532,13 @@
           }
 
           setCurrentUsername(u);
+          if (IS_WP_SHARED_MODE) {
+            try {
+              await persistAuthAuditToWpNow(false, getWpToken());
+            } catch {
+              // ignore and continue redirect
+            }
+          }
           const user = getCurrentUser();
           const _year = getLoginLandingBudgetYear();
           window.location.href = hasPermission(user, 'budget')
@@ -2522,6 +2572,13 @@
         }
 
         setCurrentUsername(u);
+        if (IS_WP_SHARED_MODE) {
+          try {
+            await persistAuthAuditToWpNow(false, getWpToken());
+          } catch {
+            // ignore and continue redirect
+          }
+        }
         const _year = getLoginLandingBudgetYear();
         window.location.href = hasPermission(user, 'budget')
           ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
@@ -13228,8 +13285,8 @@
 
     if (logoutBtn && !logoutBtn.dataset.bound) {
       logoutBtn.dataset.bound = 'true';
-      logoutBtn.addEventListener('click', () => {
-        performLogout();
+      logoutBtn.addEventListener('click', async () => {
+        await performLogout();
         window.location.reload();
       });
     }
@@ -24450,7 +24507,7 @@
     const doLogout = params.get('logout') === '1';
 
     if (isRequestForm && doLogout) {
-      performLogout();
+      await performLogout();
       setEditOrderId(null);
       form.reset();
       clearDraft();

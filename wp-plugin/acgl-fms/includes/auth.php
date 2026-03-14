@@ -173,7 +173,7 @@ function acgl_fms_key_to_module($key) {
     $k = (string) $key;
 
     if ($k === 'payment_order_users_v1') return 'settings';
-    if ($k === 'payment_order_auth_audit_v1') return 'settings';
+    if ($k === 'payment_order_auth_audit_v1') return 'settings_audit';
 
     if ($k === 'payment_order_budget_years_v1') return 'budget';
     if ($k === 'payment_order_active_budget_year_v1') return 'budget';

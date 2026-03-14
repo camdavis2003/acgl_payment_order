@@ -159,8 +159,15 @@ function acgl_fms_render_fullpage() {
     echo '(function(){';
     echo 'var frame=document.getElementById(' . wp_json_encode('acglFmsFrame') . ');';
     echo 'if(!frame) return;';
-    echo '// Intentionally do not restore previous iframe URL here.';
-    echo '// Login/open should always go through app startup and land on active budget dashboard.';
+    echo 'var KEY=' . wp_json_encode('acgl_fms_fullpage_last_src_v1') . ';';
+    echo 'var TOKEN_KEY=' . wp_json_encode('acgl_fms_wp_token_v1') . ';';
+    echo 'var APP_BASE=' . wp_json_encode($app_base_url) . ';';
+    echo 'try {';
+    echo 'var token=String(sessionStorage.getItem(TOKEN_KEY)||""||"").trim();';
+    echo 'if(!token) return;';
+    echo 'var last=String(sessionStorage.getItem(KEY)||""||"");';
+    echo 'if(last && last.indexOf(APP_BASE)===0){ frame.src=last; }';
+    echo '} catch(e) {}';
     echo '})();';
     echo '</script>';
     echo '</body>';

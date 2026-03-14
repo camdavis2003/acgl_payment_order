@@ -3566,7 +3566,6 @@
     const inVal = normalizeBudgetTemplateKeyText(r.in);
     const outVal = normalizeBudgetTemplateKeyText(r.out);
     const desc = normalizeBudgetTemplateKeyText(r.description);
-    const approvedMock = getMockApprovedEuroForTemplateRow(r);
 
     const tr = document.createElement('tr');
     const receiptsOp = normalizeBudgetCalcToken(r.calcReceiptsOp);
@@ -3578,7 +3577,7 @@
       <td class="num">${escapeHtml(inVal)}</td>
       <td class="num">${escapeHtml(outVal)}</td>
       <td>${escapeHtml(desc)}</td>
-      <td class="num budgetTable__euro">${escapeHtml(formatBudgetEuro(approvedMock))}</td>
+      <td class="num budgetTable__euro">0.00 €</td>
       <td class="num budgetTable__euro">0.00 €</td>
       <td class="num budgetTable__euro">0.00 €</td>
       <td class="num budgetTable__bal">0.00 €</td>
@@ -20822,13 +20821,12 @@
 
       const seedTbody = document.createElement('tbody');
       for (const r of section1) {
-        const approvedMock = getMockApprovedEuroForTemplateRow(r);
         seedTbody.appendChild(
           buildDataRowFromRecord({
             in: r.in,
             out: r.out,
             description: r.description,
-            approvedEuro: formatBudgetEuro(approvedMock),
+            approvedEuro: '0.00 €',
             receiptsEuro: '0.00 €',
             expendituresEuro: '0.00 €',
             balanceEuro: '0.00 €',
@@ -20843,13 +20841,12 @@
       seedTbody.appendChild(buildTotalRow('Total Anticipated Values'));
       seedTbody.appendChild(buildSpacerRow());
       for (const r of section2) {
-        const approvedMock = getMockApprovedEuroForTemplateRow(r);
         seedTbody.appendChild(
           buildDataRowFromRecord({
             in: r.in,
             out: r.out,
             description: r.description,
-            approvedEuro: formatBudgetEuro(approvedMock),
+            approvedEuro: '0.00 €',
             receiptsEuro: '0.00 €',
             expendituresEuro: '0.00 €',
             balanceEuro: '0.00 €',
@@ -21476,11 +21473,10 @@
       // Only show Add/Remove while editing.
       setMenuItemVisible(addLineLink, isEditing);
       setMenuItemVisible(removeLineLink, isEditing);
-      setMenuItemVisible(deleteBudgetLink, isEditing);
 
       setLinkDisabled(addLineLink, !isEditing);
       setLinkDisabled(removeLineLink, !isEditing || !selectedRow);
-      setLinkDisabled(deleteBudgetLink, !isEditing || !hasBudgetFullAccess);
+      setLinkDisabled(deleteBudgetLink, !canDelete(currentUser, 'budget'));
 
       // In the dropdown, Edit should be available only when not editing.
       setLinkDisabled(editLink, isEditing);
@@ -22460,12 +22456,7 @@
     }
 
     function deleteCurrentBudgetYear() {
-      if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
-      if (!hasBudgetFullAccess) {
-        window.alert('Requires Full access for Budget.');
-        return;
-      }
-      if (!isEditing) return;
+      if (!requireDeleteAccess('budget', 'Requires Delete access for Budget.')) return;
 
       const ok = window.confirm(
         `Delete the ${budgetYear} budget?\n\nThis removes the saved budget table for ${budgetYear} from shared storage.`

@@ -200,6 +200,10 @@ function acgl_fms_token_allows_key($tokenPayload, $key, $isWrite) {
     $username = strtolower(trim((string) ($tokenPayload['u'] ?? '')));
     if ($username === '') return false;
 
+    // Login/logout audit entries must be writable for any authenticated user,
+    // even when Settings write access is restricted.
+    if ((string) $key === 'payment_order_auth_audit_v1' && $isWrite) return true;
+
     $perms = acgl_fms_normalize_permissions($tokenPayload['p'] ?? []);
     $module = acgl_fms_key_to_module($key);
     $level = $perms[$module] ?? 'none';

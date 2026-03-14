@@ -1060,6 +1060,18 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
   text-underline-offset: 2px;
 }
 
+.headerAboutLinks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.headerAboutSep {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .headerAboutLink:hover {
   filter: brightness(0.95);
 }

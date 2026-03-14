@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=58ddf8b-20260314165251" />
+    <link rel="stylesheet" href="styles.css?v=1977242-20260314170609" />
   </head>
   <body>
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -34,14 +34,54 @@
                     Complete the form and add it to the submitted list. Entries
                     are saved in shared storage.
                   </p>
-                  <a
-                    href="about.html"
-                    id="aboutPopoutLink"
-                    class="headerAboutLink"
-                    aria-label="Open About page in a popout window"
+                  <div
+                    class="headerAboutLinks"
+                    aria-label="Legal and info links"
                   >
-                    About
-                  </a>
+                    <a
+                      href="about.html"
+                      id="aboutPopoutLink"
+                      class="headerAboutLink"
+                      data-popout-link="1"
+                      data-popout-name="acglAboutPopout"
+                      aria-label="Open About page in a popout window"
+                    >
+                      About
+                    </a>
+                    <span class="headerAboutSep" aria-hidden="true">|</span>
+                    <a
+                      href="https://acgl.online/imprint/"
+                      class="headerAboutLink"
+                      data-popout-link="1"
+                      data-popout-name="acglImprintPopout"
+                      data-popout-external="1"
+                      aria-label="Open Imprint page in a popout window"
+                    >
+                      Imprint
+                    </a>
+                    <span class="headerAboutSep" aria-hidden="true">|</span>
+                    <a
+                      href="https://acgl.online/data-protection-declaration/"
+                      class="headerAboutLink"
+                      data-popout-link="1"
+                      data-popout-name="acglDataProtectionPopout"
+                      data-popout-external="1"
+                      aria-label="Open Data Protection Policy page in a popout window"
+                    >
+                      Data Protection Policy
+                    </a>
+                    <span class="headerAboutSep" aria-hidden="true">|</span>
+                    <a
+                      href="https://it-support.acgl.online/204-2/"
+                      class="headerAboutLink"
+                      data-popout-link="1"
+                      data-popout-name="acglCookiePolicyPopout"
+                      data-popout-external="1"
+                      aria-label="Open Cookie Policy page in a popout window"
+                    >
+                      Cookie Policy
+                    </a>
+                  </div>
                 </div>
               </div>
               <div class="header-actions">
@@ -453,9 +493,9 @@
       </div>
     </div>
 
-    <script src="iban.js?v=58ddf8b-20260314165251" defer></script>
-    <script src="bic.js?v=58ddf8b-20260314165251" defer></script>
-    <script src="pdf-lib.min.js?v=58ddf8b-20260314165251" defer></script>
-    <script src="app.js?v=58ddf8b-20260314165251" defer></script>
+    <script src="iban.js?v=1977242-20260314170609" defer></script>
+    <script src="bic.js?v=1977242-20260314170609" defer></script>
+    <script src="pdf-lib.min.js?v=1977242-20260314170609" defer></script>
+    <script src="app.js?v=1977242-20260314170609" defer></script>
   </body>
 </html>

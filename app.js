@@ -3990,7 +3990,7 @@
 
   // Request form (index.html) header auth button
   const authHeaderBtn = document.getElementById('authHeaderBtn');
-  const aboutPopoutLink = document.getElementById('aboutPopoutLink');
+  const requestHeaderPopoutLinks = Array.from(document.querySelectorAll('[data-popout-link="1"]'));
 
   // Request form submission token
   const submitToken = document.getElementById('submitToken');
@@ -24097,12 +24097,19 @@
     }
   }
 
-  if (aboutPopoutLink && !aboutPopoutLink.dataset.bound) {
-    aboutPopoutLink.dataset.bound = 'true';
-    aboutPopoutLink.addEventListener('click', (e) => {
+  for (const popoutLink of requestHeaderPopoutLinks) {
+    if (!popoutLink || popoutLink.dataset.bound) continue;
+    popoutLink.dataset.bound = 'true';
+    popoutLink.addEventListener('click', (e) => {
       e.preventDefault();
 
-      const href = withWpEmbedParams('about.html');
+      const rawHref = String(popoutLink.getAttribute('href') || '').trim();
+      if (!rawHref) return;
+
+      const isExternal = popoutLink.getAttribute('data-popout-external') === '1';
+      const href = isExternal ? rawHref : withWpEmbedParams(rawHref);
+      const winName = String(popoutLink.getAttribute('data-popout-name') || 'acglInfoPopout').trim() || 'acglInfoPopout';
+
       const w = 1120;
       const h = 820;
       const screenLeft = Number(window.screenLeft ?? window.screenX ?? 0) || 0;
@@ -24112,7 +24119,7 @@
       const top = Math.max(0, Math.round(screenTop + (screenH - h) / 2));
       const features = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},left=${left},top=${top}`;
 
-      const win = window.open(href, 'acglAboutPopout', features);
+      const win = window.open(href, winName, features);
       if (!win) {
         window.location.href = href;
         return;

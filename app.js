@@ -22457,6 +22457,11 @@
 
     function deleteCurrentBudgetYear() {
       if (!requireDeleteAccess('budget', 'Requires Delete access for Budget.')) return;
+      const activeYear = loadActiveBudgetYear();
+      if (activeYear !== null && Number(activeYear) === Number(budgetYear)) {
+        window.alert('Active Budget cannot be deleted. Deactivate it first, then delete.');
+        return;
+      }
 
       const ok = window.confirm(
         `Delete the ${budgetYear} budget year?\n\nThis permanently removes ALL data for ${budgetYear}: budget table, payment orders, ledger entries, money transfers, income records, backups, and the Archive link. This cannot be undone.`
@@ -23245,9 +23250,15 @@
     const emptyEl = root.querySelector('[data-archive-empty]');
     if (!grid) return;
 
+    const currentUser = getCurrentUser();
+    const canManualDeleteFromArchive = currentUser
+      ? (getEffectivePermissions(currentUser).budget || 'none') === 'full'
+      : false;
+
     const config = getNavConfig();
     const isYearLabel = (label) => /^\d{4}$/.test(String(label || '').trim());
     const actualYears = new Set(loadBudgetYears().map((y) => String(y)));
+    const activeBudgetYear = loadActiveBudgetYear();
 
     const areas = (Array.isArray(config) ? config : []).filter((it) => {
       const children = Array.isArray(it && it.children) ? it.children : [];
@@ -23269,6 +23280,7 @@
       const h = document.createElement('h2');
       h.className = 'archive__title';
       h.textContent = String(area && area.label ? area.label : '').trim() || 'Archive';
+      const isBudgetArea = String(area && area.key ? area.key : '').trim() === 'budget';
 
       const yearsWrap = document.createElement('div');
       yearsWrap.className = 'archive__years';
@@ -23278,18 +23290,101 @@
         return isYearLabel(label) && actualYears.has(label);
       });
       for (const child of yearChildren) {
+        const yearLabel = String(child && child.label ? child.label : '').trim();
+        const yearNum = Number(yearLabel);
+        const isActiveBudgetYear = isBudgetArea && activeBudgetYear !== null && Number(activeBudgetYear) === yearNum;
+        const yearItem = document.createElement('span');
+        yearItem.className = 'archive__yearItem';
+
         const a = document.createElement('a');
         a.className = 'actionLink';
         a.href = String(child && child.href ? child.href : '#');
         a.textContent = '';
-        a.appendChild(document.createTextNode(String(child && child.label ? child.label : '').trim()));
-        if (child && child.isActiveBudgetYear) {
+        a.appendChild(document.createTextNode(yearLabel));
+        if (isActiveBudgetYear) {
           const badge = document.createElement('span');
           badge.className = 'appNavTree__badge';
           badge.textContent = ' (active)';
           a.appendChild(badge);
         }
-        yearsWrap.appendChild(a);
+        yearItem.appendChild(a);
+
+        if (canManualDeleteFromArchive && Number.isInteger(yearNum)) {
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'archive__yearDelete';
+          delBtn.setAttribute('aria-label', `Delete budget year ${yearLabel}`);
+          if (isActiveBudgetYear) {
+            delBtn.disabled = true;
+            delBtn.setAttribute('title', `Cannot delete active budget year ${yearLabel}. Deactivate it first.`);
+          } else {
+            delBtn.setAttribute('title', `Delete all data for budget year ${yearLabel}`);
+          }
+          delBtn.textContent = 'x';
+
+          delBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const activeYear = loadActiveBudgetYear();
+            if (activeYear !== null && Number(activeYear) === yearNum) {
+              window.alert('Active Budget cannot be deleted. Deactivate it first, then delete.');
+              return;
+            }
+
+            const ok = window.confirm(
+              `Delete the ${yearLabel} budget year?\n\nThis permanently removes ALL data for ${yearLabel}: budget table, payment orders, ledger entries, money transfers, income records, backups, and this Archive link. This cannot be undone.`
+            );
+            if (!ok) return;
+
+            const rm = (k) => { if (k) { try { localStorage.removeItem(k); } catch { /* ignore */ } } };
+
+            // Budget
+            rm(getBudgetTableKeyForYear(yearNum));
+            rm(getBudgetMetaKeyForYear(yearNum));
+            rm(`payment_order_budget_checksums_visible_${yearNum}_v1`);
+
+            // Payment orders & reconciliation
+            rm(getPaymentOrdersKeyForYear(yearNum));
+            rm(getPaymentOrdersReconciliationKeyForYear(yearNum));
+
+            // Money transfers
+            rm(getMoneyTransfersKeyForYear(yearNum));
+
+            // Ledger
+            rm(getIncomeKeyForYear(yearNum));
+            rm(getWiseEurKeyForYear(yearNum));
+            rm(getWiseUsdKeyForYear(yearNum));
+            rm(getGsLedgerVerifiedKeyForYear(yearNum));
+
+            // Backups: remove all backup data entries then the index and last-auto marker
+            try {
+              const index = loadBackupIndex(yearNum);
+              for (const m of (Array.isArray(index) ? index : [])) {
+                if (m && m.id) rm(getBackupDataKeyForYearId(yearNum, m.id));
+              }
+            } catch { /* ignore */ }
+            rm(getBackupIndexKeyForYear(yearNum));
+            rm(getBackupLastAutoKeyForYear(yearNum));
+
+            // Remove year from list (this also removes the Archive link)
+            const years = loadBudgetYears().filter((yr) => Number(yr) !== yearNum);
+            saveBudgetYears(years);
+
+            // If this was the active budget year, clear the active setting.
+            if (loadActiveBudgetYear() === yearLabel || loadActiveBudgetYear() === yearNum) clearActiveBudgetYear();
+
+            appendAppAuditEvent(`Budget (${yearLabel})`, `Budget ${yearLabel}`, 'Deleted', [
+              { field: 'Year', from: yearLabel, to: '' },
+            ]);
+
+            initArchivePage();
+          });
+
+          yearItem.appendChild(delBtn);
+        }
+
+        yearsWrap.appendChild(yearItem);
       }
 
       header.appendChild(h);

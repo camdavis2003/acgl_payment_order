@@ -485,6 +485,29 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   justify-content: center;
 }
 
+.archive__yearItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.archive__yearDelete {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.8;
+}
+
+.archive__yearDelete:hover,
+.archive__yearDelete:focus-visible {
+  opacity: 1;
+}
+
 .budgetDash__section {
   margin: 0;
 }

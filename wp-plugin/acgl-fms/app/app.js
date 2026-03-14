@@ -45,7 +45,7 @@
   }
 
   const APP_TAB_TITLE = 'ACGL - FMS';
-  const APP_VERSION = '0.1.2';
+  const APP_VERSION = '0.1.3';
 
   function applyAppTabTitle() {
     setBrowserTabTitle(APP_TAB_TITLE);
@@ -659,13 +659,13 @@
         passwordHash: buildLegacyPwHash(HARD_CODED_ADMIN_PASSWORD, HARD_CODED_ADMIN_SALT),
         passwordPlain: HARD_CODED_ADMIN_PASSWORD,
         permissions: {
-          budget: 'write',
-          income_bankeur: 'write',
-          orders: 'write',
-          ledger: 'write',
-          ledger_money_transfers: 'write',
-          archive: 'write',
-          settings: 'write',
+          budget: 'full',
+          income_bankeur: 'full',
+          orders: 'full',
+          ledger: 'full',
+          ledger_money_transfers: 'full',
+          archive: 'full',
+          settings: 'full',
         },
       };
 
@@ -1407,6 +1407,7 @@
   function isPublicRequestPage(pathname) {
     const base = getBasename(pathname);
     if (base === 'index.html') return true;
+    if (base === 'about.html') return true;
     if (base === 'itemize.html') return isPublicItemizeDraft();
     return false;
   }
@@ -2283,7 +2284,10 @@
             setCurrentUsername(u);
             const user = getCurrentUser();
             if (!tryRedirectToRememberedPage(user)) {
-              window.location.reload();
+              const _year = getActiveBudgetYear();
+              window.location.href = hasPermission(user, 'budget')
+                ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+                : firstAllowedHrefForUser(user, _year);
             }
           });
         }
@@ -2381,7 +2385,10 @@
           }
 
           if (!tryRedirectToRememberedPage(user)) {
-            window.location.reload();
+            const _year = getActiveBudgetYear();
+            window.location.href = hasPermission(user, 'budget')
+              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+              : firstAllowedHrefForUser(user, _year);
           }
         });
       }
@@ -2477,7 +2484,10 @@
           setCurrentUsername(u);
           const user = getCurrentUser();
           if (!tryRedirectToRememberedPage(user)) {
-            window.location.reload();
+            const _year = getActiveBudgetYear();
+            window.location.href = hasPermission(user, 'budget')
+              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+              : firstAllowedHrefForUser(user, _year);
           }
           return;
         }
@@ -2508,7 +2518,10 @@
 
         setCurrentUsername(u);
         if (!tryRedirectToRememberedPage(user)) {
-          window.location.reload();
+          const _year = getActiveBudgetYear();
+          window.location.href = hasPermission(user, 'budget')
+            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+            : firstAllowedHrefForUser(user, _year);
         }
       });
     }
@@ -3553,7 +3566,6 @@
     const inVal = normalizeBudgetTemplateKeyText(r.in);
     const outVal = normalizeBudgetTemplateKeyText(r.out);
     const desc = normalizeBudgetTemplateKeyText(r.description);
-    const approvedMock = getMockApprovedEuroForTemplateRow(r);
 
     const tr = document.createElement('tr');
     const receiptsOp = normalizeBudgetCalcToken(r.calcReceiptsOp);
@@ -3565,7 +3577,7 @@
       <td class="num">${escapeHtml(inVal)}</td>
       <td class="num">${escapeHtml(outVal)}</td>
       <td>${escapeHtml(desc)}</td>
-      <td class="num budgetTable__euro">${escapeHtml(formatBudgetEuro(approvedMock))}</td>
+      <td class="num budgetTable__euro">0.00 €</td>
       <td class="num budgetTable__euro">0.00 €</td>
       <td class="num budgetTable__euro">0.00 €</td>
       <td class="num budgetTable__bal">0.00 €</td>
@@ -3975,6 +3987,7 @@
 
   // Request form (index.html) header auth button
   const authHeaderBtn = document.getElementById('authHeaderBtn');
+  const aboutPopoutLink = document.getElementById('aboutPopoutLink');
 
   // Request form submission token
   const submitToken = document.getElementById('submitToken');
@@ -18036,7 +18049,7 @@
 
     const currentUser = getCurrentUser();
     const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = incomeLevel === 'write';
+    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income') : false;
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseEurViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
@@ -19711,7 +19724,7 @@
 
     const currentUser = getCurrentUser();
     const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = incomeLevel === 'write';
+    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income') : false;
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseUsdViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
@@ -20597,7 +20610,7 @@
 
     const currentUser = getCurrentUser();
     const budgetLevel = currentUser ? getEffectivePermissions(currentUser).budget : 'none';
-    const hasBudgetFullAccess = budgetLevel === 'write';
+    const hasBudgetFullAccess = currentUser ? canWrite(currentUser, 'budget') : false;
 
     const tbody = table.querySelector('tbody');
     if (!tbody) return;
@@ -20808,13 +20821,12 @@
 
       const seedTbody = document.createElement('tbody');
       for (const r of section1) {
-        const approvedMock = getMockApprovedEuroForTemplateRow(r);
         seedTbody.appendChild(
           buildDataRowFromRecord({
             in: r.in,
             out: r.out,
             description: r.description,
-            approvedEuro: formatBudgetEuro(approvedMock),
+            approvedEuro: '0.00 €',
             receiptsEuro: '0.00 €',
             expendituresEuro: '0.00 €',
             balanceEuro: '0.00 €',
@@ -20829,13 +20841,12 @@
       seedTbody.appendChild(buildTotalRow('Total Anticipated Values'));
       seedTbody.appendChild(buildSpacerRow());
       for (const r of section2) {
-        const approvedMock = getMockApprovedEuroForTemplateRow(r);
         seedTbody.appendChild(
           buildDataRowFromRecord({
             in: r.in,
             out: r.out,
             description: r.description,
-            approvedEuro: formatBudgetEuro(approvedMock),
+            approvedEuro: '0.00 €',
             receiptsEuro: '0.00 €',
             expendituresEuro: '0.00 €',
             balanceEuro: '0.00 €',
@@ -21462,11 +21473,10 @@
       // Only show Add/Remove while editing.
       setMenuItemVisible(addLineLink, isEditing);
       setMenuItemVisible(removeLineLink, isEditing);
-      setMenuItemVisible(deleteBudgetLink, isEditing);
 
       setLinkDisabled(addLineLink, !isEditing);
       setLinkDisabled(removeLineLink, !isEditing || !selectedRow);
-      setLinkDisabled(deleteBudgetLink, !isEditing || !hasBudgetFullAccess);
+      setLinkDisabled(deleteBudgetLink, !canDelete(currentUser, 'budget'));
 
       // In the dropdown, Edit should be available only when not editing.
       setLinkDisabled(editLink, isEditing);
@@ -22446,39 +22456,72 @@
     }
 
     function deleteCurrentBudgetYear() {
-      if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
-      if (!hasBudgetFullAccess) {
-        window.alert('Requires Full access for Budget.');
+      if (!requireDeleteAccess('budget', 'Requires Delete access for Budget.')) return;
+      const activeYear = loadActiveBudgetYear();
+      if (activeYear !== null && Number(activeYear) === Number(budgetYear)) {
+        window.alert('Active Budget cannot be deleted. Deactivate it first, then delete.');
         return;
       }
-      if (!isEditing) return;
 
       const ok = window.confirm(
-        `Delete the ${budgetYear} budget?\n\nThis removes the saved budget table for ${budgetYear} from shared storage.`
+        `Delete the ${budgetYear} budget year?\n\nThis permanently removes ALL data for ${budgetYear}: budget table, payment orders, ledger entries, money transfers, income records, backups, and the Archive link. This cannot be undone.`
       );
       if (!ok) return;
 
-      // Remove the saved budget HTML for this year.
-      if (budgetKey) localStorage.removeItem(budgetKey);
+      const y = Number(budgetYear);
+      const rm = (k) => { if (k) { try { localStorage.removeItem(k); } catch { /* ignore */ } } };
 
-      // Remove the year from the years list.
-      const years = loadBudgetYears().filter((y) => Number(y) !== Number(budgetYear));
+      // Budget
+      rm(getBudgetTableKeyForYear(y));
+      rm(getBudgetMetaKeyForYear(y));
+      rm(`payment_order_budget_checksums_visible_${y}_v1`);
+
+      // Payment orders & reconciliation
+      rm(getPaymentOrdersKeyForYear(y));
+      rm(getPaymentOrdersReconciliationKeyForYear(y));
+
+      // Money transfers
+      rm(getMoneyTransfersKeyForYear(y));
+
+      // Ledger
+      rm(getIncomeKeyForYear(y));
+      rm(getWiseEurKeyForYear(y));
+      rm(getWiseUsdKeyForYear(y));
+      rm(getGsLedgerVerifiedKeyForYear(y));
+
+      // Backups: remove all backup data entries then the index and last-auto marker
+      try {
+        const index = loadBackupIndex(y);
+        for (const m of (Array.isArray(index) ? index : [])) {
+          if (m && m.id) rm(getBackupDataKeyForYearId(y, m.id));
+        }
+      } catch { /* ignore */ }
+      rm(getBackupIndexKeyForYear(y));
+      rm(getBackupLastAutoKeyForYear(y));
+
+      // Remove year from list (this also removes the Archive link)
+      const years = loadBudgetYears().filter((yr) => Number(yr) !== y);
       saveBudgetYears(years);
 
       // If this was the active budget year, clear the active setting.
       if (loadActiveBudgetYear() === budgetYear) clearActiveBudgetYear();
 
-      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Deleted', []);
+      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Deleted', [
+        { field: 'Year', from: String(budgetYear), to: '' },
+      ]);
 
-      // Exit edit mode and navigate away (staying on this page would recreate the year on reload).
+      // Exit edit mode and navigate away.
       setSelectedRow(null);
       setEditing(false);
       editStartHtml = null;
       closeMenu();
 
-      const fallback = getCurrentBudgetYearFromDate(new Date());
-      const nextYear = years.length ? years[0] : fallback;
-      window.location.href = `budget.html?year=${encodeURIComponent(String(nextYear))}`;
+      if (years.length > 0) {
+        const nextYear = years[0];
+        window.location.href = `budget.html?year=${encodeURIComponent(String(nextYear))}`;
+      } else {
+        window.location.href = withWpEmbedParams('archive.html');
+      }
     }
 
     if (deleteBudgetLink) {
@@ -23207,12 +23250,22 @@
     const emptyEl = root.querySelector('[data-archive-empty]');
     if (!grid) return;
 
+    const currentUser = getCurrentUser();
+    const canManualDeleteFromArchive = currentUser
+      ? (getEffectivePermissions(currentUser).budget || 'none') === 'full'
+      : false;
+
     const config = getNavConfig();
     const isYearLabel = (label) => /^\d{4}$/.test(String(label || '').trim());
+    const actualYears = new Set(loadBudgetYears().map((y) => String(y)));
+    const activeBudgetYear = loadActiveBudgetYear();
 
     const areas = (Array.isArray(config) ? config : []).filter((it) => {
       const children = Array.isArray(it && it.children) ? it.children : [];
-      return children.some((c) => isYearLabel(c && c.label));
+      return children.some((c) => {
+        const label = String(c && c.label ? c.label : '').trim();
+        return isYearLabel(label) && actualYears.has(label);
+      });
     });
 
     grid.innerHTML = '';
@@ -23227,24 +23280,104 @@
       const h = document.createElement('h2');
       h.className = 'archive__title';
       h.textContent = String(area && area.label ? area.label : '').trim() || 'Archive';
-
       const yearsWrap = document.createElement('div');
       yearsWrap.className = 'archive__years';
 
-      const yearChildren = (Array.isArray(area && area.children) ? area.children : []).filter((c) => isYearLabel(c && c.label));
+      const yearChildren = (Array.isArray(area && area.children) ? area.children : []).filter((c) => {
+        const label = String(c && c.label ? c.label : '').trim();
+        return isYearLabel(label) && actualYears.has(label);
+      });
       for (const child of yearChildren) {
+        const yearLabel = String(child && child.label ? child.label : '').trim();
+        const yearNum = Number(yearLabel);
+        const isActiveBudgetYear = activeBudgetYear !== null && Number(activeBudgetYear) === yearNum;
+        const yearItem = document.createElement('span');
+        yearItem.className = 'archive__yearItem';
+
         const a = document.createElement('a');
         a.className = 'actionLink';
         a.href = String(child && child.href ? child.href : '#');
         a.textContent = '';
-        a.appendChild(document.createTextNode(String(child && child.label ? child.label : '').trim()));
-        if (child && child.isActiveBudgetYear) {
+        a.appendChild(document.createTextNode(yearLabel));
+        if (isActiveBudgetYear) {
           const badge = document.createElement('span');
           badge.className = 'appNavTree__badge';
           badge.textContent = ' (active)';
           a.appendChild(badge);
         }
-        yearsWrap.appendChild(a);
+        yearItem.appendChild(a);
+
+        if (canManualDeleteFromArchive && Number.isInteger(yearNum) && !isActiveBudgetYear) {
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'archive__yearDelete';
+          delBtn.setAttribute('aria-label', `Delete budget year ${yearLabel}`);
+          delBtn.setAttribute('title', `Delete all data for budget year ${yearLabel}`);
+          delBtn.textContent = 'x';
+
+          delBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const activeYear = loadActiveBudgetYear();
+            if (activeYear !== null && Number(activeYear) === yearNum) {
+              window.alert('Active Budget cannot be deleted. Deactivate it first, then delete.');
+              return;
+            }
+
+            const ok = window.confirm(
+              `Delete the ${yearLabel} budget year?\n\nThis permanently removes ALL data for ${yearLabel}: budget table, payment orders, ledger entries, money transfers, income records, backups, and this Archive link. This cannot be undone.`
+            );
+            if (!ok) return;
+
+            const rm = (k) => { if (k) { try { localStorage.removeItem(k); } catch { /* ignore */ } } };
+
+            // Budget
+            rm(getBudgetTableKeyForYear(yearNum));
+            rm(getBudgetMetaKeyForYear(yearNum));
+            rm(`payment_order_budget_checksums_visible_${yearNum}_v1`);
+
+            // Payment orders & reconciliation
+            rm(getPaymentOrdersKeyForYear(yearNum));
+            rm(getPaymentOrdersReconciliationKeyForYear(yearNum));
+
+            // Money transfers
+            rm(getMoneyTransfersKeyForYear(yearNum));
+
+            // Ledger
+            rm(getIncomeKeyForYear(yearNum));
+            rm(getWiseEurKeyForYear(yearNum));
+            rm(getWiseUsdKeyForYear(yearNum));
+            rm(getGsLedgerVerifiedKeyForYear(yearNum));
+
+            // Backups: remove all backup data entries then the index and last-auto marker
+            try {
+              const index = loadBackupIndex(yearNum);
+              for (const m of (Array.isArray(index) ? index : [])) {
+                if (m && m.id) rm(getBackupDataKeyForYearId(yearNum, m.id));
+              }
+            } catch { /* ignore */ }
+            rm(getBackupIndexKeyForYear(yearNum));
+            rm(getBackupLastAutoKeyForYear(yearNum));
+
+            // Remove year from list (this also removes the Archive link)
+            const years = loadBudgetYears().filter((yr) => Number(yr) !== yearNum);
+            saveBudgetYears(years);
+
+            // If this was the active budget year, clear the active setting.
+            if (loadActiveBudgetYear() === yearLabel || loadActiveBudgetYear() === yearNum) clearActiveBudgetYear();
+
+            appendAppAuditEvent(`Budget (${yearLabel})`, `Budget ${yearLabel}`, 'Deleted', [
+              { field: 'Year', from: yearLabel, to: '' },
+            ]);
+
+            initArchivePage();
+          });
+
+          yearItem.appendChild(delBtn);
+        }
+
+        yearsWrap.appendChild(yearItem);
       }
 
       header.appendChild(h);
@@ -23959,6 +24092,35 @@
         openAuthLoginOverlay();
       });
     }
+  }
+
+  if (aboutPopoutLink && !aboutPopoutLink.dataset.bound) {
+    aboutPopoutLink.dataset.bound = 'true';
+    aboutPopoutLink.addEventListener('click', (e) => {
+      e.preventDefault();
+
+      const href = withWpEmbedParams('about.html');
+      const w = 1120;
+      const h = 820;
+      const screenLeft = Number(window.screenLeft ?? window.screenX ?? 0) || 0;
+      const screenTop = Number(window.screenTop ?? window.screenY ?? 0) || 0;
+      const screenH = Number(window.screen?.height) || window.outerHeight || h;
+      const left = screenLeft + 20;
+      const top = Math.max(0, Math.round(screenTop + (screenH - h) / 2));
+      const features = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},left=${left},top=${top}`;
+
+      const win = window.open(href, 'acglAboutPopout', features);
+      if (!win) {
+        window.location.href = href;
+        return;
+      }
+      try {
+        if (typeof win.moveTo === 'function') win.moveTo(left, top);
+        if (typeof win.focus === 'function') win.focus();
+      } catch {
+        // ignore popup positioning limitations
+      }
+    });
   }
 
   if (downloadPdfBtn && !downloadPdfBtn.dataset.bound) {

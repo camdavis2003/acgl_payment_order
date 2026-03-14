@@ -485,6 +485,29 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   justify-content: center;
 }
 
+.archive__yearItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.archive__yearDelete {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.8;
+}
+
+.archive__yearDelete:hover,
+.archive__yearDelete:focus-visible {
+  opacity: 1;
+}
+
 .budgetDash__section {
   margin: 0;
 }
@@ -1027,6 +1050,18 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
 .subhead {
   margin: 0 0 8px;
   color: var(--muted);
+}
+
+.headerAboutLink {
+  display: inline-block;
+  font-weight: 700;
+  color: var(--focus);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.headerAboutLink:hover {
+  filter: brightness(0.95);
 }
 
 .headerThemeBlock {
@@ -1980,6 +2015,36 @@ html[data-theme="dark"] .btn--primary:focus-visible {
   gap: 18px;
   padding: 6px 0 38px;
   text-align: center;
+}
+
+body[data-page="about"] .authGate__brand {
+  padding-bottom: 4px;
+}
+
+body[data-page="about"] {
+  overflow: hidden;
+}
+
+body[data-page="about"] .appMain {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-page="about"] main.container {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body[data-page="about"] main.container > section.card {
+  height: 100%;
+  margin: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .authGate__brandTitle {

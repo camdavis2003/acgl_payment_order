@@ -23280,8 +23280,6 @@
       const h = document.createElement('h2');
       h.className = 'archive__title';
       h.textContent = String(area && area.label ? area.label : '').trim() || 'Archive';
-      const isBudgetArea = String(area && area.key ? area.key : '').trim() === 'budget';
-
       const yearsWrap = document.createElement('div');
       yearsWrap.className = 'archive__years';
 
@@ -23292,7 +23290,7 @@
       for (const child of yearChildren) {
         const yearLabel = String(child && child.label ? child.label : '').trim();
         const yearNum = Number(yearLabel);
-        const isActiveBudgetYear = isBudgetArea && activeBudgetYear !== null && Number(activeBudgetYear) === yearNum;
+        const isActiveBudgetYear = activeBudgetYear !== null && Number(activeBudgetYear) === yearNum;
         const yearItem = document.createElement('span');
         yearItem.className = 'archive__yearItem';
 

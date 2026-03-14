@@ -2284,7 +2284,10 @@
             setCurrentUsername(u);
             const user = getCurrentUser();
             if (!tryRedirectToRememberedPage(user)) {
-              window.location.reload();
+              const _year = getActiveBudgetYear();
+              window.location.href = hasPermission(user, 'budget')
+                ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+                : firstAllowedHrefForUser(user, _year);
             }
           });
         }
@@ -2382,7 +2385,10 @@
           }
 
           if (!tryRedirectToRememberedPage(user)) {
-            window.location.reload();
+            const _year = getActiveBudgetYear();
+            window.location.href = hasPermission(user, 'budget')
+              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+              : firstAllowedHrefForUser(user, _year);
           }
         });
       }
@@ -2478,7 +2484,10 @@
           setCurrentUsername(u);
           const user = getCurrentUser();
           if (!tryRedirectToRememberedPage(user)) {
-            window.location.reload();
+            const _year = getActiveBudgetYear();
+            window.location.href = hasPermission(user, 'budget')
+              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+              : firstAllowedHrefForUser(user, _year);
           }
           return;
         }
@@ -2509,7 +2518,10 @@
 
         setCurrentUsername(u);
         if (!tryRedirectToRememberedPage(user)) {
-          window.location.reload();
+          const _year = getActiveBudgetYear();
+          window.location.href = hasPermission(user, 'budget')
+            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+            : firstAllowedHrefForUser(user, _year);
         }
       });
     }
@@ -23971,12 +23983,24 @@
       const href = withWpEmbedParams('about.html');
       const w = 1120;
       const h = 820;
-      const left = Math.max(0, Math.round((window.screen.width - w) / 2));
-      const top = Math.max(0, Math.round((window.screen.height - h) / 2));
+      const screenLeft = Number(window.screenLeft ?? window.screenX ?? 0) || 0;
+      const screenTop = Number(window.screenTop ?? window.screenY ?? 0) || 0;
+      const screenH = Number(window.screen?.height) || window.outerHeight || h;
+      const left = screenLeft + 20;
+      const top = Math.max(0, Math.round(screenTop + (screenH - h) / 2));
       const features = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},left=${left},top=${top}`;
 
       const win = window.open(href, 'acglAboutPopout', features);
-      if (!win) window.location.href = href;
+      if (!win) {
+        window.location.href = href;
+        return;
+      }
+      try {
+        if (typeof win.moveTo === 'function') win.moveTo(left, top);
+        if (typeof win.focus === 'function') win.focus();
+      } catch {
+        // ignore popup positioning limitations
+      }
     });
   }
 

@@ -22511,9 +22511,12 @@
       editStartHtml = null;
       closeMenu();
 
-      const fallback = getCurrentBudgetYearFromDate(new Date());
-      const nextYear = years.length ? years[0] : fallback;
-      window.location.href = `budget.html?year=${encodeURIComponent(String(nextYear))}`;
+      if (years.length > 0) {
+        const nextYear = years[0];
+        window.location.href = `budget.html?year=${encodeURIComponent(String(nextYear))}`;
+      } else {
+        window.location.href = withWpEmbedParams('archive.html');
+      }
     }
 
     if (deleteBudgetLink) {
@@ -23244,10 +23247,14 @@
 
     const config = getNavConfig();
     const isYearLabel = (label) => /^\d{4}$/.test(String(label || '').trim());
+    const actualYears = new Set(loadBudgetYears().map((y) => String(y)));
 
     const areas = (Array.isArray(config) ? config : []).filter((it) => {
       const children = Array.isArray(it && it.children) ? it.children : [];
-      return children.some((c) => isYearLabel(c && c.label));
+      return children.some((c) => {
+        const label = String(c && c.label ? c.label : '').trim();
+        return isYearLabel(label) && actualYears.has(label);
+      });
     });
 
     grid.innerHTML = '';
@@ -23266,7 +23273,10 @@
       const yearsWrap = document.createElement('div');
       yearsWrap.className = 'archive__years';
 
-      const yearChildren = (Array.isArray(area && area.children) ? area.children : []).filter((c) => isYearLabel(c && c.label));
+      const yearChildren = (Array.isArray(area && area.children) ? area.children : []).filter((c) => {
+        const label = String(c && c.label ? c.label : '').trim();
+        return isYearLabel(label) && actualYears.has(label);
+      });
       for (const child of yearChildren) {
         const a = document.createElement('a');
         a.className = 'actionLink';

@@ -23634,15 +23634,31 @@
     if (payload.schema !== BACKUP_SCHEMA) return { ok: false, error: 'invalid_schema' };
     if (Number(payload.version) !== BACKUP_VERSION) return { ok: false, error: 'unsupported_version' };
 
-    const y = normalizeBackupYear(payload.year);
-    if (!y) return { ok: false, error: 'invalid_year' };
-
     if (IS_WP_SHARED_MODE && !getWpToken()) {
       return { ok: false, error: 'wp_login_required' };
     }
 
-    const allowed = new Set(getBackupScopedKeysForYear(y));
     const bag = payload.keys && typeof payload.keys === 'object' ? payload.keys : {};
+
+    // Build the set of allowed keys: all-years backup has a `years` array;
+    // legacy per-year backup has a single `year` field.
+    const years = [];
+    if (Array.isArray(payload.years)) {
+      for (const v of payload.years) {
+        const y = normalizeBackupYear(v);
+        if (y) years.push(y);
+      }
+    } else {
+      const y = normalizeBackupYear(payload.year);
+      if (y) years.push(y);
+    }
+
+    if (years.length === 0) return { ok: false, error: 'invalid_year' };
+
+    const allowed = new Set();
+    for (const y of years) {
+      for (const k of getBackupScopedKeysForYear(y)) allowed.add(k);
+    }
 
     for (const k of Object.keys(bag)) {
       if (!allowed.has(k)) continue;
@@ -23654,15 +23670,16 @@
       }
     }
 
-    // Ensure the year is discoverable in the budget year list.
+    // Ensure all years are discoverable in the budget year list.
     try {
-      const years = loadBudgetYears();
-      if (!years.includes(y)) saveBudgetYears([y, ...years]);
+      const existing = loadBudgetYears();
+      const merged = Array.from(new Set([...years, ...existing]));
+      saveBudgetYears(merged);
     } catch {
       // ignore
     }
 
-    return { ok: true, year: y };
+    return { ok: true, years };
   }
 
   function formatBackupCreatedAt(iso) {
@@ -23742,13 +23759,10 @@
     }
 
     function filterCloudFilesForYear(files, year) {
-      const y = normalizeBackupYear(year);
-      if (!y) return [];
+      // Kept for compatibility when restoring from per-year backup files.
+      // All-years backups (acgl-fms-backup-all-*) are shown without filtering.
       const list = Array.isArray(files) ? files : [];
-      const prefix = `acgl-fms-backup-${String(y)}-`;
-      return list
-        .filter((f) => f && typeof f === 'object')
-        .filter((f) => String(f.name || '').trim().startsWith(prefix));
+      return list.filter((f) => f && typeof f === 'object');
     }
 
     async function fetchGdriveBackupPayloadById(fileId) {
@@ -23793,7 +23807,7 @@
         }
 
         gdriveCloudStatus = '';
-        gdriveCloudFiles = filterCloudFilesForYear(data.files || [], y);
+        gdriveCloudFiles = Array.isArray(data.files) ? data.files.filter((f) => f && typeof f === 'object') : [];
         render();
       } catch {
         gdriveCloudStatus = 'Could not load cloud backups.';
@@ -23830,10 +23844,7 @@
       }
     }
 
-    function renderGdriveCloudCard(year) {
-      const y = normalizeBackupYear(year);
-      if (!y) return null;
-
+    function renderGdriveCloudCard() {
       const card = document.createElement('div');
       card.className = 'archive__card';
 
@@ -23842,7 +23853,7 @@
 
       const h = document.createElement('h3');
       h.className = 'archive__title';
-      h.textContent = `${String(y)} Cloud (Google)`;
+      h.textContent = 'Cloud Backups (Google Drive)';
       header.appendChild(h);
       card.appendChild(header);
 
@@ -23853,7 +23864,7 @@
         card.appendChild(status);
       }
 
-      const list = gdriveCloudYear === y ? gdriveCloudFiles : [];
+      const list = gdriveCloudFiles;
       let any = false;
       for (const f of list) {
         if (!f || typeof f !== 'object') continue;
@@ -23889,7 +23900,7 @@
             render();
             return;
           }
-          const fileName = String((data.file && data.file.name) || '').trim() || `acgl-fms-backup-${String(y)}-${id}.json`;
+          const fileName = String((data.file && data.file.name) || '').trim() || `acgl-fms-backup-all-${id}.json`;
           const text = JSON.stringify(data.payload, null, 2);
           const blob = new Blob([text], { type: 'application/json;charset=utf-8;' });
           downloadBlob(blob, fileName);
@@ -23908,7 +23919,7 @@
             window.alert('Please sign in.');
             return;
           }
-          const ok = window.confirm(`Restore ${String(y)} from this cloud backup? This will overwrite ${String(y)} data.`);
+          const ok = window.confirm(`Restore all years from this cloud backup? This will overwrite all backed-up year data.`);
           if (!ok) return;
 
           gdriveCloudStatus = 'Restoring…';
@@ -24041,10 +24052,12 @@
         grid.appendChild(card);
         }
 
-        if (canUseGdrive && cloudYear && y === cloudYear) {
-          const cloudCard = renderGdriveCloudCard(y);
-          if (cloudCard) grid.appendChild(cloudCard);
-        }
+      }
+
+      // The Google Drive cloud card covers all years in one file — render it once.
+      if (canUseGdrive) {
+        const cloudCard = renderGdriveCloudCard();
+        if (cloudCard) grid.appendChild(cloudCard);
       }
 
       if (emptyEl) emptyEl.hidden = anyBackups;

@@ -26,6 +26,7 @@ const FILES = [
   'reconciliation.html',
   'grand_secretary_ledger.html',
   'settings.html',
+  'google_backup_setup.html',
   'itemize.html',
   'loading.html',
   'iban.js',

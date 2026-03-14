@@ -815,11 +815,6 @@
       // ignore
     }
 
-    // Persist an audit trail of sign-in events (in localStorage) so it is visible
-    // on the Settings -> Audit Log page.
-    if (u) {
-      appendAuthAuditEvent('Login', u);
-    }
   }
 
   function formatLoginAtForDisplay(isoString) {
@@ -875,12 +870,7 @@
     if (!prev) return;
 
     // Record as an auth audit note, excluding hard-coded admin.
-    appendAuthAuditEvent('Auto log out', prev);
-
-    // Persist the logout event BEFORE clearing the token so the request arrives authenticated.
-    if (IS_WP_SHARED_MODE) {
-      try { await persistAuthAuditToWpNow(false, getWpToken()); } catch { }
-    }
+    await appendAuthAuditEvent('Auto log out', prev);
 
     // Clear session (do not also write a normal Logout record).
     setCurrentUsername('');
@@ -920,18 +910,14 @@
 
       const idleMs = Date.now() - lastMs;
       if (idleMs >= IDLE_LIMIT_MS) {
-        performAutoLogout();
+        void performAutoLogout();
       }
     }, 15 * 1000);
   }
 
   async function performLogout() {
     const prev = normalizeUsername(getCurrentUsername());
-    if (prev) appendAuthAuditEvent('Logout', prev);
-    // Persist the logout event BEFORE clearing the token so the request arrives authenticated.
-    if (IS_WP_SHARED_MODE) {
-      try { await persistAuthAuditToWpNow(false, getWpToken()); } catch { }
-    }
+    if (prev) await appendAuthAuditEvent('Logout', prev);
     setCurrentUsername('');
     if (IS_WP_SHARED_MODE) clearWpToken();
   }
@@ -940,11 +926,67 @@
     if (!IS_WP_SHARED_MODE) return { ok: true, skipped: true };
     try {
       const raw = String(localStorage.getItem(AUTH_AUDIT_KEY) || '').trim();
-      const value = raw ? raw : '[]';
+      const localEvents = safeJsonParse(raw, []);
+      const localList = Array.isArray(localEvents) ? localEvents : [];
       const url = wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(AUTH_AUDIT_KEY))}`);
       const headers = { 'Content-Type': 'application/json' };
       const auth = String(tokenOverride || '').trim();
       if (auth) headers.Authorization = `Bearer ${auth}`;
+
+      // Merge server + local lists before save so concurrent clients do not
+      // overwrite each other's login/logout events.
+      let merged = localList;
+      try {
+        const getRes = await wpFetchJson(url, { method: 'GET', headers });
+        if (getRes && getRes.ok) {
+          const payload = await readJsonResponse(getRes);
+          const remoteRaw = payload && typeof payload.v === 'string' ? payload.v : '';
+          const remoteEvents = safeJsonParse(remoteRaw, []);
+          const remoteList = Array.isArray(remoteEvents) ? remoteEvents : [];
+
+          const keyOf = (e) => {
+            if (!e || typeof e !== 'object') return '';
+            const at = String(e.at || '').trim();
+            const user = String(e.user || '').trim().toLowerCase();
+            const action = String(e.action || '').trim().toLowerCase();
+            const module = String(e.module || '').trim().toLowerCase();
+            const record = String(e.record || '').trim().toLowerCase();
+            return `${at}|${user}|${action}|${module}|${record}`;
+          };
+
+          const map = new Map();
+          for (const e of remoteList) {
+            const k = keyOf(e);
+            if (!k) continue;
+            map.set(k, e);
+          }
+          for (const e of localList) {
+            const k = keyOf(e);
+            if (!k) continue;
+            map.set(k, e);
+          }
+
+          merged = Array.from(map.values());
+          merged.sort((a, b) => {
+            const ams = toTimeMs(a && a.at ? a.at : '') ?? 0;
+            const bms = toTimeMs(b && b.at ? b.at : '') ?? 0;
+            return ams - bms;
+          });
+          const MAX = 200;
+          if (merged.length > MAX) merged = merged.slice(merged.length - MAX);
+
+          // Keep local copy aligned with what we write to the server.
+          try {
+            saveAuthAuditEvents(merged);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // If merge-read fails, still try to persist local events.
+      }
+
+      const value = JSON.stringify(Array.isArray(merged) ? merged : []);
       const res = await wpFetchJson(url, {
         method: 'POST',
         headers,
@@ -981,7 +1023,7 @@
     }
   }
 
-  function appendAuthAuditEvent(actionRaw, usernameRaw) {
+  async function appendAuthAuditEvent(actionRaw, usernameRaw) {
     const action = String(actionRaw || '').trim() || 'Event';
     const user = normalizeUsername(usernameRaw) || '—';
     const at = new Date().toISOString();
@@ -1000,7 +1042,11 @@
       const tokenAtWrite = getWpToken();
       const actionLower = action.toLowerCase();
       const shouldKeepalive = actionLower === 'logout' || actionLower === 'auto log out' || actionLower === 'auto logout';
-      void persistAuthAuditToWpNow(shouldKeepalive, tokenAtWrite);
+      try {
+        await persistAuthAuditToWpNow(shouldKeepalive, tokenAtWrite);
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -2322,13 +2368,7 @@
             }
 
             setCurrentUsername(u);
-            if (IS_WP_SHARED_MODE) {
-              try {
-                await persistAuthAuditToWpNow(false, getWpToken());
-              } catch {
-                // ignore and continue redirect
-              }
-            }
+            await appendAuthAuditEvent('Login', u);
             const user = getCurrentUser();
             const _year = getLoginLandingBudgetYear();
             window.location.href = hasPermission(user, 'budget')
@@ -2422,13 +2462,7 @@
           }
 
           setCurrentUsername(u);
-          if (IS_WP_SHARED_MODE) {
-            try {
-              await persistAuthAuditToWpNow(false, getWpToken());
-            } catch {
-              // ignore and continue redirect
-            }
-          }
+          await appendAuthAuditEvent('Login', u);
 
           const required = requiredPermissionForPage(window.location.pathname);
           if (!hasPermission(user, required)) {
@@ -2532,13 +2566,7 @@
           }
 
           setCurrentUsername(u);
-          if (IS_WP_SHARED_MODE) {
-            try {
-              await persistAuthAuditToWpNow(false, getWpToken());
-            } catch {
-              // ignore and continue redirect
-            }
-          }
+          await appendAuthAuditEvent('Login', u);
           const user = getCurrentUser();
           const _year = getLoginLandingBudgetYear();
           window.location.href = hasPermission(user, 'budget')
@@ -2572,13 +2600,7 @@
         }
 
         setCurrentUsername(u);
-        if (IS_WP_SHARED_MODE) {
-          try {
-            await persistAuthAuditToWpNow(false, getWpToken());
-          } catch {
-            // ignore and continue redirect
-          }
-        }
+        await appendAuthAuditEvent('Login', u);
         const _year = getLoginLandingBudgetYear();
         window.location.href = hasPermission(user, 'budget')
           ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
@@ -23970,29 +23992,25 @@
 
     function render() {
       const years = getKnownYears();
-      const cloudYear = canUseGdrive ? getCloudYearForUi() : null;
       const activeYear = normalizeBackupYear(getActiveBudgetYear());
       grid.innerHTML = '';
 
       let anyBackups = false;
-      for (const y of years) {
-        const idx = loadBackupIndex(y);
-        if (idx.length > 0) anyBackups = true;
+      let renderedAny = false;
 
-        // Only render a WordPress year card if it has backups, or if it's the active year.
-        // (Create actions live in the card header now.)
-        const showWpYearCard = idx.length > 0 || (activeYear && y === activeYear);
-
-        if (showWpYearCard) {
+      function createWpYearCard(y, idx, isActiveYear) {
         const card = document.createElement('div');
         card.className = 'archive__card';
+        if (!isActiveYear) card.classList.add('backupCard--belowTop');
 
         const header = document.createElement('div');
         header.className = 'archive__cardHeader';
 
         const h = document.createElement('h3');
         h.className = 'archive__title';
-        h.textContent = `${String(y)} (WordPress)`;
+        h.textContent = isActiveYear
+          ? `${String(y)} (WordPress - Active)`
+          : `${String(y)} (WordPress)`;
         header.appendChild(h);
         card.appendChild(header);
 
@@ -24045,22 +24063,60 @@
           buttons.appendChild(rs);
 
           row.appendChild(buttons);
-
           card.appendChild(row);
         }
 
-        grid.appendChild(card);
+        if (idx.length === 0) {
+          const empty = document.createElement('p');
+          empty.className = 'empty';
+          empty.textContent = isActiveYear ? 'No active-year WordPress backups yet.' : 'No WordPress backups yet.';
+          card.appendChild(empty);
         }
 
+        return card;
       }
 
-      // The Google Drive cloud card covers all years in one file — render it once.
+      const otherWpCards = [];
+      let activeWpCard = null;
+
+      for (const y of years) {
+        const idx = loadBackupIndex(y);
+        if (idx.length > 0) anyBackups = true;
+
+        // Only render a WordPress year card if it has backups, or if it's the active year.
+        const showWpYearCard = idx.length > 0 || (activeYear && y === activeYear);
+        if (!showWpYearCard) continue;
+
+        const isActiveYear = Boolean(activeYear && y === activeYear);
+        const card = createWpYearCard(y, idx, isActiveYear);
+
+        if (isActiveYear) activeWpCard = card;
+        else otherWpCards.push(card);
+      }
+
+      // Priority order:
+      // 1) Active-year WordPress backups
+      // 2) Google Drive cloud backups
+      // 3) Non-active WordPress year backups
+      if (activeWpCard) {
+        grid.appendChild(activeWpCard);
+        renderedAny = true;
+      }
+
       if (canUseGdrive) {
         const cloudCard = renderGdriveCloudCard();
-        if (cloudCard) grid.appendChild(cloudCard);
+        if (cloudCard) {
+          grid.appendChild(cloudCard);
+          renderedAny = true;
+        }
       }
 
-      if (emptyEl) emptyEl.hidden = anyBackups;
+      for (const card of otherWpCards) {
+        grid.appendChild(card);
+        renderedAny = true;
+      }
+
+      if (emptyEl) emptyEl.hidden = renderedAny || anyBackups;
     }
 
     if (createActiveBtn && !createActiveBtn.dataset.bound) {

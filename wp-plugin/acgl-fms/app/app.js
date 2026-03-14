@@ -23309,17 +23309,12 @@
         }
         yearItem.appendChild(a);
 
-        if (canManualDeleteFromArchive && Number.isInteger(yearNum)) {
+        if (canManualDeleteFromArchive && Number.isInteger(yearNum) && !isActiveBudgetYear) {
           const delBtn = document.createElement('button');
           delBtn.type = 'button';
           delBtn.className = 'archive__yearDelete';
           delBtn.setAttribute('aria-label', `Delete budget year ${yearLabel}`);
-          if (isActiveBudgetYear) {
-            delBtn.disabled = true;
-            delBtn.setAttribute('title', `Cannot delete active budget year ${yearLabel}. Deactivate it first.`);
-          } else {
-            delBtn.setAttribute('title', `Delete all data for budget year ${yearLabel}`);
-          }
+          delBtn.setAttribute('title', `Delete all data for budget year ${yearLabel}`);
           delBtn.textContent = 'x';
 
           delBtn.addEventListener('click', (e) => {

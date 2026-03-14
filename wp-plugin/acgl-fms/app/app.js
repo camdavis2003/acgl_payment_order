@@ -18049,7 +18049,7 @@
 
     const currentUser = getCurrentUser();
     const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = incomeLevel === 'write';
+    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income') : false;
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseEurViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
@@ -19724,7 +19724,7 @@
 
     const currentUser = getCurrentUser();
     const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = incomeLevel === 'write';
+    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income') : false;
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseUsdViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
@@ -20610,7 +20610,7 @@
 
     const currentUser = getCurrentUser();
     const budgetLevel = currentUser ? getEffectivePermissions(currentUser).budget : 'none';
-    const hasBudgetFullAccess = budgetLevel === 'write';
+    const hasBudgetFullAccess = currentUser ? canWrite(currentUser, 'budget') : false;
 
     const tbody = table.querySelector('tbody');
     if (!tbody) return;

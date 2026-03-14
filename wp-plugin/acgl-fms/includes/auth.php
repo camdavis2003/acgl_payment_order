@@ -112,13 +112,21 @@ function acgl_fms_verify_token($token) {
 }
 
 function acgl_fms_normalize_perm_level($value) {
-    if ($value === true) return 'write';
+    if ($value === true) return 'full';
     if ($value === false || $value === null) return 'none';
     $v = strtolower(trim((string) $value));
-    if ($v === 'write' || $v === 'full' || $v === 'fullaccess') return 'write';
+    if ($v === 'full' || $v === 'fullaccess' || $v === 'admin') return 'full';
+    if ($v === 'delete' || $v === 'remove') return 'delete';
+    if ($v === 'create' || $v === 'add') return 'create';
+    if ($v === 'write' || $v === 'edit') return 'write';
     if ($v === 'partial' || $v === 'limited' || $v === 'some') return 'partial';
     if ($v === 'read' || $v === 'readonly' || $v === 'read-only') return 'read';
     return 'none';
+}
+
+function acgl_fms_level_allows_write($level) {
+    $lvl = strtolower(trim((string) $level));
+    return in_array($lvl, ['partial', 'write', 'create', 'delete', 'full'], true);
 }
 
 function acgl_fms_normalize_permissions($perms) {
@@ -198,9 +206,7 @@ function acgl_fms_token_allows_key($tokenPayload, $key, $isWrite) {
 
     if ($level === 'none') return false;
 
-    if ($isWrite) {
-        return $level === 'write' || $level === 'partial';
-    }
+    if ($isWrite) return acgl_fms_level_allows_write($level);
 
     return true;
 }
@@ -298,7 +304,7 @@ function acgl_fms_load_users_from_kv() {
 }
 
 function acgl_fms_ensure_default_admin_pass_user_exists() {
-    // Ensure the built-in bootstrap admin exists, without overwriting other users.
+    // Ensure the built-in bootstrap admin exists, and keep it at full access.
     try {
         $raw = acgl_fms_kv_get_raw('payment_order_users_v1');
         $users = [];
@@ -313,16 +319,25 @@ function acgl_fms_ensure_default_admin_pass_user_exists() {
         }
 
         $adminU = 'admin.pass';
-        foreach ($users as $row) {
+        $foundIdx = -1;
+        foreach ($users as $idx => $row) {
             $ru = strtolower(trim((string) ($row['username'] ?? '')));
             if ($ru === $adminU) {
-                return;
+                $foundIdx = (int) $idx;
+                break;
             }
         }
 
         $now = gmdate('c');
         $salt = 'acgl_fms_admin_v1';
         $pwHash = 'pw:' . base64_encode($salt . ':' . 'acgl1962ADM');
+        $adminPerms = [
+            'budget' => 'full',
+            'income' => 'full',
+            'orders' => 'full',
+            'ledger' => 'full',
+            'settings' => 'full',
+        ];
         $admin = [
             'id' => 'user_admin_pass_v1',
             'createdAt' => $now,
@@ -332,10 +347,26 @@ function acgl_fms_ensure_default_admin_pass_user_exists() {
             'salt' => $salt,
             'passwordHash' => $pwHash,
             'passwordPlain' => '',
-            'permissions' => [ 'budget' => 'write', 'income' => 'write', 'orders' => 'write', 'ledger' => 'write', 'settings' => 'write' ],
+            'permissions' => $adminPerms,
         ];
 
-        $users[] = $admin;
+        if ($foundIdx === -1) {
+            $users[] = $admin;
+        } else {
+            $current = is_array($users[$foundIdx]) ? $users[$foundIdx] : [];
+            $users[$foundIdx] = array_merge($current, [
+                'id' => (string) ($current['id'] ?? 'user_admin_pass_v1'),
+                'createdAt' => (string) ($current['createdAt'] ?? $now),
+                'updatedAt' => $now,
+                'username' => $adminU,
+                'email' => (string) ($current['email'] ?? ''),
+                'salt' => $salt,
+                'passwordHash' => $pwHash,
+                'passwordPlain' => '',
+                'permissions' => $adminPerms,
+            ]);
+        }
+
         acgl_fms_kv_set_raw('payment_order_users_v1', wp_json_encode($users));
     } catch (Throwable $e) {
         // ignore

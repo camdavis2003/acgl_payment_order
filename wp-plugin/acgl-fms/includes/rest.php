@@ -24,7 +24,7 @@ function acgl_fms_authorize_settings_write() {
 
     $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
     $lvl = $perms['settings'] ?? 'none';
-    return $lvl === 'write' || $lvl === 'partial';
+    return acgl_fms_level_allows_write($lvl);
 }
 
 function acgl_fms_public_year2_from_budget_year($budgetYear) {
@@ -97,7 +97,7 @@ function acgl_fms_authorize_attachments($isWrite) {
     $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
     $lvl = $perms['orders'] ?? 'none';
     if ($lvl === 'none') return false;
-    if ($isWrite) return $lvl === 'write' || $lvl === 'partial';
+    if ($isWrite) return acgl_fms_level_allows_write($lvl);
     return true;
 }
 
@@ -118,7 +118,7 @@ function acgl_fms_authorize_backlog_attachments($isWrite) {
     $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
     $lvl = $perms['settings'] ?? 'none';
     if ($lvl === 'none') return false;
-    if ($isWrite) return $lvl === 'write' || $lvl === 'partial';
+    if ($isWrite) return acgl_fms_level_allows_write($lvl);
     return true;
 }
 

@@ -1407,6 +1407,7 @@
   function isPublicRequestPage(pathname) {
     const base = getBasename(pathname);
     if (base === 'index.html') return true;
+    if (base === 'about.html') return true;
     if (base === 'itemize.html') return isPublicItemizeDraft();
     return false;
   }
@@ -3975,6 +3976,7 @@
 
   // Request form (index.html) header auth button
   const authHeaderBtn = document.getElementById('authHeaderBtn');
+  const aboutPopoutLink = document.getElementById('aboutPopoutLink');
 
   // Request form submission token
   const submitToken = document.getElementById('submitToken');
@@ -23959,6 +23961,23 @@
         openAuthLoginOverlay();
       });
     }
+  }
+
+  if (aboutPopoutLink && !aboutPopoutLink.dataset.bound) {
+    aboutPopoutLink.dataset.bound = 'true';
+    aboutPopoutLink.addEventListener('click', (e) => {
+      e.preventDefault();
+
+      const href = withWpEmbedParams('about.html');
+      const w = 1120;
+      const h = 820;
+      const left = Math.max(0, Math.round((window.screen.width - w) / 2));
+      const top = Math.max(0, Math.round((window.screen.height - h) / 2));
+      const features = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},left=${left},top=${top}`;
+
+      const win = window.open(href, 'acglAboutPopout', features);
+      if (!win) window.location.href = href;
+    });
   }
 
   if (downloadPdfBtn && !downloadPdfBtn.dataset.bound) {

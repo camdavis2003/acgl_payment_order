@@ -1029,6 +1029,18 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
   color: var(--muted);
 }
 
+.headerAboutLink {
+  display: inline-block;
+  font-weight: 700;
+  color: var(--focus);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.headerAboutLink:hover {
+  filter: brightness(0.95);
+}
+
 .headerThemeBlock {
   display: flex;
   flex-direction: column;

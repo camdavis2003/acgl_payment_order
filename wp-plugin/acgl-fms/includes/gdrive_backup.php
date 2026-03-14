@@ -205,7 +205,7 @@ function acgl_fms_gdrive_list_backup_files($token, $folderId, $pageSize) {
     if ($n < 1) $n = 20;
     if ($n > 100) $n = 100;
 
-    // List recent JSON backups in the folder.
+    // List recent JSON backups in the folder. Matches both old per-year files and new all-years files.
     $q = sprintf("'%s' in parents and mimeType='application/json' and name contains 'acgl-fms-backup-'", str_replace("'", "\\'", (string) $folderId));
 
     $url = add_query_arg([
@@ -361,7 +361,7 @@ function acgl_fms_gdrive_get_backup_payload_by_file_id($fileId) {
         return [ 'ok' => false, 'error' => 'not_json' ];
     }
 
-    // Restrict to expected naming pattern.
+    // Restrict to expected naming pattern (per-year or all-years).
     if ($name === '' || strpos($name, 'acgl-fms-backup-') !== 0) {
         return [ 'ok' => false, 'error' => 'not_a_backup' ];
     }
@@ -402,13 +402,9 @@ function acgl_fms_gdrive_get_backup_payload_by_file_id($fileId) {
     ];
 }
 
-function acgl_fms_gdrive_backup_year_payload($year, $kind) {
+function acgl_fms_gdrive_backup_year_keys($year) {
     $y = (int) $year;
-    if ($y < 1900 || $y > 3000) {
-        return null;
-    }
-
-    $keys = [
+    return [
         'payment_orders_' . $y . '_v1',
         'payment_orders_reconciliation_' . $y . '_v1',
         'payment_order_income_' . $y . '_v1',
@@ -417,10 +413,33 @@ function acgl_fms_gdrive_backup_year_payload($year, $kind) {
         'payment_order_wise_usd_' . $y . '_v1',
         'payment_order_gs_ledger_verified_' . $y . '_v1',
     ];
+}
+
+function acgl_fms_gdrive_backup_all_years_payload($years, $kind) {
+    // Always-included shared keys.
+    $sharedKeys = [
+        'payment_order_users_v1',
+        'payment_order_numbering',
+        'payment_order_grand_lodge_info_v1',
+        'payment_order_budget_years_v1',
+        'payment_order_active_budget_year_v1',
+        'payment_order_budget_template_rows_v1',
+        'payment_order_backlog_v1',
+    ];
 
     $bag = [];
-    foreach ($keys as $k) {
+    foreach ($sharedKeys as $k) {
         $bag[$k] = acgl_fms_kv_get_raw($k);
+    }
+
+    $includedYears = [];
+    foreach ($years as $year) {
+        $y = (int) $year;
+        if ($y < 1900 || $y > 3000) continue;
+        $includedYears[] = $y;
+        foreach (acgl_fms_gdrive_backup_year_keys($y) as $k) {
+            $bag[$k] = acgl_fms_kv_get_raw($k);
+        }
     }
 
     $id = acgl_fms_gdrive_now_backup_id();
@@ -429,7 +448,7 @@ function acgl_fms_gdrive_backup_year_payload($year, $kind) {
     return [
         'schema' => ACGL_FMS_GDRIVE_SCHEMA,
         'version' => ACGL_FMS_GDRIVE_VERSION,
-        'year' => $y,
+        'years' => $includedYears,
         'id' => $id,
         'createdAt' => $createdAt,
         'kind' => $kind === 'auto' ? 'auto' : 'manual',
@@ -475,38 +494,17 @@ function acgl_fms_gdrive_run_backup_upload($kind) {
     }
 
     $years = acgl_fms_gdrive_backup_get_known_years();
-    if (count($years) === 0) {
-        return [ 'ok' => false, 'error' => 'no_years' ];
-    }
+    // Upload a single backup file that covers all years.
+    $payload = acgl_fms_gdrive_backup_all_years_payload($years, $kind);
 
-    $results = [];
-    foreach ($years as $year) {
-        $payload = acgl_fms_gdrive_backup_year_payload($year, $kind);
-        if (!$payload) {
-            $results[] = [ 'year' => $year, 'ok' => false, 'error' => 'invalid_year' ];
-            continue;
-        }
+    $fileName = 'acgl-fms-backup-all-' . (string) $payload['id'] . '.json';
+    $text = wp_json_encode($payload, JSON_PRETTY_PRINT);
+    $up = acgl_fms_gdrive_upload_json($token, (string) $config['folderId'], $fileName, (string) $text);
 
-        $fileName = 'acgl-fms-backup-' . $year . '-' . (string) $payload['id'] . '.json';
-        $text = wp_json_encode($payload, JSON_PRETTY_PRINT);
-        $up = acgl_fms_gdrive_upload_json($token, (string) $config['folderId'], $fileName, (string) $text);
-        $results[] = array_merge([ 'year' => $year, 'fileName' => $fileName ], $up);
-    }
-
-    $uploaded = 0;
-    $failed = 0;
-    foreach ($results as $r) {
-        if (!is_array($r)) continue;
-        if (!empty($r['ok'])) $uploaded++;
-        else $failed++;
-    }
-
-    return [
-        'ok' => $uploaded > 0 && $failed === 0,
-        'uploaded' => $uploaded,
-        'failed' => $failed,
-        'results' => $results,
-    ];
+    return array_merge(
+        [ 'fileName' => $fileName, 'years' => $years, 'uploaded' => empty($up['ok']) ? 0 : 1, 'failed' => empty($up['ok']) ? 1 : 0 ],
+        $up
+    );
 }
 
 function acgl_fms_gdrive_backup_daily_handler() {

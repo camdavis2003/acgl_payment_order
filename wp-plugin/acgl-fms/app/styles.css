@@ -458,6 +458,10 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   padding: 14px;
 }
 
+[data-backup] .archive__grid > .archive__card.backupCard--belowTop {
+  grid-column: 1 / -1;
+}
+
 .archive__cardHeader {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1058,6 +1062,18 @@ html[data-theme="dark"] .switch__input:checked + .switch__track {
   color: var(--focus);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.headerAboutLinks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.headerAboutSep {
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .headerAboutLink:hover {

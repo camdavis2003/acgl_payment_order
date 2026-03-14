@@ -415,26 +415,31 @@
     const kvListUrl = wpJoin('acgl-fms/v1/kv');
     const itemUrl = (key) => wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(key || ''))}`);
 
+    async function hydrateSharedFromWp() {
+      const res = await wpFetchJson(kvListUrl, { method: 'GET' });
+      if (res.status === 401 || res.status === 403) return false;
+      if (!res.ok) throw new Error(`kv_list_failed_${res.status}`);
+
+      const payload = await readJsonResponse(res);
+      const items = payload && Array.isArray(payload.items) ? payload.items : [];
+
+      mem.clear();
+      for (const it of items) {
+        if (!it || typeof it !== 'object') continue;
+        const k = String(it.k || '').trim();
+        if (!isWpSharedKey(k)) continue;
+        const v = it.v === null || it.v === undefined ? null : String(it.v);
+        if (v === null) mem.delete(k);
+        else mem.set(k, v);
+      }
+      return true;
+    }
+
     // 1) Load all shared keys from WP into memory.
     try {
-      const res = await wpFetchJson(kvListUrl, { method: 'GET' });
-      if (res.status === 401 || res.status === 403) {
+      const ok = await hydrateSharedFromWp();
+      if (!ok) {
         // Not signed into the app yet (public mode). Continue with an empty in-memory store.
-      } else if (!res.ok) {
-        // If WP is reachable but the API fails, fall back to local storage.
-        return;
-      }
-      if (res.ok) {
-        const payload = await readJsonResponse(res);
-        const items = payload && Array.isArray(payload.items) ? payload.items : [];
-        for (const it of items) {
-          if (!it || typeof it !== 'object') continue;
-          const k = String(it.k || '').trim();
-          if (!isWpSharedKey(k)) continue;
-          const v = it.v === null || it.v === undefined ? null : String(it.v);
-          if (v === null) mem.delete(k);
-          else mem.set(k, v);
-        }
       }
     } catch {
       // Network errors: fall back to local storage.
@@ -518,6 +523,8 @@
     // Expose a safe way to force persistence before navigation.
     // Used when the UI redirects immediately after writing shared keys.
     window.acglFmsWpFlushNow = flushNow;
+    // Expose a way to refresh shared data after successful token login.
+    window.acglFmsWpHydrateSharedNow = hydrateSharedFromWp;
 
     // 2) Override localStorage for shared keys only.
     storage.getItem = (key) => {
@@ -808,11 +815,6 @@
       // ignore
     }
 
-    // Persist an audit trail of sign-in events (in localStorage) so it is visible
-    // on the Settings -> Audit Log page.
-    if (u) {
-      appendAuthAuditEvent('Login', u);
-    }
   }
 
   function formatLoginAtForDisplay(isoString) {
@@ -863,12 +865,12 @@
     }
   }
 
-  function performAutoLogout() {
+  async function performAutoLogout() {
     const prev = normalizeUsername(getCurrentUsername());
     if (!prev) return;
 
     // Record as an auth audit note, excluding hard-coded admin.
-    appendAuthAuditEvent('Auto log out', prev);
+    await appendAuthAuditEvent('Auto log out', prev);
 
     // Clear session (do not also write a normal Logout record).
     setCurrentUsername('');
@@ -908,33 +910,96 @@
 
       const idleMs = Date.now() - lastMs;
       if (idleMs >= IDLE_LIMIT_MS) {
-        performAutoLogout();
+        void performAutoLogout();
       }
     }, 15 * 1000);
   }
 
-  function performLogout() {
+  async function performLogout() {
     const prev = normalizeUsername(getCurrentUsername());
-    if (prev) appendAuthAuditEvent('Logout', prev);
+    if (prev) await appendAuthAuditEvent('Logout', prev);
     setCurrentUsername('');
     if (IS_WP_SHARED_MODE) clearWpToken();
   }
 
-  async function persistAuthAuditToWpNow(keepalive = false) {
+  async function persistAuthAuditToWpNow(keepalive = false, tokenOverride = '') {
     if (!IS_WP_SHARED_MODE) return { ok: true, skipped: true };
     try {
       const raw = String(localStorage.getItem(AUTH_AUDIT_KEY) || '').trim();
-      const value = raw ? raw : '[]';
+      const localEvents = safeJsonParse(raw, []);
+      const localList = Array.isArray(localEvents) ? localEvents : [];
       const url = wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(AUTH_AUDIT_KEY))}`);
+      const headers = { 'Content-Type': 'application/json' };
+      const auth = String(tokenOverride || '').trim();
+      if (auth) headers.Authorization = `Bearer ${auth}`;
+
+      // Merge server + local lists before save so concurrent clients do not
+      // overwrite each other's login/logout events.
+      let merged = localList;
+      try {
+        const getRes = await wpFetchJson(url, { method: 'GET', headers });
+        if (getRes && getRes.ok) {
+          const payload = await readJsonResponse(getRes);
+          const remoteRaw = payload && typeof payload.v === 'string' ? payload.v : '';
+          const remoteEvents = safeJsonParse(remoteRaw, []);
+          const remoteList = Array.isArray(remoteEvents) ? remoteEvents : [];
+
+          const keyOf = (e) => {
+            if (!e || typeof e !== 'object') return '';
+            const at = String(e.at || '').trim();
+            const user = String(e.user || '').trim().toLowerCase();
+            const action = String(e.action || '').trim().toLowerCase();
+            const module = String(e.module || '').trim().toLowerCase();
+            const record = String(e.record || '').trim().toLowerCase();
+            return `${at}|${user}|${action}|${module}|${record}`;
+          };
+
+          const map = new Map();
+          for (const e of remoteList) {
+            const k = keyOf(e);
+            if (!k) continue;
+            map.set(k, e);
+          }
+          for (const e of localList) {
+            const k = keyOf(e);
+            if (!k) continue;
+            map.set(k, e);
+          }
+
+          merged = Array.from(map.values());
+          merged.sort((a, b) => {
+            const ams = toTimeMs(a && a.at ? a.at : '') ?? 0;
+            const bms = toTimeMs(b && b.at ? b.at : '') ?? 0;
+            return ams - bms;
+          });
+          const MAX = 200;
+          if (merged.length > MAX) merged = merged.slice(merged.length - MAX);
+
+          // Keep local copy aligned with what we write to the server.
+          try {
+            saveAuthAuditEvents(merged);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // If merge-read fails, still try to persist local events.
+      }
+
+      const value = JSON.stringify(Array.isArray(merged) ? merged : []);
       const res = await wpFetchJson(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ value }),
         keepalive: Boolean(keepalive),
       });
-      if (!res.ok) return { ok: false, status: res.status };
+      if (!res.ok) {
+        console.error('[ACGL FMS] Auth audit persist failed', res.status, url);
+        return { ok: false, status: res.status };
+      }
       return { ok: true };
-    } catch {
+    } catch (err) {
+      console.error('[ACGL FMS] Auth audit persist error', err);
       return { ok: false, status: 0 };
     }
   }
@@ -958,7 +1023,7 @@
     }
   }
 
-  function appendAuthAuditEvent(actionRaw, usernameRaw) {
+  async function appendAuthAuditEvent(actionRaw, usernameRaw) {
     const action = String(actionRaw || '').trim() || 'Event';
     const user = normalizeUsername(usernameRaw) || '—';
     const at = new Date().toISOString();
@@ -967,15 +1032,21 @@
     const next = [...existing, { at, module: 'Auth', record: 'Session', user, action, changes: [] }];
 
     // Keep storage bounded.
-    const MAX = 500;
+    const MAX = 200;
     const trimmed = next.length > MAX ? next.slice(next.length - MAX) : next;
     saveAuthAuditEvents(trimmed);
 
     // In WP mode, localStorage writes are debounced for performance; ensure auth events
     // are persisted immediately so logout/navigation doesn't drop them.
     if (IS_WP_SHARED_MODE) {
-      const shouldKeepalive = action === 'Logout' || action === 'Auto log out';
-      void persistAuthAuditToWpNow(shouldKeepalive);
+      const tokenAtWrite = getWpToken();
+      const actionLower = action.toLowerCase();
+      const shouldKeepalive = actionLower === 'logout' || actionLower === 'auto log out' || actionLower === 'auto logout';
+      try {
+        await persistAuthAuditToWpNow(shouldKeepalive, tokenAtWrite);
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -2001,6 +2072,14 @@
     return getCurrentBudgetYearFromDate(new Date());
   }
 
+  function getLoginLandingBudgetYear() {
+    const years = migrateLegacyBudgetIfNeeded();
+    const active = loadActiveBudgetYear();
+    if (active && (years.length === 0 || years.includes(active))) return active;
+    if (years.length > 0) return years[0];
+    return getCurrentBudgetYearFromDate(new Date());
+  }
+
   function getNavConfig() {
     const years = migrateLegacyBudgetIfNeeded();
     const navYears = years.length > 0 ? years : [getCurrentBudgetYearFromDate(new Date())];
@@ -2183,6 +2262,13 @@
 
       setWpToken(token);
       if (data && data.user && data.user.permissions) setWpPerms(data.user.permissions);
+      if (typeof window.acglFmsWpHydrateSharedNow === 'function') {
+        try {
+          await window.acglFmsWpHydrateSharedNow();
+        } catch {
+          // ignore hydrate failures and continue login
+        }
+      }
       return { ok: true };
     } catch {
       return { ok: false, error: 'network' };
@@ -2282,13 +2368,12 @@
             }
 
             setCurrentUsername(u);
+            await appendAuthAuditEvent('Login', u);
             const user = getCurrentUser();
-            if (!tryRedirectToRememberedPage(user)) {
-              const _year = getActiveBudgetYear();
-              window.location.href = hasPermission(user, 'budget')
-                ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-                : firstAllowedHrefForUser(user, _year);
-            }
+            const _year = getLoginLandingBudgetYear();
+            window.location.href = hasPermission(user, 'budget')
+              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+              : firstAllowedHrefForUser(user, _year);
           });
         }
         return { blocked: true };
@@ -2377,6 +2462,7 @@
           }
 
           setCurrentUsername(u);
+          await appendAuthAuditEvent('Login', u);
 
           const required = requiredPermissionForPage(window.location.pathname);
           if (!hasPermission(user, required)) {
@@ -2384,12 +2470,10 @@
             return;
           }
 
-          if (!tryRedirectToRememberedPage(user)) {
-            const _year = getActiveBudgetYear();
-            window.location.href = hasPermission(user, 'budget')
-              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-              : firstAllowedHrefForUser(user, _year);
-          }
+          const _year = getLoginLandingBudgetYear();
+          window.location.href = hasPermission(user, 'budget')
+            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+            : firstAllowedHrefForUser(user, _year);
         });
       }
       return { blocked: true };
@@ -2482,13 +2566,12 @@
           }
 
           setCurrentUsername(u);
+          await appendAuthAuditEvent('Login', u);
           const user = getCurrentUser();
-          if (!tryRedirectToRememberedPage(user)) {
-            const _year = getActiveBudgetYear();
-            window.location.href = hasPermission(user, 'budget')
-              ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-              : firstAllowedHrefForUser(user, _year);
-          }
+          const _year = getLoginLandingBudgetYear();
+          window.location.href = hasPermission(user, 'budget')
+            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+            : firstAllowedHrefForUser(user, _year);
           return;
         }
 
@@ -2517,12 +2600,11 @@
         }
 
         setCurrentUsername(u);
-        if (!tryRedirectToRememberedPage(user)) {
-          const _year = getActiveBudgetYear();
-          window.location.href = hasPermission(user, 'budget')
-            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-            : firstAllowedHrefForUser(user, _year);
-        }
+        await appendAuthAuditEvent('Login', u);
+        const _year = getLoginLandingBudgetYear();
+        window.location.href = hasPermission(user, 'budget')
+          ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
+          : firstAllowedHrefForUser(user, _year);
       });
     }
   }
@@ -3987,7 +4069,7 @@
 
   // Request form (index.html) header auth button
   const authHeaderBtn = document.getElementById('authHeaderBtn');
-  const aboutPopoutLink = document.getElementById('aboutPopoutLink');
+  const requestHeaderPopoutLinks = Array.from(document.querySelectorAll('[data-popout-link="1"]'));
 
   // Request form submission token
   const submitToken = document.getElementById('submitToken');
@@ -13225,8 +13307,8 @@
 
     if (logoutBtn && !logoutBtn.dataset.bound) {
       logoutBtn.dataset.bound = 'true';
-      logoutBtn.addEventListener('click', () => {
-        performLogout();
+      logoutBtn.addEventListener('click', async () => {
+        await performLogout();
         window.location.reload();
       });
     }
@@ -23574,15 +23656,31 @@
     if (payload.schema !== BACKUP_SCHEMA) return { ok: false, error: 'invalid_schema' };
     if (Number(payload.version) !== BACKUP_VERSION) return { ok: false, error: 'unsupported_version' };
 
-    const y = normalizeBackupYear(payload.year);
-    if (!y) return { ok: false, error: 'invalid_year' };
-
     if (IS_WP_SHARED_MODE && !getWpToken()) {
       return { ok: false, error: 'wp_login_required' };
     }
 
-    const allowed = new Set(getBackupScopedKeysForYear(y));
     const bag = payload.keys && typeof payload.keys === 'object' ? payload.keys : {};
+
+    // Build the set of allowed keys: all-years backup has a `years` array;
+    // legacy per-year backup has a single `year` field.
+    const years = [];
+    if (Array.isArray(payload.years)) {
+      for (const v of payload.years) {
+        const y = normalizeBackupYear(v);
+        if (y) years.push(y);
+      }
+    } else {
+      const y = normalizeBackupYear(payload.year);
+      if (y) years.push(y);
+    }
+
+    if (years.length === 0) return { ok: false, error: 'invalid_year' };
+
+    const allowed = new Set();
+    for (const y of years) {
+      for (const k of getBackupScopedKeysForYear(y)) allowed.add(k);
+    }
 
     for (const k of Object.keys(bag)) {
       if (!allowed.has(k)) continue;
@@ -23594,15 +23692,16 @@
       }
     }
 
-    // Ensure the year is discoverable in the budget year list.
+    // Ensure all years are discoverable in the budget year list.
     try {
-      const years = loadBudgetYears();
-      if (!years.includes(y)) saveBudgetYears([y, ...years]);
+      const existing = loadBudgetYears();
+      const merged = Array.from(new Set([...years, ...existing]));
+      saveBudgetYears(merged);
     } catch {
       // ignore
     }
 
-    return { ok: true, year: y };
+    return { ok: true, years };
   }
 
   function formatBackupCreatedAt(iso) {
@@ -23682,13 +23781,10 @@
     }
 
     function filterCloudFilesForYear(files, year) {
-      const y = normalizeBackupYear(year);
-      if (!y) return [];
+      // Kept for compatibility when restoring from per-year backup files.
+      // All-years backups (acgl-fms-backup-all-*) are shown without filtering.
       const list = Array.isArray(files) ? files : [];
-      const prefix = `acgl-fms-backup-${String(y)}-`;
-      return list
-        .filter((f) => f && typeof f === 'object')
-        .filter((f) => String(f.name || '').trim().startsWith(prefix));
+      return list.filter((f) => f && typeof f === 'object');
     }
 
     async function fetchGdriveBackupPayloadById(fileId) {
@@ -23733,7 +23829,7 @@
         }
 
         gdriveCloudStatus = '';
-        gdriveCloudFiles = filterCloudFilesForYear(data.files || [], y);
+        gdriveCloudFiles = Array.isArray(data.files) ? data.files.filter((f) => f && typeof f === 'object') : [];
         render();
       } catch {
         gdriveCloudStatus = 'Could not load cloud backups.';
@@ -23770,10 +23866,7 @@
       }
     }
 
-    function renderGdriveCloudCard(year) {
-      const y = normalizeBackupYear(year);
-      if (!y) return null;
-
+    function renderGdriveCloudCard() {
       const card = document.createElement('div');
       card.className = 'archive__card';
 
@@ -23782,7 +23875,7 @@
 
       const h = document.createElement('h3');
       h.className = 'archive__title';
-      h.textContent = `${String(y)} Cloud (Google)`;
+      h.textContent = 'Cloud Backups (Google Drive)';
       header.appendChild(h);
       card.appendChild(header);
 
@@ -23793,7 +23886,7 @@
         card.appendChild(status);
       }
 
-      const list = gdriveCloudYear === y ? gdriveCloudFiles : [];
+      const list = gdriveCloudFiles;
       let any = false;
       for (const f of list) {
         if (!f || typeof f !== 'object') continue;
@@ -23829,7 +23922,7 @@
             render();
             return;
           }
-          const fileName = String((data.file && data.file.name) || '').trim() || `acgl-fms-backup-${String(y)}-${id}.json`;
+          const fileName = String((data.file && data.file.name) || '').trim() || `acgl-fms-backup-all-${id}.json`;
           const text = JSON.stringify(data.payload, null, 2);
           const blob = new Blob([text], { type: 'application/json;charset=utf-8;' });
           downloadBlob(blob, fileName);
@@ -23848,7 +23941,7 @@
             window.alert('Please sign in.');
             return;
           }
-          const ok = window.confirm(`Restore ${String(y)} from this cloud backup? This will overwrite ${String(y)} data.`);
+          const ok = window.confirm(`Restore all years from this cloud backup? This will overwrite all backed-up year data.`);
           if (!ok) return;
 
           gdriveCloudStatus = 'Restoring…';
@@ -23899,29 +23992,25 @@
 
     function render() {
       const years = getKnownYears();
-      const cloudYear = canUseGdrive ? getCloudYearForUi() : null;
       const activeYear = normalizeBackupYear(getActiveBudgetYear());
       grid.innerHTML = '';
 
       let anyBackups = false;
-      for (const y of years) {
-        const idx = loadBackupIndex(y);
-        if (idx.length > 0) anyBackups = true;
+      let renderedAny = false;
 
-        // Only render a WordPress year card if it has backups, or if it's the active year.
-        // (Create actions live in the card header now.)
-        const showWpYearCard = idx.length > 0 || (activeYear && y === activeYear);
-
-        if (showWpYearCard) {
+      function createWpYearCard(y, idx, isActiveYear) {
         const card = document.createElement('div');
         card.className = 'archive__card';
+        if (!isActiveYear) card.classList.add('backupCard--belowTop');
 
         const header = document.createElement('div');
         header.className = 'archive__cardHeader';
 
         const h = document.createElement('h3');
         h.className = 'archive__title';
-        h.textContent = `${String(y)} (WordPress)`;
+        h.textContent = isActiveYear
+          ? `${String(y)} (WordPress - Active)`
+          : `${String(y)} (WordPress)`;
         header.appendChild(h);
         card.appendChild(header);
 
@@ -23974,20 +24063,60 @@
           buttons.appendChild(rs);
 
           row.appendChild(buttons);
-
           card.appendChild(row);
         }
 
-        grid.appendChild(card);
+        if (idx.length === 0) {
+          const empty = document.createElement('p');
+          empty.className = 'empty';
+          empty.textContent = isActiveYear ? 'No active-year WordPress backups yet.' : 'No WordPress backups yet.';
+          card.appendChild(empty);
         }
 
-        if (canUseGdrive && cloudYear && y === cloudYear) {
-          const cloudCard = renderGdriveCloudCard(y);
-          if (cloudCard) grid.appendChild(cloudCard);
+        return card;
+      }
+
+      const otherWpCards = [];
+      let activeWpCard = null;
+
+      for (const y of years) {
+        const idx = loadBackupIndex(y);
+        if (idx.length > 0) anyBackups = true;
+
+        // Only render a WordPress year card if it has backups, or if it's the active year.
+        const showWpYearCard = idx.length > 0 || (activeYear && y === activeYear);
+        if (!showWpYearCard) continue;
+
+        const isActiveYear = Boolean(activeYear && y === activeYear);
+        const card = createWpYearCard(y, idx, isActiveYear);
+
+        if (isActiveYear) activeWpCard = card;
+        else otherWpCards.push(card);
+      }
+
+      // Priority order:
+      // 1) Active-year WordPress backups
+      // 2) Google Drive cloud backups
+      // 3) Non-active WordPress year backups
+      if (activeWpCard) {
+        grid.appendChild(activeWpCard);
+        renderedAny = true;
+      }
+
+      if (canUseGdrive) {
+        const cloudCard = renderGdriveCloudCard();
+        if (cloudCard) {
+          grid.appendChild(cloudCard);
+          renderedAny = true;
         }
       }
 
-      if (emptyEl) emptyEl.hidden = anyBackups;
+      for (const card of otherWpCards) {
+        grid.appendChild(card);
+        renderedAny = true;
+      }
+
+      if (emptyEl) emptyEl.hidden = renderedAny || anyBackups;
     }
 
     if (createActiveBtn && !createActiveBtn.dataset.bound) {
@@ -24094,12 +24223,19 @@
     }
   }
 
-  if (aboutPopoutLink && !aboutPopoutLink.dataset.bound) {
-    aboutPopoutLink.dataset.bound = 'true';
-    aboutPopoutLink.addEventListener('click', (e) => {
+  for (const popoutLink of requestHeaderPopoutLinks) {
+    if (!popoutLink || popoutLink.dataset.bound) continue;
+    popoutLink.dataset.bound = 'true';
+    popoutLink.addEventListener('click', (e) => {
       e.preventDefault();
 
-      const href = withWpEmbedParams('about.html');
+      const rawHref = String(popoutLink.getAttribute('href') || '').trim();
+      if (!rawHref) return;
+
+      const isExternal = popoutLink.getAttribute('data-popout-external') === '1';
+      const href = isExternal ? rawHref : withWpEmbedParams(rawHref);
+      const winName = String(popoutLink.getAttribute('data-popout-name') || 'acglInfoPopout').trim() || 'acglInfoPopout';
+
       const w = 1120;
       const h = 820;
       const screenLeft = Number(window.screenLeft ?? window.screenX ?? 0) || 0;
@@ -24109,7 +24245,7 @@
       const top = Math.max(0, Math.round(screenTop + (screenH - h) / 2));
       const features = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},left=${left},top=${top}`;
 
-      const win = window.open(href, 'acglAboutPopout', features);
+      const win = window.open(href, winName, features);
       if (!win) {
         window.location.href = href;
         return;
@@ -24440,7 +24576,7 @@
     const doLogout = params.get('logout') === '1';
 
     if (isRequestForm && doLogout) {
-      performLogout();
+      await performLogout();
       setEditOrderId(null);
       form.reset();
       clearDraft();

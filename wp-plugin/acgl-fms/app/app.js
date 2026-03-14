@@ -22459,23 +22459,53 @@
       if (!requireDeleteAccess('budget', 'Requires Delete access for Budget.')) return;
 
       const ok = window.confirm(
-        `Delete the ${budgetYear} budget?\n\nThis removes the saved budget table for ${budgetYear} from shared storage.`
+        `Delete the ${budgetYear} budget year?\n\nThis permanently removes ALL data for ${budgetYear}: budget table, payment orders, ledger entries, money transfers, income records, backups, and the Archive link. This cannot be undone.`
       );
       if (!ok) return;
 
-      // Remove the saved budget HTML for this year.
-      if (budgetKey) localStorage.removeItem(budgetKey);
+      const y = Number(budgetYear);
+      const rm = (k) => { if (k) { try { localStorage.removeItem(k); } catch { /* ignore */ } } };
 
-      // Remove the year from the years list.
-      const years = loadBudgetYears().filter((y) => Number(y) !== Number(budgetYear));
+      // Budget
+      rm(getBudgetTableKeyForYear(y));
+      rm(getBudgetMetaKeyForYear(y));
+      rm(`payment_order_budget_checksums_visible_${y}_v1`);
+
+      // Payment orders & reconciliation
+      rm(getPaymentOrdersKeyForYear(y));
+      rm(getPaymentOrdersReconciliationKeyForYear(y));
+
+      // Money transfers
+      rm(getMoneyTransfersKeyForYear(y));
+
+      // Ledger
+      rm(getIncomeKeyForYear(y));
+      rm(getWiseEurKeyForYear(y));
+      rm(getWiseUsdKeyForYear(y));
+      rm(getGsLedgerVerifiedKeyForYear(y));
+
+      // Backups: remove all backup data entries then the index and last-auto marker
+      try {
+        const index = loadBackupIndex(y);
+        for (const m of (Array.isArray(index) ? index : [])) {
+          if (m && m.id) rm(getBackupDataKeyForYearId(y, m.id));
+        }
+      } catch { /* ignore */ }
+      rm(getBackupIndexKeyForYear(y));
+      rm(getBackupLastAutoKeyForYear(y));
+
+      // Remove year from list (this also removes the Archive link)
+      const years = loadBudgetYears().filter((yr) => Number(yr) !== y);
       saveBudgetYears(years);
 
       // If this was the active budget year, clear the active setting.
       if (loadActiveBudgetYear() === budgetYear) clearActiveBudgetYear();
 
-      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Deleted', []);
+      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Deleted', [
+        { field: 'Year', from: String(budgetYear), to: '' },
+      ]);
 
-      // Exit edit mode and navigate away (staying on this page would recreate the year on reload).
+      // Exit edit mode and navigate away.
       setSelectedRow(null);
       setEditing(false);
       editStartHtml = null;

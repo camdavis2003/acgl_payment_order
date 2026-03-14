@@ -659,13 +659,13 @@
         passwordHash: buildLegacyPwHash(HARD_CODED_ADMIN_PASSWORD, HARD_CODED_ADMIN_SALT),
         passwordPlain: HARD_CODED_ADMIN_PASSWORD,
         permissions: {
-          budget: 'write',
-          income_bankeur: 'write',
-          orders: 'write',
-          ledger: 'write',
-          ledger_money_transfers: 'write',
-          archive: 'write',
-          settings: 'write',
+          budget: 'full',
+          income_bankeur: 'full',
+          orders: 'full',
+          ledger: 'full',
+          ledger_money_transfers: 'full',
+          archive: 'full',
+          settings: 'full',
         },
       };
 

@@ -24840,6 +24840,8 @@
         enabled: String(r.enabled || def.enabled) === '1' ? '1' : '0',
         subject: String(r.subject || def.subject),
         body: String(r.body || def.body),
+        recipients_mode: r.recipients_mode ? normalizeNotificationsRecipientsMode(String(r.recipients_mode)) : '',
+        manual_to: String(r.manual_to || ''),
       };
     };
 
@@ -24931,10 +24933,13 @@
       if (notificationsManualToInput) notificationsManualToInput.disabled = !manual;
     };
 
-    const recipientSummary = (settings) => {
-      const mode = normalizeNotificationsRecipientsMode(settings && settings.recipients_mode);
+    const recipientSummary = (typeConfig, globalSettings) => {
+      const tc = typeConfig && typeof typeConfig === 'object' ? typeConfig : {};
+      const gs = globalSettings && typeof globalSettings === 'object' ? globalSettings : {};
+      const mode = normalizeNotificationsRecipientsMode(tc.recipients_mode || gs.recipients_mode);
       if (mode === 'manual_list') {
-        const count = String(settings && settings.manual_to || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).length;
+        const raw = String(tc.manual_to || gs.manual_to || '');
+        const count = raw.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).length;
         return count > 0 ? `Manual (${count})` : 'Manual (empty)';
       }
       if (mode.startsWith('user:')) {
@@ -24963,6 +24968,12 @@
       if (notificationsTypeEnabledInput) notificationsTypeEnabledInput.checked = String(cfg.enabled || '0') === '1';
       if (notificationsSubjectInput) notificationsSubjectInput.value = String(cfg.subject || '');
       if (notificationsBodyInput) notificationsBodyInput.value = String(cfg.body || '');
+      if (notificationsRecipientsModeInput) {
+        const effectiveMode = cfg.recipients_mode || notificationsCurrentSettings.recipients_mode || 'all_users_with_email';
+        notificationsRecipientsModeInput.value = effectiveMode;
+      }
+      if (notificationsManualToInput) notificationsManualToInput.value = String(cfg.manual_to || '');
+      notificationsSyncModeUi();
     };
 
     const notificationsFlushTypeFields = () => {
@@ -24974,14 +24985,16 @@
         enabled: notificationsTypeEnabledInput && notificationsTypeEnabledInput.checked ? '1' : '0',
         subject: notificationsSubjectInput ? String(notificationsSubjectInput.value || '') : '',
         body: notificationsBodyInput ? String(notificationsBodyInput.value || '') : '',
+        recipients_mode: notificationsRecipientsModeInput ? String(notificationsRecipientsModeInput.value || '') : '',
+        manual_to: notificationsManualToInput ? String(notificationsManualToInput.value || '') : '',
       };
     };
 
     const notificationsReadFormPayload = () => {
       notificationsFlushTypeFields();
       return {
-        recipients_mode: normalizeNotificationsRecipientsMode(notificationsRecipientsModeInput ? String(notificationsRecipientsModeInput.value || '') : 'all_users_with_email'),
-        manual_to: notificationsManualToInput ? String(notificationsManualToInput.value || '') : '',
+        recipients_mode: notificationsCurrentSettings ? notificationsCurrentSettings.recipients_mode : 'all_users_with_email',
+        manual_to: notificationsCurrentSettings ? String(notificationsCurrentSettings.manual_to || '') : '',
         reply_to: notificationsReplyToInput ? String(notificationsReplyToInput.value || '') : '',
         reply_to_cleared: notificationsReplyToInput ? String(notificationsReplyToInput.value || '').trim() === '' : false,
         signature: notificationsSignatureInput ? String(notificationsSignatureInput.value || '') : '',
@@ -25020,7 +25033,6 @@
     const renderNotificationsTable = () => {
       if (!notificationsListTbody || !notificationsCurrentSettings) return;
       const rows = Array.isArray(notificationsCurrentSettings.active_type_ids) ? notificationsCurrentSettings.active_type_ids : [];
-      const recipient = recipientSummary(notificationsCurrentSettings);
       const query = String(notificationsSearchInput ? notificationsSearchInput.value || '' : notificationsSearchQuery).trim().toLowerCase();
       notificationsSearchQuery = query;
 
@@ -25038,6 +25050,7 @@
         if (!t) return false;
         const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
         const status = String(cfg.enabled) === '1' ? 'enabled' : 'disabled';
+        const recipient = recipientSummary(cfg, notificationsCurrentSettings);
         const haystack = `${recipient} ${t.label} ${status}`.toLowerCase();
         return haystack.includes(query);
       });
@@ -25046,6 +25059,7 @@
         const t = NOTIFICATION_TYPES.find((x) => x.id === id);
         if (!t) return;
         const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
+        const recipient = recipientSummary(cfg, notificationsCurrentSettings);
         const isInline = notificationsInlineEditTypeId === id;
         const tr = document.createElement('tr');
         tr.innerHTML = isInline

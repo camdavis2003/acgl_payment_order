@@ -97,6 +97,8 @@ function acgl_fms_notifications_normalize_runtime_settings($baseSettings, $overr
             'enabled' => ($enabledRaw === '1' || $enabledRaw === 'true' || $enabledRaw === 'yes') ? '1' : '0',
             'subject' => $subject !== '' ? (string) $rawType['subject'] : (string) ($typeDefault['subject'] ?? ''),
             'body' => $body !== '' ? (string) $rawType['body'] : (string) ($typeDefault['body'] ?? ''),
+            'recipients_mode' => isset($rawType['recipients_mode']) ? trim((string) $rawType['recipients_mode']) : '',
+            'manual_to' => isset($rawType['manual_to']) ? trim((string) $rawType['manual_to']) : '',
         ];
     }
 
@@ -134,6 +136,8 @@ function acgl_fms_notifications_get_type_config($settings, $typeId) {
         'enabled' => ($enabledRaw === '1' || $enabledRaw === 'true' || $enabledRaw === 'yes') ? '1' : '0',
         'subject' => $subject !== '' ? (string) $rawType['subject'] : (string) ($default['subject'] ?? ''),
         'body' => $body !== '' ? (string) $rawType['body'] : (string) ($default['body'] ?? ''),
+        'recipients_mode' => isset($rawType['recipients_mode']) ? trim((string) $rawType['recipients_mode']) : '',
+        'manual_to' => isset($rawType['manual_to']) ? trim((string) $rawType['manual_to']) : '',
     ];
 }
 
@@ -1125,7 +1129,14 @@ function acgl_fms_register_rest_routes() {
             }
 
             $forcedTo = is_array($data) ? (string) ($data['to'] ?? '') : '';
-            $to = acgl_fms_notifications_resolve_recipients($settings, $forcedTo);
+            $typeRecipMode = trim((string) ($typeConfig['recipients_mode'] ?? ''));
+            $typeManualTo = trim((string) ($typeConfig['manual_to'] ?? ''));
+            $effectiveSettingsForTest = $settings;
+            if ($typeRecipMode !== '') {
+                $effectiveSettingsForTest['recipients_mode'] = $typeRecipMode;
+                $effectiveSettingsForTest['manual_to'] = $typeManualTo;
+            }
+            $to = acgl_fms_notifications_resolve_recipients($effectiveSettingsForTest, $forcedTo);
             if (count($to) === 0) {
                 return new WP_REST_Response([ 'ok' => false, 'error' => 'no_recipients' ], 400);
             }
@@ -1218,7 +1229,14 @@ function acgl_fms_register_rest_routes() {
                 return new WP_REST_Response([ 'ok' => false, 'error' => 'event_disabled' ], 400);
             }
 
-            $to = acgl_fms_notifications_resolve_recipients($settings, '');
+            $typeRecipMode = trim((string) ($typeConfig['recipients_mode'] ?? ''));
+            $typeManualTo = trim((string) ($typeConfig['manual_to'] ?? ''));
+            $effectiveSettings = $settings;
+            if ($typeRecipMode !== '') {
+                $effectiveSettings['recipients_mode'] = $typeRecipMode;
+                $effectiveSettings['manual_to'] = $typeManualTo;
+            }
+            $to = acgl_fms_notifications_resolve_recipients($effectiveSettings, '');
             if (count($to) === 0) {
                 return new WP_REST_Response([ 'ok' => false, 'error' => 'no_recipients' ], 400);
             }

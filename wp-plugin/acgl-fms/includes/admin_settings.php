@@ -95,6 +95,8 @@ function acgl_fms_admin_normalize_notification_type_config($typeId, $raw) {
         'enabled' => ($enabledRaw === '1' || $enabledRaw === 'true' || $enabledRaw === 'yes') ? '1' : '0',
         'subject' => $subject !== '' ? (string) $data['subject'] : (string) ($default['subject'] ?? ''),
         'body' => $body !== '' ? (string) $data['body'] : (string) ($default['body'] ?? ''),
+        'recipients_mode' => isset($data['recipients_mode']) ? trim((string) $data['recipients_mode']) : '',
+        'manual_to' => isset($data['manual_to']) ? trim((string) $data['manual_to']) : '',
     ];
 }
 

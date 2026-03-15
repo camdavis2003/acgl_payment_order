@@ -11,6 +11,7 @@ define('ACGL_FMS_NOTIFY_ON_PUBLIC_SUBMIT_OPTION', 'acgl_fms_notify_on_public_sub
 define('ACGL_FMS_NOTIFY_RECIPIENTS_MODE_OPTION', 'acgl_fms_notify_recipients_mode_v1');
 define('ACGL_FMS_NOTIFY_MANUAL_TO_OPTION', 'acgl_fms_notify_manual_to_v1');
 define('ACGL_FMS_NOTIFY_REPLY_TO_OPTION', 'acgl_fms_notify_reply_to_v1');
+define('ACGL_FMS_NOTIFY_REPLY_TO_CLEARED_OPTION', 'acgl_fms_notify_reply_to_cleared_v1');
 define('ACGL_FMS_NOTIFY_SUBJECT_OPTION', 'acgl_fms_notify_subject_v1');
 define('ACGL_FMS_NOTIFY_BODY_OPTION', 'acgl_fms_notify_body_v1');
 define('ACGL_FMS_NOTIFY_SIGNATURE_OPTION', 'acgl_fms_notify_signature_v1');
@@ -27,52 +28,52 @@ function acgl_fms_admin_notification_type_defaults() {
         'gs_review' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] Payment Order Awaiting Grand Secretary Review',
-            'body' => "Payment Order {{paymentOrderNo}} is awaiting Grand Secretary review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}",
+            'body' => "Payment Order {{paymentOrderNo}} is awaiting Grand Secretary review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}\nDirect link: {{directLink}}",
         ],
         'gm_review' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] Payment Order Awaiting Grand Master Review',
-            'body' => "Payment Order {{paymentOrderNo}} is awaiting Grand Master review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}",
+            'body' => "Payment Order {{paymentOrderNo}} is awaiting Grand Master review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}\nDirect link: {{directLink}}",
         ],
         'gt_processing' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] Payment Order Approved for Grand Treasurer Processing',
-            'body' => "Payment Order {{paymentOrderNo}} has been approved and is ready for Grand Treasurer processing.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}",
+            'body' => "Payment Order {{paymentOrderNo}} has been approved and is ready for Grand Treasurer processing.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}\nDirect link: {{directLink}}",
         ],
         'budget_update' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] Budget Updated',
-            'body' => 'The budget for {{year}} has been updated by {{user}}.',
+            'body' => 'The budget for {{year}} has been updated by {{user}}.\nDirect link: {{directLink}}',
         ],
         'new_bank_eur' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] New BankEUR Entry',
-            'body' => "A new BankEUR entry has been added.\n\nDate: {{date}}\nDescription: {{description}}\nAmount: {{amount}} EUR\nYear: {{year}}",
+            'body' => "A new BankEUR entry has been added.\n\nDate: {{date}}\nDescription: {{description}}\nAmount: {{amount}} EUR\nYear: {{year}}\nDirect link: {{directLink}}",
         ],
         'new_wise_eur' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] New wiseEUR Entry',
-            'body' => "A new wiseEUR entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}",
+            'body' => "A new wiseEUR entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}\nDirect link: {{directLink}}",
         ],
         'new_wise_usd' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] New wiseUSD Entry',
-            'body' => "A new wiseUSD entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}",
+            'body' => "A new wiseUSD entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}\nDirect link: {{directLink}}",
         ],
         'mt_gs_verification' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] New Money Transfer Created',
-            'body' => "A new Money Transfer has been created and is awaiting GS verification.\n\nMoney Transfer No: {{moneyTransferNo}}\nDate: {{date}}\nComments: {{comments}}\nYear: {{year}}",
+            'body' => "A new Money Transfer has been created and is awaiting GS verification.\n\nMoney Transfer No: {{moneyTransferNo}}\nDate: {{date}}\nComments: {{comments}}\nYear: {{year}}\nDirect link: {{directLink}}",
         ],
         'mt_gt_verification' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] Money Transfer GS Verified',
-            'body' => "A Money Transfer has been marked as GS Verified.\n\nDate: {{date}}\nDescription: {{description}}\nYear: {{year}}",
+            'body' => "A Money Transfer has been marked as GS Verified.\n\nDate: {{date}}\nDescription: {{description}}\nYear: {{year}}\nDirect link: {{directLink}}",
         ],
         'new_backlog' => [
             'enabled' => '1',
             'subject' => '[ACGL FMS] New Backlog Item',
-            'body' => "A new backlog item has been created.\n\nRef: {{refNo}}\nSubject: {{subject}}\nPriority: {{priority}}\nCreated by: {{createdBy}}",
+            'body' => "A new backlog item has been created.\n\nRef: {{refNo}}\nSubject: {{subject}}\nPriority: {{priority}}\nCreated by: {{createdBy}}\nDirect link: {{directLink}}",
         ],
     ];
 }
@@ -192,7 +193,9 @@ function acgl_fms_admin_get_notification_settings() {
 
     $recipientsMode = (string) get_option(ACGL_FMS_NOTIFY_RECIPIENTS_MODE_OPTION, $defaults['recipients_mode']);
     $manualTo = (string) get_option(ACGL_FMS_NOTIFY_MANUAL_TO_OPTION, $defaults['manual_to']);
-    $replyTo = (string) get_option(ACGL_FMS_NOTIFY_REPLY_TO_OPTION, $defaults['reply_to']);
+    $replyToFromDb = get_option(ACGL_FMS_NOTIFY_REPLY_TO_OPTION);
+    $replyToIsDefault = ($replyToFromDb === false);
+    $replyTo = $replyToIsDefault ? $defaults['reply_to'] : (string) $replyToFromDb;
     $signature = (string) get_option(ACGL_FMS_NOTIFY_SIGNATURE_OPTION, $defaults['signature']);
     $typesRawStored = get_option(ACGL_FMS_NOTIFY_TYPES_CONFIG_OPTION, null);
     $activeTypesRawStored = get_option(ACGL_FMS_NOTIFY_ACTIVE_TYPES_OPTION, null);
@@ -243,6 +246,8 @@ function acgl_fms_admin_get_notification_settings() {
         'recipients_mode' => $recipientsMode,
         'manual_to' => trim($manualTo),
         'reply_to' => trim($replyTo),
+        'reply_to_is_default' => $replyToIsDefault,
+        'reply_to_cleared' => (!$replyToIsDefault && get_option(ACGL_FMS_NOTIFY_REPLY_TO_CLEARED_OPTION, '0') === '1'),
         'signature' => trim($signature) !== '' ? $signature : $defaults['signature'],
         'types_config' => $typesConfig,
         'active_type_ids' => $activeTypeIds,
@@ -292,6 +297,7 @@ function acgl_fms_admin_save_notification_settings($input) {
     acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_RECIPIENTS_MODE_OPTION, $mode);
     acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_MANUAL_TO_OPTION, $manualTo);
     acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_REPLY_TO_OPTION, $replyTo);
+    acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_REPLY_TO_CLEARED_OPTION, $replyTo === '' ? '1' : '0');
     acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_SIGNATURE_OPTION, $signature);
     if (function_exists('wp_json_encode')) {
         acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_TYPES_CONFIG_OPTION, (string) wp_json_encode($typesConfig));
@@ -576,7 +582,7 @@ function acgl_fms_render_admin_settings_page() {
     echo '<hr style="margin:24px 0;">';
     echo '<h2>Email Notifications</h2>';
     echo '<p>Configure email templates and recipients for FMS notification events. Delivery is handled by your active WordPress mailer (for example WP Mail SMTP).</p>';
-    echo '<p class="description">Supported placeholders: <code>{{paymentOrderNo}}</code>, <code>{{year}}</code>, <code>{{createdAt}}</code>, <code>{{id}}</code>, <code>{{paymentOrderLink}}</code>, <code>{{user}}</code>, <code>{{date}}</code>, <code>{{description}}</code>, <code>{{amount}}</code>, <code>{{party}}</code>, <code>{{moneyTransferNo}}</code>, <code>{{comments}}</code>, <code>{{refNo}}</code>, <code>{{subject}}</code>, <code>{{priority}}</code>, <code>{{createdBy}}</code>.</p>';
+    echo '<p class="description">Supported placeholders: <code>{{paymentOrderNo}}</code>, <code>{{year}}</code>, <code>{{createdAt}}</code>, <code>{{id}}</code>, <code>{{paymentOrderLink}}</code>, <code>{{user}}</code>, <code>{{date}}</code>, <code>{{description}}</code>, <code>{{amount}}</code>, <code>{{party}}</code>, <code>{{moneyTransferNo}}</code>, <code>{{comments}}</code>, <code>{{directLink}}</code>, <code>{{refNo}}</code>, <code>{{subject}}</code>, <code>{{priority}}</code>, <code>{{createdBy}}</code>.</p>';
 
     echo '<form method="post" action="">';
     wp_nonce_field('acgl_fms_admin_settings');

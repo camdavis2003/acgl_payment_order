@@ -650,61 +650,61 @@
       id: 'gs_review',
       label: 'Grand Secretary Review',
       defaultSubject: '[ACGL FMS] Payment Order Awaiting Grand Secretary Review',
-      defaultBody: 'Payment Order {{paymentOrderNo}} is awaiting Grand Secretary review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}',
+      defaultBody: 'Payment Order {{paymentOrderNo}} is awaiting Grand Secretary review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}\nDirect link: {{directLink}}',
     },
     {
       id: 'gm_review',
       label: 'Grand Master Review',
       defaultSubject: '[ACGL FMS] Payment Order Awaiting Grand Master Review',
-      defaultBody: 'Payment Order {{paymentOrderNo}} is awaiting Grand Master review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}',
+      defaultBody: 'Payment Order {{paymentOrderNo}} is awaiting Grand Master review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}\nDirect link: {{directLink}}',
     },
     {
       id: 'gt_processing',
       label: 'Grand Treasurer Processing',
       defaultSubject: '[ACGL FMS] Payment Order Approved for Grand Treasurer Processing',
-      defaultBody: 'Payment Order {{paymentOrderNo}} has been approved and is ready for Grand Treasurer processing.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}',
+      defaultBody: 'Payment Order {{paymentOrderNo}} has been approved and is ready for Grand Treasurer processing.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}\nDirect link: {{directLink}}',
     },
     {
       id: 'budget_update',
       label: 'Budget Update',
       defaultSubject: '[ACGL FMS] Budget Updated',
-      defaultBody: 'The budget for {{year}} has been updated by {{user}}.',
+      defaultBody: 'The budget for {{year}} has been updated by {{user}}.\nDirect link: {{directLink}}',
     },
     {
       id: 'new_bank_eur',
       label: 'New BankEUR',
       defaultSubject: '[ACGL FMS] New BankEUR Entry',
-      defaultBody: 'A new BankEUR entry has been added.\n\nDate: {{date}}\nDescription: {{description}}\nAmount: {{amount}} EUR\nYear: {{year}}',
+      defaultBody: 'A new BankEUR entry has been added.\n\nDate: {{date}}\nDescription: {{description}}\nAmount: {{amount}} EUR\nYear: {{year}}\nDirect link: {{directLink}}',
     },
     {
       id: 'new_wise_eur',
       label: 'New wiseEUR',
       defaultSubject: '[ACGL FMS] New wiseEUR Entry',
-      defaultBody: 'A new wiseEUR entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}',
+      defaultBody: 'A new wiseEUR entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}\nDirect link: {{directLink}}',
     },
     {
       id: 'new_wise_usd',
       label: 'New wiseUSD',
       defaultSubject: '[ACGL FMS] New wiseUSD Entry',
-      defaultBody: 'A new wiseUSD entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}',
+      defaultBody: 'A new wiseUSD entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}\nDirect link: {{directLink}}',
     },
     {
       id: 'mt_gs_verification',
       label: 'Money Transfer GS Verification',
       defaultSubject: '[ACGL FMS] New Money Transfer Created',
-      defaultBody: 'A new Money Transfer has been created and is awaiting GS verification.\n\nMoney Transfer No: {{moneyTransferNo}}\nDate: {{date}}\nComments: {{comments}}\nYear: {{year}}',
+      defaultBody: 'A new Money Transfer has been created and is awaiting GS verification.\n\nMoney Transfer No: {{moneyTransferNo}}\nDate: {{date}}\nComments: {{comments}}\nYear: {{year}}\nDirect link: {{directLink}}',
     },
     {
       id: 'mt_gt_verification',
       label: 'Money Transfer GT Verification',
       defaultSubject: '[ACGL FMS] Money Transfer GS Verified',
-      defaultBody: 'A Money Transfer has been marked as GS Verified.\n\nDate: {{date}}\nDescription: {{description}}\nYear: {{year}}',
+      defaultBody: 'A Money Transfer has been marked as GS Verified.\n\nDate: {{date}}\nDescription: {{description}}\nYear: {{year}}\nDirect link: {{directLink}}',
     },
     {
       id: 'new_backlog',
       label: 'New Backlog',
       defaultSubject: '[ACGL FMS] New Backlog Item',
-      defaultBody: 'A new backlog item has been created.\n\nRef: {{refNo}}\nSubject: {{subject}}\nPriority: {{priority}}\nCreated by: {{createdBy}}',
+      defaultBody: 'A new backlog item has been created.\n\nRef: {{refNo}}\nSubject: {{subject}}\nPriority: {{priority}}\nCreated by: {{createdBy}}\nDirect link: {{directLink}}',
     },
   ];
 
@@ -2475,6 +2475,11 @@
             setCurrentUsername(u);
             await appendAuthAuditEvent('Login', u);
             const user = getCurrentUser();
+            const currentRequired = requiredPermissionForPage(window.location.pathname);
+            if (!currentRequired || hasPermission(user, currentRequired)) {
+              window.location.reload();
+              return;
+            }
             const _year = getLoginLandingBudgetYear();
             window.location.href = hasPermission(user, 'budget')
               ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
@@ -2575,10 +2580,7 @@
             return;
           }
 
-          const _year = getLoginLandingBudgetYear();
-          window.location.href = hasPermission(user, 'budget')
-            ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
-            : firstAllowedHrefForUser(user, _year);
+          window.location.reload();
         });
       }
       return { blocked: true };
@@ -2673,6 +2675,11 @@
           setCurrentUsername(u);
           await appendAuthAuditEvent('Login', u);
           const user = getCurrentUser();
+          const currentRequired = requiredPermissionForPage(window.location.pathname);
+          if (!currentRequired || hasPermission(user, currentRequired)) {
+            window.location.reload();
+            return;
+          }
           const _year = getLoginLandingBudgetYear();
           window.location.href = hasPermission(user, 'budget')
             ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
@@ -2706,6 +2713,11 @@
 
         setCurrentUsername(u);
         await appendAuthAuditEvent('Login', u);
+        const currentRequired = requiredPermissionForPage(window.location.pathname);
+        if (!currentRequired || hasPermission(user, currentRequired)) {
+          window.location.reload();
+          return;
+        }
         const _year = getLoginLandingBudgetYear();
         window.location.href = hasPermission(user, 'budget')
           ? withWpEmbedParams(`budget_dashboard.html?year=${encodeURIComponent(String(_year))}`)
@@ -4396,6 +4408,8 @@
   const grandSecretarySignatureSavedMeta = document.getElementById('grandSecretarySignatureSavedMeta');
   const backupOpenWpAdminLink = document.getElementById('backupOpenWpAdminLink');
   const backupWpAdminUnavailable = document.getElementById('backupWpAdminUnavailable');
+  const notificationsSearchInput = document.getElementById('notificationsSearchInput');
+  const notificationsClearSearchBtn = document.getElementById('notificationsClearSearchBtn');
   const notificationsNewBtn = document.getElementById('notificationsNewBtn');
   const notificationsListTbody = document.getElementById('notificationsListTbody');
   const notificationsEmptyState = document.getElementById('notificationsEmptyState');
@@ -11682,6 +11696,7 @@
             subject: String(nextItem.subject || ''),
             priority: String(nextItem.priority || ''),
             createdBy: String(nextItem.createdBy || ''),
+            directLink: String(window.location.href || ''),
           });
         }
 
@@ -15212,6 +15227,7 @@
             date: String(mt.date || ''),
             description: String(mt.description || mt.receivedFromDisbursedTo || ''),
             year: String(year),
+            directLink: String(window.location.href || ''),
           });
         }
         applyMoneyTransfersView();
@@ -15867,6 +15883,7 @@
               date: String(record.mtDate || ''),
               comments: String(record.comments || ''),
               year: String(resolvedYear),
+              directLink: String(window.location.href || ''),
             });
             advanceMoneyTransferSequence();
           }
@@ -17223,6 +17240,7 @@
             description: String(entry.description || ''),
             amount: String(entry.euro || ''),
             year: String(year),
+            directLink: String(window.location.href || ''),
           });
         }
 
@@ -19138,6 +19156,7 @@
               party: String(entry.receivedFromDisbursedTo || ''),
               amount: String(entry.totalAmountInEuro || entry.euroAmount || ''),
               year: String(year),
+              directLink: String(window.location.href || ''),
             });
           }
         }
@@ -20820,6 +20839,7 @@
               party: String(entry.receivedFromDisbursedTo || ''),
               amount: String(entry.totalAmountInUsd || entry.usdAmount || ''),
               year: String(year),
+              directLink: String(window.location.href || ''),
             });
           }
         }
@@ -22620,7 +22640,11 @@
       syncBudgetFromLedger(budgetYear);
       setEditing(false);
       editStartHtml = null;
-      void fireNotificationEvent('budget_update', { year: String(budgetYear), user: String(getTimelineUsername() || '') });
+      void fireNotificationEvent('budget_update', {
+        year: String(budgetYear),
+        user: String(getTimelineUsername() || ''),
+        directLink: String(window.location.href || ''),
+      });
     });
 
     if (cancelBtn) {
@@ -24863,7 +24887,8 @@
       return {
         recipients_mode: mode,
         manual_to: String(s.manual_to || notificationsDefaults.manual_to),
-        reply_to: String(s.reply_to || notificationsDefaults.reply_to),
+        reply_to: s.reply_to != null ? String(s.reply_to) : notificationsDefaults.reply_to,
+        reply_to_cleared: Boolean(s.reply_to_cleared),
         signature: String(s.signature || notificationsDefaults.signature),
         types_config: typesConfig,
         active_type_ids: normalizeActiveTypeIds(s.active_type_ids || [], typesConfig),
@@ -24873,7 +24898,7 @@
     const loadNotificationsSettingsLocal = () => {
       try {
         const raw = String(localStorage.getItem(NOTIFICATIONS_SETTINGS_KEY) || '').trim();
-        if (!raw) return { ...notificationsDefaults };
+        if (!raw) return { ...notificationsDefaults, reply_to: getGsDefaultReplyTo() };
         return normalizeNotificationsSettings(safeJsonParse(raw, notificationsDefaults));
       } catch {
         return { ...notificationsDefaults };
@@ -24922,6 +24947,13 @@
     let notificationsInlineEditTypeId = '';
     let notificationsCanEdit = false;
     let notificationsModalMode = 'edit';
+    let notificationsSearchQuery = '';
+
+    const getGsDefaultReplyTo = () => {
+      const users = Array.isArray(loadUsers()) ? loadUsers() : [];
+      const gsUser = users.find((u) => /grand\s*secretary/i.test(String((u && u.position) || '')));
+      return gsUser ? String(normalizeEmail(gsUser.email) || '').trim() : '';
+    };
 
     const notificationsLoadTypeFields = () => {
       if (!notificationsCurrentSettings) return;
@@ -24951,6 +24983,7 @@
         recipients_mode: normalizeNotificationsRecipientsMode(notificationsRecipientsModeInput ? String(notificationsRecipientsModeInput.value || '') : 'all_users_with_email'),
         manual_to: notificationsManualToInput ? String(notificationsManualToInput.value || '') : '',
         reply_to: notificationsReplyToInput ? String(notificationsReplyToInput.value || '') : '',
+        reply_to_cleared: notificationsReplyToInput ? String(notificationsReplyToInput.value || '').trim() === '' : false,
         signature: notificationsSignatureInput ? String(notificationsSignatureInput.value || '') : '',
         types_config: notificationsCurrentSettings ? { ...notificationsCurrentSettings.types_config } : {},
         active_type_ids: notificationsCurrentSettings ? [...(notificationsCurrentSettings.active_type_ids || [])] : [],
@@ -24988,9 +25021,28 @@
       if (!notificationsListTbody || !notificationsCurrentSettings) return;
       const rows = Array.isArray(notificationsCurrentSettings.active_type_ids) ? notificationsCurrentSettings.active_type_ids : [];
       const recipient = recipientSummary(notificationsCurrentSettings);
+      const query = String(notificationsSearchInput ? notificationsSearchInput.value || '' : notificationsSearchQuery).trim().toLowerCase();
+      notificationsSearchQuery = query;
+
+      if (notificationsClearSearchBtn) {
+        const hasSearch = query.length > 0;
+        notificationsClearSearchBtn.hidden = !hasSearch;
+        notificationsClearSearchBtn.disabled = !hasSearch;
+      }
+
       notificationsListTbody.innerHTML = '';
 
-      rows.forEach((id) => {
+      const filteredRows = rows.filter((id) => {
+        if (!query) return true;
+        const t = NOTIFICATION_TYPES.find((x) => x.id === id);
+        if (!t) return false;
+        const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
+        const status = String(cfg.enabled) === '1' ? 'enabled' : 'disabled';
+        const haystack = `${recipient} ${t.label} ${status}`.toLowerCase();
+        return haystack.includes(query);
+      });
+
+      filteredRows.forEach((id) => {
         const t = NOTIFICATION_TYPES.find((x) => x.id === id);
         if (!t) return;
         const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
@@ -25018,13 +25070,20 @@
             <td>${String(cfg.enabled) === '1' ? 'Enabled' : 'Disabled'}</td>
             <td>
               <button type="button" class="btn btn--editBlue" data-notifications-inline-edit="${escapeHtml(id)}">Edit</button>
-              <button type="button" class="btn btn--x" data-notifications-delete="${escapeHtml(id)}">Delete</button>
+              <button type="button" class="btn btn--danger" data-notifications-delete="${escapeHtml(id)}">Delete</button>
             </td>
           `;
         notificationsListTbody.appendChild(tr);
       });
 
-      if (notificationsEmptyState) notificationsEmptyState.hidden = rows.length !== 0;
+      if (notificationsEmptyState) {
+        const hasRows = rows.length > 0;
+        const hasMatches = filteredRows.length > 0;
+        notificationsEmptyState.textContent = hasRows
+          ? 'No notifications match your search.'
+          : 'No notifications created yet.';
+        notificationsEmptyState.hidden = hasMatches;
+      }
       notificationsSetDisabled(!notificationsCanEdit);
     };
 
@@ -25034,7 +25093,12 @@
       populateNotificationsRecipientOptions();
       if (notificationsRecipientsModeInput) notificationsRecipientsModeInput.value = s.recipients_mode;
       if (notificationsManualToInput) notificationsManualToInput.value = String(s.manual_to || '');
-      if (notificationsReplyToInput) notificationsReplyToInput.value = String(s.reply_to || '');
+      if (notificationsReplyToInput) {
+        const gsReplyTo = getGsDefaultReplyTo();
+        const effectiveReplyTo = s.reply_to || (!s.reply_to_cleared ? gsReplyTo : '');
+        notificationsReplyToInput.value = String(effectiveReplyTo || '');
+        notificationsReplyToInput.placeholder = 'email@example.org';
+      }
       if (notificationsSignatureInput) notificationsSignatureInput.value = String(s.signature || '');
       if (notificationsTypeSelectEl && notificationsTypeSelectEl.options.length === 0) {
         const ids = s.active_type_ids.length > 0 ? s.active_type_ids : allNotificationTypeIds;
@@ -25137,7 +25201,8 @@
           return;
         }
 
-        notificationsApplySettings(data.settings || {});
+        const wpSettings = data.settings || {};
+        notificationsApplySettings(wpSettings);
         const hasAnyUsers = loadUsers().length > 0;
         const currentUser = getCurrentUser();
         notificationsCanEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_email_notifications') : false);
@@ -25165,6 +25230,26 @@
       notificationsNewBtn.addEventListener('click', () => {
         if (!requireSettingsEditAccess('Email Notifications is view only for your account.', 'settings_email_notifications')) return;
         openNotificationsModal('', 'create');
+      });
+    }
+
+    if (notificationsSearchInput && !notificationsSearchInput.dataset.bound) {
+      notificationsSearchInput.dataset.bound = '1';
+      notificationsSearchInput.addEventListener('input', () => {
+        notificationsSearchQuery = String(notificationsSearchInput.value || '').trim().toLowerCase();
+        renderNotificationsTable();
+      });
+    }
+
+    if (notificationsClearSearchBtn && notificationsSearchInput && !notificationsClearSearchBtn.dataset.bound) {
+      notificationsClearSearchBtn.dataset.bound = '1';
+      notificationsClearSearchBtn.addEventListener('click', () => {
+        notificationsSearchInput.value = '';
+        notificationsSearchQuery = '';
+        notificationsClearSearchBtn.hidden = true;
+        notificationsClearSearchBtn.disabled = true;
+        notificationsSearchInput.focus();
+        renderNotificationsTable();
       });
     }
 
@@ -25765,7 +25850,12 @@
 
           // Fire notification events for status/with transitions.
           {
-            const baseVars = { paymentOrderNo: String(updated.paymentOrderNo || ''), year: String(year), paymentOrderLink: '' };
+            const baseVars = {
+              paymentOrderNo: String(updated.paymentOrderNo || ''),
+              year: String(year),
+              paymentOrderLink: '',
+              directLink: String(window.location.href || ''),
+            };
             if (nextWith === 'Grand Secretary' && nextStatus === 'Review') {
               void fireNotificationEvent('gs_review', baseVars);
             } else if (nextWith === 'Grand Master' && nextStatus === 'Review') {

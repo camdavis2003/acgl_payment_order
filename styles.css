@@ -1252,6 +1252,23 @@ input, textarea, select {
   flex: 0 0 auto;
 }
 
+#notificationsForm .notificationsPlaceholders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+#notificationsForm .notificationsPlaceholder {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: help;
+}
+
 /* JS-toggled input state (e.g., global search active) */
 .input-active {
   border-color: var(--focus);
@@ -3329,6 +3346,20 @@ body.is-modal-open {
   max-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
+}
+
+/* Notifications modal: add breathing room and allow scrolling through long forms. */
+#notificationsModal .modal__dialog {
+  padding: 12px 14px 14px;
+  overflow-y: auto;
+}
+
+#notificationsModal #notificationsForm {
+  padding-bottom: 8px;
+}
+
+#notificationsModal #notificationsForm .actions.actions--right {
+  margin-top: 20px;
 }
 
 .modal__header {

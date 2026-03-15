@@ -210,6 +210,50 @@ function acgl_fms_notifications_apply_placeholders($text, $vars) {
     return $out;
 }
 
+function acgl_fms_notifications_build_body_html($bodyTpl, $vars, $signature) {
+    // URL-type placeholders rendered as HTML anchors instead of raw URLs.
+    $urlPlaceholders = [
+        'directLink'      => 'Open Action',
+        'paymentOrderLink' => 'View payment order',
+    ];
+
+    $map = is_array($vars) ? $vars : [];
+
+    // HTML-encode the template text so it is safe to emit inside an HTML email.
+    $out = htmlspecialchars((string) $bodyTpl, ENT_QUOTES, 'UTF-8');
+
+    // Replace URL placeholders with HTML anchor tags.
+    foreach ($urlPlaceholders as $k => $label) {
+        $placeholder = htmlspecialchars('{{' . $k . '}}', ENT_QUOTES, 'UTF-8');
+        $rawUrl = isset($map[$k]) ? trim((string) $map[$k]) : '';
+        if ($rawUrl !== '' && function_exists('esc_url')) {
+            $safeUrl = esc_url($rawUrl);
+            $anchorLabel = htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
+            $out = str_replace($placeholder, '<a href="' . $safeUrl . '">' . $anchorLabel . '</a>', $out);
+        } else {
+            $out = str_replace($placeholder, '', $out);
+        }
+    }
+
+    // Replace remaining text placeholders with HTML-encoded values.
+    foreach ($map as $k => $v) {
+        if (isset($urlPlaceholders[$k])) continue;
+        $placeholder = htmlspecialchars('{{' . $k . '}}', ENT_QUOTES, 'UTF-8');
+        $out = str_replace($placeholder, htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8'), $out);
+    }
+
+    // Convert newlines to <br> tags.
+    $out = nl2br($out);
+
+    // Append signature.
+    $sig = trim((string) $signature);
+    if ($sig !== '') {
+        $out .= '<br><br>' . htmlspecialchars($sig, ENT_QUOTES, 'UTF-8');
+    }
+
+    return $out;
+}
+
 function acgl_fms_notifications_build_order_link($year, $orderId) {
     if (!defined('ACGL_FMS_PLUGIN_FILE')) return '';
 
@@ -286,12 +330,9 @@ function acgl_fms_notifications_send_public_submit($year, $order) {
 
     $signature = trim((string) ($settings['signature'] ?? ''));
     $subject = acgl_fms_notifications_apply_placeholders($subjectTpl, $vars);
-    $body = acgl_fms_notifications_apply_placeholders($bodyTpl, $vars);
-    if ($signature !== '') {
-        $body .= "\n\n" . $signature;
-    }
+    $body = acgl_fms_notifications_build_body_html($bodyTpl, $vars, $signature);
 
-    $headers = [ 'Content-Type: text/plain; charset=UTF-8' ];
+    $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
     $replyTo = trim((string) ($settings['reply_to'] ?? ''));
     if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
         $headers[] = 'Reply-To: ' . $replyTo;
@@ -1102,6 +1143,7 @@ function acgl_fms_register_rest_routes() {
                 'party' => 'Test party',
                 'moneyTransferNo' => 'MT 00-00',
                 'comments' => 'Test comments',
+                'directLink' => 'https://example.org/fms',
                 'refNo' => '12345',
                 'subject' => 'Test subject',
                 'priority' => 'normal',
@@ -1115,12 +1157,9 @@ function acgl_fms_register_rest_routes() {
             $signature = trim((string) ($settings['signature'] ?? ''));
 
             $subject = acgl_fms_notifications_apply_placeholders($subjectTpl, $vars);
-            $body = acgl_fms_notifications_apply_placeholders($bodyTpl, $vars);
-            if ($signature !== '') {
-                $body .= "\n\n" . $signature;
-            }
+            $body = acgl_fms_notifications_build_body_html($bodyTpl, $vars, $signature);
 
-            $headers = [ 'Content-Type: text/plain; charset=UTF-8' ];
+            $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
             $replyTo = trim((string) ($settings['reply_to'] ?? ''));
             if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
                 $headers[] = 'Reply-To: ' . $replyTo;
@@ -1195,13 +1234,10 @@ function acgl_fms_register_rest_routes() {
             }
 
             $subject = acgl_fms_notifications_apply_placeholders($subjectTpl, $vars);
-            $body = acgl_fms_notifications_apply_placeholders($bodyTpl, $vars);
             $signature = trim((string) ($settings['signature'] ?? ''));
-            if ($signature !== '') {
-                $body .= "\n\n" . $signature;
-            }
+            $body = acgl_fms_notifications_build_body_html($bodyTpl, $vars, $signature);
 
-            $headers = [ 'Content-Type: text/plain; charset=UTF-8' ];
+            $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
             $replyTo = trim((string) ($settings['reply_to'] ?? ''));
             if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
                 $headers[] = 'Reply-To: ' . $replyTo;

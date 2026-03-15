@@ -62,8 +62,6 @@ function acgl_fms_notifications_is_valid_email($value) {
 function acgl_fms_notifications_normalize_runtime_settings($baseSettings, $overrides) {
     $base = is_array($baseSettings) ? $baseSettings : [];
     $ov = is_array($overrides) ? $overrides : [];
-    $defaults = function_exists('acgl_fms_admin_notification_defaults') ? acgl_fms_admin_notification_defaults() : [];
-    $defaultTypes = isset($defaults['types_config']) && is_array($defaults['types_config']) ? $defaults['types_config'] : [];
 
     $pick = function ($key, $default = '') use ($ov, $base) {
         if (array_key_exists($key, $ov)) return $ov[$key];
@@ -85,59 +83,125 @@ function acgl_fms_notifications_normalize_runtime_settings($baseSettings, $overr
         }
     }
 
-    $typesRaw = $pick('types_config', []);
-    $typesMap = is_array($typesRaw) ? $typesRaw : [];
-    $typesConfig = [];
-    foreach ($defaultTypes as $typeId => $typeDefault) {
-        $rawType = isset($typesMap[$typeId]) && is_array($typesMap[$typeId]) ? $typesMap[$typeId] : [];
-        $enabledRaw = isset($rawType['enabled']) ? (string) $rawType['enabled'] : (string) ($typeDefault['enabled'] ?? '1');
-        $subject = isset($rawType['subject']) ? trim((string) $rawType['subject']) : '';
-        $body = isset($rawType['body']) ? trim((string) $rawType['body']) : '';
-        $typesConfig[$typeId] = [
-            'enabled' => ($enabledRaw === '1' || $enabledRaw === 'true' || $enabledRaw === 'yes') ? '1' : '0',
-            'subject' => $subject !== '' ? (string) $rawType['subject'] : (string) ($typeDefault['subject'] ?? ''),
-            'body' => $body !== '' ? (string) $rawType['body'] : (string) ($typeDefault['body'] ?? ''),
-            'recipients_mode' => isset($rawType['recipients_mode']) ? trim((string) $rawType['recipients_mode']) : '',
-            'manual_to' => isset($rawType['manual_to']) ? trim((string) $rawType['manual_to']) : '',
-        ];
-    }
+    $instancesRaw = $pick('instances', []);
+    $legacySettings = [
+        'types_config' => $pick('types_config', []),
+        'active_type_ids' => $pick('active_type_ids', []),
+    ];
+    $instances = function_exists('acgl_fms_admin_normalize_notification_instances')
+        ? acgl_fms_admin_normalize_notification_instances($instancesRaw, $legacySettings)
+        : [];
 
     return [
         'recipients_mode' => $mode,
         'manual_to' => trim((string) $pick('manual_to', '')),
         'reply_to' => trim((string) $pick('reply_to', '')),
         'signature' => trim((string) $pick('signature', 'ACGL Financial Management System')),
-        'types_config' => $typesConfig,
+        'instances' => $instances,
     ];
 }
 
-function acgl_fms_notifications_get_type_config($settings, $typeId) {
+function acgl_fms_notifications_get_type_instances($settings, $typeId) {
     $sid = trim((string) $typeId);
-    if ($sid === '') return null;
+    if ($sid === '') return [];
 
     $defaults = function_exists('acgl_fms_admin_notification_type_defaults')
         ? acgl_fms_admin_notification_type_defaults()
         : [];
     if (!isset($defaults[$sid]) || !is_array($defaults[$sid])) {
-        return null;
+        return [];
     }
 
-    $typesConfig = is_array($settings) && isset($settings['types_config']) && is_array($settings['types_config'])
-        ? $settings['types_config']
+    $instances = is_array($settings) && isset($settings['instances']) && is_array($settings['instances'])
+        ? $settings['instances']
         : [];
-    $rawType = isset($typesConfig[$sid]) && is_array($typesConfig[$sid]) ? $typesConfig[$sid] : [];
-    $default = $defaults[$sid];
+    $out = [];
+    foreach ($instances as $instance) {
+        if (!is_array($instance)) continue;
+        if ((string) ($instance['type_id'] ?? '') !== $sid) continue;
+        $out[] = $instance;
+    }
 
-    $enabledRaw = isset($rawType['enabled']) ? (string) $rawType['enabled'] : (string) ($default['enabled'] ?? '1');
-    $subject = isset($rawType['subject']) ? trim((string) $rawType['subject']) : '';
-    $body = isset($rawType['body']) ? trim((string) $rawType['body']) : '';
+    return $out;
+}
+
+function acgl_fms_notifications_get_type_config($settings, $typeId) {
+    $instances = acgl_fms_notifications_get_type_instances($settings, $typeId);
+    return count($instances) > 0 ? $instances[0] : null;
+}
+
+function acgl_fms_notifications_get_instance_config($settings, $instanceId) {
+    $sid = trim((string) $instanceId);
+    if ($sid === '') return null;
+
+    $instances = is_array($settings) && isset($settings['instances']) && is_array($settings['instances'])
+        ? $settings['instances']
+        : [];
+    foreach ($instances as $instance) {
+        if (!is_array($instance)) continue;
+        if ((string) ($instance['instance_id'] ?? '') === $sid) {
+            return $instance;
+        }
+    }
+    return null;
+}
+
+function acgl_fms_notifications_settings_for_instance($settings, $instanceConfig) {
+    $effective = is_array($settings) ? $settings : [];
+    $instance = is_array($instanceConfig) ? $instanceConfig : [];
+    $instanceMode = trim((string) ($instance['recipients_mode'] ?? ''));
+    if ($instanceMode !== '') {
+        $effective['recipients_mode'] = $instanceMode;
+        $effective['manual_to'] = trim((string) ($instance['manual_to'] ?? ''));
+    }
+    return $effective;
+}
+
+function acgl_fms_notifications_send_instance_email($settings, $instanceConfig, $vars, $forcedTo) {
+    $instance = is_array($instanceConfig) ? $instanceConfig : [];
+    if (!is_array($instance) || count($instance) === 0) {
+        return [ 'ok' => false, 'error' => 'event_unknown' ];
+    }
+    if ((string) ($instance['enabled'] ?? '0') !== '1') {
+        return [ 'ok' => false, 'error' => 'event_disabled' ];
+    }
+
+    $effectiveSettings = acgl_fms_notifications_settings_for_instance($settings, $instance);
+    $to = acgl_fms_notifications_resolve_recipients($effectiveSettings, $forcedTo);
+    if (!is_array($to) || count($to) === 0) {
+        return [ 'ok' => false, 'error' => 'no_recipients' ];
+    }
+
+    $subjectTpl = trim((string) ($instance['subject'] ?? ''));
+    if ($subjectTpl === '') {
+        $subjectTpl = '[ACGL FMS] Notification';
+    }
+    $bodyTpl = trim((string) ($instance['body'] ?? ''));
+    if ($bodyTpl === '') {
+        $bodyTpl = 'This is a notification from ACGL FMS.';
+    }
+
+    $subject = acgl_fms_notifications_apply_placeholders($subjectTpl, is_array($vars) ? $vars : []);
+    $signature = trim((string) ($settings['signature'] ?? ''));
+    $body = acgl_fms_notifications_build_body_html($bodyTpl, is_array($vars) ? $vars : [], $signature);
+
+    $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
+    $replyTo = trim((string) ($settings['reply_to'] ?? ''));
+    if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
+        $headers[] = 'Reply-To: ' . $replyTo;
+    }
+
+    $ok = wp_mail($to, $subject, $body, $headers);
+    if (!$ok) {
+        return [ 'ok' => false, 'error' => 'mail_send_failed' ];
+    }
 
     return [
-        'enabled' => ($enabledRaw === '1' || $enabledRaw === 'true' || $enabledRaw === 'yes') ? '1' : '0',
-        'subject' => $subject !== '' ? (string) $rawType['subject'] : (string) ($default['subject'] ?? ''),
-        'body' => $body !== '' ? (string) $rawType['body'] : (string) ($default['body'] ?? ''),
-        'recipients_mode' => isset($rawType['recipients_mode']) ? trim((string) $rawType['recipients_mode']) : '',
-        'manual_to' => isset($rawType['manual_to']) ? trim((string) $rawType['manual_to']) : '',
+        'ok' => true,
+        'to' => $to,
+        'subject' => $subject,
+        'instance_id' => (string) ($instance['instance_id'] ?? ''),
+        'type_id' => (string) ($instance['type_id'] ?? ''),
     ];
 }
 
@@ -297,17 +361,15 @@ function acgl_fms_notifications_send_public_submit($year, $order) {
     }
 
     $settings = acgl_fms_notifications_normalize_runtime_settings($saved, []);
-    $typeConfig = acgl_fms_notifications_get_type_config($settings, 'new_payment_order');
-    if (!is_array($typeConfig)) {
+    $typeInstances = acgl_fms_notifications_get_type_instances($settings, 'new_payment_order');
+    if (count($typeInstances) === 0) {
         return [ 'ok' => false, 'error' => 'event_unknown' ];
     }
-    if ((string) ($typeConfig['enabled'] ?? '0') !== '1') {
+    $enabledInstances = array_values(array_filter($typeInstances, function ($instance) {
+        return is_array($instance) && (string) ($instance['enabled'] ?? '0') === '1';
+    }));
+    if (count($enabledInstances) === 0) {
         return [ 'ok' => false, 'error' => 'event_disabled' ];
-    }
-
-    $to = acgl_fms_notifications_resolve_recipients($settings, '');
-    if (!is_array($to) || count($to) === 0) {
-        return [ 'ok' => false, 'error' => 'no_recipients' ];
     }
 
     $orderArr = is_array($order) ? $order : [];
@@ -630,34 +692,35 @@ function acgl_fms_docs_find_existing_attachment_id($kind, $year, $orderId = null
         'meta_query' => $meta,
     ]);
 
-    if (is_array($ids) && count($ids) > 0) {
-        $id = (int) $ids[0];
-        return $id > 0 ? $id : 0;
+    $sentTo = [];
+    $sentCount = 0;
+    $firstError = '';
+    foreach ($enabledInstances as $instanceConfig) {
+        $result = acgl_fms_notifications_send_instance_email($settings, $instanceConfig, $vars, '');
+        if (!is_array($result) || empty($result['ok'])) {
+            if ($firstError === '') {
+                $firstError = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
+            }
+            continue;
+        }
+        $recipients = isset($result['to']) && is_array($result['to']) ? $result['to'] : [];
+        foreach ($recipients as $email) {
+            $emailKey = strtolower(trim((string) $email));
+            if ($emailKey !== '') {
+                $sentTo[$emailKey] = true;
+            }
+        }
+        $sentCount += count($recipients);
     }
-    return 0;
-}
 
-function acgl_fms_docs_write_json_attachment($kind, $year, $title, $subdir, $filename, $payload, $orderId = null) {
-    $kind = is_string($kind) ? trim($kind) : '';
-    $year = acgl_fms_sanitize_year_folder((string) $year);
-    $title = is_string($title) ? trim($title) : '';
-    $subdir = is_string($subdir) ? trim($subdir) : '';
-    $filename = is_string($filename) ? trim($filename) : '';
-    if ($kind === '' || $year === '' || $title === '' || $subdir === '' || $filename === '') return 0;
-
-    $uploads = wp_upload_dir(null, false);
-    $basedir = is_array($uploads) ? (string) ($uploads['basedir'] ?? '') : '';
-    $baseurl = is_array($uploads) ? (string) ($uploads['baseurl'] ?? '') : '';
-    if ($basedir === '' || $baseurl === '') return 0;
-
-    $sub = '/' . ltrim($subdir, '/');
+    if ($sentCount === 0) {
+        return [ 'ok' => false, 'error' => $firstError !== '' ? $firstError : 'no_recipients' ];
     $sub = rtrim($sub, '/');
     $relative = ltrim($sub, '/') . '/' . $filename;
     $fullPath = rtrim($basedir, '/\\') . $sub . '/' . $filename;
     $fullDir = dirname($fullPath);
-    if (!wp_mkdir_p($fullDir)) return 0;
-
-    $json = wp_json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        'sent' => $sentCount,
+        'to' => array_values(array_keys($sentTo)),
     if (!is_string($json)) $json = '';
     $written = @file_put_contents($fullPath, $json);
     if ($written === false) return 0;
@@ -1120,27 +1183,18 @@ function acgl_fms_register_rest_routes() {
                 ? $data['settings']
                 : [];
             $typeId = is_array($data) ? trim((string) ($data['type'] ?? 'new_payment_order')) : 'new_payment_order';
+            $instanceId = is_array($data) ? trim((string) ($data['instance_id'] ?? '')) : '';
             if ($typeId === '') $typeId = 'new_payment_order';
 
             $settings = acgl_fms_notifications_normalize_runtime_settings($saved, $settingsOverride);
-            $typeConfig = acgl_fms_notifications_get_type_config($settings, $typeId);
+            $typeConfig = $instanceId !== ''
+                ? acgl_fms_notifications_get_instance_config($settings, $instanceId)
+                : acgl_fms_notifications_get_type_config($settings, $typeId);
             if (!is_array($typeConfig)) {
                 return new WP_REST_Response([ 'ok' => false, 'error' => 'event_unknown' ], 400);
             }
 
             $forcedTo = is_array($data) ? (string) ($data['to'] ?? '') : '';
-            $typeRecipMode = trim((string) ($typeConfig['recipients_mode'] ?? ''));
-            $typeManualTo = trim((string) ($typeConfig['manual_to'] ?? ''));
-            $effectiveSettingsForTest = $settings;
-            if ($typeRecipMode !== '') {
-                $effectiveSettingsForTest['recipients_mode'] = $typeRecipMode;
-                $effectiveSettingsForTest['manual_to'] = $typeManualTo;
-            }
-            $to = acgl_fms_notifications_resolve_recipients($effectiveSettingsForTest, $forcedTo);
-            if (count($to) === 0) {
-                return new WP_REST_Response([ 'ok' => false, 'error' => 'no_recipients' ], 400);
-            }
-
             $vars = [
                 'paymentOrderNo' => 'PO 00-00',
                 'year' => (string) gmdate('Y'),
@@ -1153,37 +1207,21 @@ function acgl_fms_register_rest_routes() {
                 'amount' => '123.45',
                 'party' => 'Test party',
                 'moneyTransferNo' => 'MT 00-00',
-                'comments' => 'Test comments',
-                'directLink' => 'https://example.org/fms',
-                'refNo' => '12345',
-                'subject' => 'Test subject',
-                'priority' => 'normal',
-                'createdBy' => function_exists('wp_get_current_user') ? (string) (wp_get_current_user()->user_login ?? '') : '',
-            ];
 
-            $subjectTpl = trim((string) ($typeConfig['subject'] ?? ''));
-            if ($subjectTpl === '') $subjectTpl = '[ACGL FMS] Test Email {{id}}';
-            $bodyTpl = trim((string) ($typeConfig['body'] ?? ''));
-            if ($bodyTpl === '') $bodyTpl = 'This is a test email from ACGL FMS.';
-            $signature = trim((string) ($settings['signature'] ?? ''));
-
-            $subject = acgl_fms_notifications_apply_placeholders($subjectTpl, $vars);
-            $body = acgl_fms_notifications_build_body_html($bodyTpl, $vars, $signature);
-
-            $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
-            $replyTo = trim((string) ($settings['reply_to'] ?? ''));
-            if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
-                $headers[] = 'Reply-To: ' . $replyTo;
-            }
-
+            $result = acgl_fms_notifications_send_instance_email($settings, $typeConfig, $vars, $forcedTo);
+            if (!is_array($result) || empty($result['ok'])) {
+                $error = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
+                $status = $error === 'mail_send_failed' ? 500 : 400;
+                return new WP_REST_Response([ 'ok' => false, 'error' => $error ], $status);
             $ok = wp_mail($to, $subject, $body, $headers);
             if (!$ok) {
                 return new WP_REST_Response([ 'ok' => false, 'error' => 'mail_send_failed' ], 500);
             }
-
-            return [
-                'ok' => true,
+                'sent' => count(isset($result['to']) && is_array($result['to']) ? $result['to'] : []),
+                'to' => isset($result['to']) && is_array($result['to']) ? $result['to'] : [],
+                'subject' => isset($result['subject']) ? (string) $result['subject'] : '',
                 'sent' => count($to),
+                'instance_id' => (string) ($typeConfig['instance_id'] ?? ''),
                 'to' => $to,
                 'subject' => $subject,
                 'type' => $typeId,
@@ -1221,57 +1259,56 @@ function acgl_fms_register_rest_routes() {
             }
 
             $settings = acgl_fms_notifications_normalize_runtime_settings($saved, []);
-            $typeConfig = acgl_fms_notifications_get_type_config($settings, $typeId);
-            if (!is_array($typeConfig)) {
+            $typeInstances = acgl_fms_notifications_get_type_instances($settings, $typeId);
+            if (count($typeInstances) === 0) {
                 return new WP_REST_Response([ 'ok' => false, 'error' => 'event_unknown' ], 400);
             }
-            if ((string) ($typeConfig['enabled'] ?? '0') !== '1') {
+            $enabledInstances = array_values(array_filter($typeInstances, function ($instance) {
+                return is_array($instance) && (string) ($instance['enabled'] ?? '0') === '1';
+            }));
+            if (count($enabledInstances) === 0) {
                 return new WP_REST_Response([ 'ok' => false, 'error' => 'event_disabled' ], 400);
             }
 
-            $typeRecipMode = trim((string) ($typeConfig['recipients_mode'] ?? ''));
-            $typeManualTo = trim((string) ($typeConfig['manual_to'] ?? ''));
-            $effectiveSettings = $settings;
-            if ($typeRecipMode !== '') {
-                $effectiveSettings['recipients_mode'] = $typeRecipMode;
-                $effectiveSettings['manual_to'] = $typeManualTo;
-            }
-            $to = acgl_fms_notifications_resolve_recipients($effectiveSettings, '');
-            if (count($to) === 0) {
-                return new WP_REST_Response([ 'ok' => false, 'error' => 'no_recipients' ], 400);
-            }
-
             $vars = isset($data['vars']) && is_array($data['vars']) ? $data['vars'] : [];
-            $subjectTpl = trim((string) ($typeConfig['subject'] ?? ''));
-            $bodyTpl = trim((string) ($typeConfig['body'] ?? ''));
-            if ($subjectTpl === '') {
-                $subjectTpl = '[ACGL FMS] Notification';
-            }
-            if ($bodyTpl === '') {
-                $bodyTpl = 'This is a notification from ACGL FMS.';
+
+            $sentTo = [];
+            $sentCount = 0;
+            $firstError = '';
+            $subjects = [];
+            foreach ($enabledInstances as $instanceConfig) {
+                $result = acgl_fms_notifications_send_instance_email($settings, $instanceConfig, $vars, '');
+                if (!is_array($result) || empty($result['ok'])) {
+                    if ($firstError === '') {
+                        $firstError = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
+                    }
+                    continue;
+                }
+                $recipients = isset($result['to']) && is_array($result['to']) ? $result['to'] : [];
+                foreach ($recipients as $email) {
+                    $emailKey = strtolower(trim((string) $email));
+                    if ($emailKey !== '') {
+                        $sentTo[$emailKey] = true;
+                    }
+                }
+                $sentCount += count($recipients);
+                if (isset($result['subject'])) {
+                    $subjects[] = (string) $result['subject'];
+                }
             }
 
-            $subject = acgl_fms_notifications_apply_placeholders($subjectTpl, $vars);
-            $signature = trim((string) ($settings['signature'] ?? ''));
-            $body = acgl_fms_notifications_build_body_html($bodyTpl, $vars, $signature);
-
-            $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
-            $replyTo = trim((string) ($settings['reply_to'] ?? ''));
-            if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
-                $headers[] = 'Reply-To: ' . $replyTo;
-            }
-
-            $ok = wp_mail($to, $subject, $body, $headers);
-            if (!$ok) {
-                return new WP_REST_Response([ 'ok' => false, 'error' => 'mail_send_failed' ], 500);
+            if ($sentCount === 0) {
+                $status = $firstError === 'mail_send_failed' ? 500 : 400;
+                return new WP_REST_Response([ 'ok' => false, 'error' => $firstError !== '' ? $firstError : 'no_recipients' ], $status);
             }
 
             return [
                 'ok' => true,
-                'sent' => count($to),
-                'to' => $to,
-                'subject' => $subject,
+                'sent' => $sentCount,
+                'to' => array_values(array_keys($sentTo)),
+                'subject' => count($subjects) > 0 ? $subjects[0] : '',
                 'type' => $typeId,
+                'instance_count' => count($enabledInstances),
             ];
         },
     ]);

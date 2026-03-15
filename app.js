@@ -24768,6 +24768,7 @@
 
   if (notificationsForm) {
     const allNotificationTypeIds = NOTIFICATION_TYPES.map((t) => t.id);
+    const defaultNotificationTypeId = NOTIFICATION_TYPES[0] ? NOTIFICATION_TYPES[0].id : 'new_payment_order';
 
     const normalizeNotificationsRecipientsMode = (modeRaw) => {
       const mode = String(modeRaw || '').trim();
@@ -24824,6 +24825,27 @@
       });
     };
 
+    const normalizeNotificationTypeId = (typeIdRaw) => {
+      const id = String(typeIdRaw || '').trim();
+      return allNotificationTypeIds.includes(id) ? id : defaultNotificationTypeId;
+    };
+
+    const sanitizeNotificationInstanceId = (instanceIdRaw) => {
+      const id = String(instanceIdRaw || '').trim();
+      return /^[a-z0-9._:-]+$/i.test(id) ? id : '';
+    };
+
+    const createNotificationInstanceId = (typeIdRaw) => {
+      const typeId = normalizeNotificationTypeId(typeIdRaw).replace(/[^a-z0-9._:-]+/gi, '_') || 'notification';
+      return `${typeId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+    };
+
+    const notificationsTypeLabelForId = (typeIdRaw) => {
+      const typeId = normalizeNotificationTypeId(typeIdRaw);
+      const def = NOTIFICATION_TYPES.find((t) => t.id === typeId);
+      return def ? def.label : typeId;
+    };
+
     const notificationsTypeDefaultForId = (id) => {
       const def = NOTIFICATION_TYPES.find((t) => t.id === id);
       return {
@@ -24837,6 +24859,35 @@
       const r = raw && typeof raw === 'object' ? raw : {};
       const def = notificationsTypeDefaultForId(id);
       return {
+        enabled: String(r.enabled || def.enabled) === '1' ? '1' : '0',
+        subject: String(r.subject || def.subject),
+        body: String(r.body || def.body),
+        recipients_mode: r.recipients_mode ? normalizeNotificationsRecipientsMode(String(r.recipients_mode)) : '',
+        manual_to: String(r.manual_to || ''),
+      };
+    };
+
+    const notificationsInstanceDefaultForType = (typeIdRaw, instanceIdRaw = '') => {
+      const typeId = normalizeNotificationTypeId(typeIdRaw);
+      const def = notificationsTypeDefaultForId(typeId);
+      return {
+        instance_id: sanitizeNotificationInstanceId(instanceIdRaw) || createNotificationInstanceId(typeId),
+        type_id: typeId,
+        enabled: String(def.enabled || '0') === '1' ? '1' : '0',
+        subject: String(def.subject || ''),
+        body: String(def.body || ''),
+        recipients_mode: '',
+        manual_to: '',
+      };
+    };
+
+    const normalizeNotificationsInstance = (raw, fallbackTypeId = defaultNotificationTypeId) => {
+      const r = raw && typeof raw === 'object' ? raw : {};
+      const typeId = normalizeNotificationTypeId(r.type_id || r.type || fallbackTypeId);
+      const def = notificationsInstanceDefaultForType(typeId, r.instance_id || r.id || '');
+      return {
+        instance_id: sanitizeNotificationInstanceId(r.instance_id || r.id || '') || def.instance_id,
+        type_id: typeId,
         enabled: String(r.enabled || def.enabled) === '1' ? '1' : '0',
         subject: String(r.subject || def.subject),
         body: String(r.body || def.body),
@@ -24873,27 +24924,89 @@
       return fallback;
     };
 
+    const migrateLegacyNotificationsInstances = (settingsRaw) => {
+      const s = settingsRaw && typeof settingsRaw === 'object' ? settingsRaw : {};
+      const typesConfig = normalizeNotificationsTypesConfig(s.types_config || {});
+      const activeTypeIds = normalizeActiveTypeIds(s.active_type_ids || [], typesConfig);
+      const migrated = activeTypeIds.map((typeId) => normalizeNotificationsInstance({
+        instance_id: typeId,
+        type_id: typeId,
+        ...(typesConfig[typeId] || {}),
+      }, typeId));
+      return migrated.length > 0 ? migrated : [notificationsInstanceDefaultForType(defaultNotificationTypeId, defaultNotificationTypeId)];
+    };
+
+    const normalizeNotificationsInstances = (rawList, legacySource) => {
+      if (!Array.isArray(rawList)) {
+        return migrateLegacyNotificationsInstances(legacySource);
+      }
+      const out = [];
+      const seen = new Set();
+      rawList.forEach((entry) => {
+        const normalized = normalizeNotificationsInstance(entry, entry && typeof entry === 'object' ? entry.type_id : defaultNotificationTypeId);
+        let instanceId = normalized.instance_id;
+        while (seen.has(instanceId)) {
+          instanceId = createNotificationInstanceId(normalized.type_id);
+        }
+        seen.add(instanceId);
+        out.push({ ...normalized, instance_id: instanceId });
+      });
+      return out;
+    };
+
+    const notificationsGetInstanceIndex = (settings, instanceIdRaw) => {
+      const instanceId = String(instanceIdRaw || '').trim();
+      const instances = Array.isArray(settings && settings.instances) ? settings.instances : [];
+      return instances.findIndex((instance) => String(instance && instance.instance_id || '') === instanceId);
+    };
+
+    const notificationsGetInstance = (settings, instanceIdRaw) => {
+      const idx = notificationsGetInstanceIndex(settings, instanceIdRaw);
+      if (idx < 0) return null;
+      const instances = Array.isArray(settings && settings.instances) ? settings.instances : [];
+      return instances[idx] || null;
+    };
+
+    const describeNotificationRows = (instancesRaw) => {
+      const instances = Array.isArray(instancesRaw) ? instancesRaw : [];
+      const counts = {};
+      instances.forEach((instance) => {
+        const typeId = normalizeNotificationTypeId(instance && instance.type_id);
+        counts[typeId] = (counts[typeId] || 0) + 1;
+      });
+      const seen = {};
+      return instances.map((instance) => {
+        const typeId = normalizeNotificationTypeId(instance && instance.type_id);
+        const typeLabel = notificationsTypeLabelForId(typeId);
+        seen[typeId] = (seen[typeId] || 0) + 1;
+        const ordinal = seen[typeId];
+        return {
+          instance,
+          typeId,
+          typeLabel,
+          displayLabel: counts[typeId] > 1 ? `${typeLabel} #${ordinal}` : typeLabel,
+        };
+      });
+    };
+
     const notificationsDefaults = {
       recipients_mode: 'all_users_with_email',
       manual_to: '',
       reply_to: '',
       signature: 'ACGL FMS',
-      types_config: normalizeNotificationsTypesConfig({}),
-      active_type_ids: ['new_payment_order'],
+      instances: [notificationsInstanceDefaultForType(defaultNotificationTypeId, defaultNotificationTypeId)],
     };
 
     const normalizeNotificationsSettings = (settingsRaw) => {
       const s = settingsRaw && typeof settingsRaw === 'object' ? settingsRaw : {};
       const mode = normalizeNotificationsRecipientsMode(s.recipients_mode || notificationsDefaults.recipients_mode);
-      const typesConfig = normalizeNotificationsTypesConfig(s.types_config || {});
       return {
         recipients_mode: mode,
         manual_to: String(s.manual_to || notificationsDefaults.manual_to),
         reply_to: s.reply_to != null ? String(s.reply_to) : notificationsDefaults.reply_to,
         reply_to_cleared: Boolean(s.reply_to_cleared),
         signature: String(s.signature || notificationsDefaults.signature),
-        types_config: typesConfig,
-        active_type_ids: normalizeActiveTypeIds(s.active_type_ids || [], typesConfig),
+        instances: normalizeNotificationsInstances(s.instances, s),
       };
     };
 
@@ -24933,8 +25046,8 @@
       if (notificationsManualToInput) notificationsManualToInput.disabled = !manual;
     };
 
-    const recipientSummary = (typeConfig, globalSettings) => {
-      const tc = typeConfig && typeof typeConfig === 'object' ? typeConfig : {};
+    const recipientSummary = (instanceConfig, globalSettings) => {
+      const tc = instanceConfig && typeof instanceConfig === 'object' ? instanceConfig : {};
       const gs = globalSettings && typeof globalSettings === 'object' ? globalSettings : {};
       const mode = normalizeNotificationsRecipientsMode(tc.recipients_mode || gs.recipients_mode);
       if (mode === 'manual_list') {
@@ -24949,9 +25062,11 @@
     };
 
     let notificationsCurrentSettings = null;
-    let notificationsInlineEditTypeId = '';
+    let notificationsInlineEditInstanceId = '';
     let notificationsCanEdit = false;
     let notificationsModalMode = 'edit';
+    let notificationsEditingInstanceId = '';
+    let notificationsModalDraft = null;
     let notificationsSearchQuery = '';
 
     const getGsDefaultReplyTo = () => {
@@ -24962,44 +25077,69 @@
 
     const notificationsLoadTypeFields = () => {
       if (!notificationsCurrentSettings) return;
-      const id = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '').trim() : '';
-      if (!id) return;
-      const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
-      if (notificationsTypeEnabledInput) notificationsTypeEnabledInput.checked = String(cfg.enabled || '0') === '1';
-      if (notificationsSubjectInput) notificationsSubjectInput.value = String(cfg.subject || '');
-      if (notificationsBodyInput) notificationsBodyInput.value = String(cfg.body || '');
+      const selectedTypeId = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '').trim() : '';
+      let instance = null;
+      if (notificationsModalMode === 'edit') {
+        instance = notificationsGetInstance(notificationsCurrentSettings, notificationsEditingInstanceId);
+      } else {
+        const typeId = normalizeNotificationTypeId(selectedTypeId || (notificationsModalDraft && notificationsModalDraft.type_id) || defaultNotificationTypeId);
+        instance = normalizeNotificationsInstance(notificationsModalDraft || { type_id: typeId }, typeId);
+        notificationsModalDraft = instance;
+        if (notificationsTypeSelectEl) notificationsTypeSelectEl.value = typeId;
+      }
+      if (!instance) return;
+      if (notificationsTypeEnabledInput) notificationsTypeEnabledInput.checked = String(instance.enabled || '0') === '1';
+      if (notificationsSubjectInput) notificationsSubjectInput.value = String(instance.subject || '');
+      if (notificationsBodyInput) notificationsBodyInput.value = String(instance.body || '');
       if (notificationsRecipientsModeInput) {
-        const effectiveMode = cfg.recipients_mode || notificationsCurrentSettings.recipients_mode || 'all_users_with_email';
+        const effectiveMode = instance.recipients_mode || notificationsCurrentSettings.recipients_mode || 'all_users_with_email';
         notificationsRecipientsModeInput.value = effectiveMode;
       }
-      if (notificationsManualToInput) notificationsManualToInput.value = String(cfg.manual_to || '');
+      if (notificationsManualToInput) notificationsManualToInput.value = String(instance.manual_to || '');
       notificationsSyncModeUi();
     };
 
     const notificationsFlushTypeFields = () => {
-      if (!notificationsCurrentSettings) return;
-      const id = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '').trim() : '';
-      if (!id) return;
-      if (!notificationsCurrentSettings.types_config) notificationsCurrentSettings.types_config = {};
-      notificationsCurrentSettings.types_config[id] = {
+      const typeId = normalizeNotificationTypeId(notificationsTypeSelectEl ? notificationsTypeSelectEl.value : defaultNotificationTypeId);
+      const sourceInstance = notificationsModalMode === 'edit'
+        ? notificationsGetInstance(notificationsCurrentSettings, notificationsEditingInstanceId)
+        : notificationsModalDraft;
+      const instance = normalizeNotificationsInstance({
+        ...(sourceInstance || {}),
+        instance_id: sourceInstance && sourceInstance.instance_id ? sourceInstance.instance_id : createNotificationInstanceId(typeId),
+        type_id: typeId,
         enabled: notificationsTypeEnabledInput && notificationsTypeEnabledInput.checked ? '1' : '0',
         subject: notificationsSubjectInput ? String(notificationsSubjectInput.value || '') : '',
         body: notificationsBodyInput ? String(notificationsBodyInput.value || '') : '',
         recipients_mode: notificationsRecipientsModeInput ? String(notificationsRecipientsModeInput.value || '') : '',
         manual_to: notificationsManualToInput ? String(notificationsManualToInput.value || '') : '',
-      };
+      }, typeId);
+      notificationsModalDraft = instance;
+      return instance;
     };
 
     const notificationsReadFormPayload = () => {
-      notificationsFlushTypeFields();
+      const instance = notificationsFlushTypeFields();
+      const base = normalizeNotificationsSettings(notificationsCurrentSettings || notificationsDefaults);
+      const instances = Array.isArray(base.instances) ? [...base.instances] : [];
+      const idx = notificationsModalMode === 'edit'
+        ? instances.findIndex((entry) => String(entry && entry.instance_id || '') === String(instance && instance.instance_id || ''))
+        : -1;
+      if (idx >= 0) {
+        instances[idx] = instance;
+      } else {
+        instances.push(instance);
+      }
       return {
-        recipients_mode: notificationsCurrentSettings ? notificationsCurrentSettings.recipients_mode : 'all_users_with_email',
-        manual_to: notificationsCurrentSettings ? String(notificationsCurrentSettings.manual_to || '') : '',
-        reply_to: notificationsReplyToInput ? String(notificationsReplyToInput.value || '') : '',
-        reply_to_cleared: notificationsReplyToInput ? String(notificationsReplyToInput.value || '').trim() === '' : false,
-        signature: notificationsSignatureInput ? String(notificationsSignatureInput.value || '') : '',
-        types_config: notificationsCurrentSettings ? { ...notificationsCurrentSettings.types_config } : {},
-        active_type_ids: notificationsCurrentSettings ? [...(notificationsCurrentSettings.active_type_ids || [])] : [],
+        instance,
+        settings: {
+          recipients_mode: base.recipients_mode,
+          manual_to: String(base.manual_to || ''),
+          reply_to: notificationsReplyToInput ? String(notificationsReplyToInput.value || '') : '',
+          reply_to_cleared: notificationsReplyToInput ? String(notificationsReplyToInput.value || '').trim() === '' : false,
+          signature: notificationsSignatureInput ? String(notificationsSignatureInput.value || '') : '',
+          instances,
+        },
       };
     };
 
@@ -25032,7 +25172,7 @@
 
     const renderNotificationsTable = () => {
       if (!notificationsListTbody || !notificationsCurrentSettings) return;
-      const rows = Array.isArray(notificationsCurrentSettings.active_type_ids) ? notificationsCurrentSettings.active_type_ids : [];
+      const rows = describeNotificationRows(notificationsCurrentSettings.instances || []);
       const query = String(notificationsSearchInput ? notificationsSearchInput.value || '' : notificationsSearchQuery).trim().toLowerCase();
       notificationsSearchQuery = query;
 
@@ -25044,47 +25184,44 @@
 
       notificationsListTbody.innerHTML = '';
 
-      const filteredRows = rows.filter((id) => {
+      const filteredRows = rows.filter((row) => {
         if (!query) return true;
-        const t = NOTIFICATION_TYPES.find((x) => x.id === id);
-        if (!t) return false;
-        const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
-        const status = String(cfg.enabled) === '1' ? 'enabled' : 'disabled';
-        const recipient = recipientSummary(cfg, notificationsCurrentSettings);
-        const haystack = `${recipient} ${t.label} ${status}`.toLowerCase();
+        const status = String(row.instance && row.instance.enabled) === '1' ? 'enabled' : 'disabled';
+        const recipient = recipientSummary(row.instance, notificationsCurrentSettings);
+        const haystack = `${recipient} ${row.displayLabel} ${status}`.toLowerCase();
         return haystack.includes(query);
       });
 
-      filteredRows.forEach((id) => {
-        const t = NOTIFICATION_TYPES.find((x) => x.id === id);
-        if (!t) return;
-        const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
-        const recipient = recipientSummary(cfg, notificationsCurrentSettings);
-        const isInline = notificationsInlineEditTypeId === id;
+      filteredRows.forEach((row) => {
+        const instance = row.instance;
+        if (!instance) return;
+        const instanceId = String(instance.instance_id || '');
+        const recipient = recipientSummary(instance, notificationsCurrentSettings);
+        const isInline = notificationsInlineEditInstanceId === instanceId;
         const tr = document.createElement('tr');
         tr.innerHTML = isInline
           ? `
             <td>${escapeHtml(recipient)}</td>
-            <td>${escapeHtml(t.label)}</td>
+            <td>${escapeHtml(row.displayLabel)}</td>
             <td>
-              <select data-notifications-inline-status="${escapeHtml(id)}">
-                <option value="1" ${String(cfg.enabled) === '1' ? 'selected' : ''}>Enabled</option>
-                <option value="0" ${String(cfg.enabled) !== '1' ? 'selected' : ''}>Disabled</option>
+              <select data-notifications-inline-status="${escapeHtml(instanceId)}">
+                <option value="1" ${String(instance.enabled) === '1' ? 'selected' : ''}>Enabled</option>
+                <option value="0" ${String(instance.enabled) !== '1' ? 'selected' : ''}>Disabled</option>
               </select>
             </td>
             <td>
-              <button type="button" class="btn btn--viewGrey" data-notifications-inline-save="${escapeHtml(id)}">Save</button>
-              <button type="button" class="btn btn--ghost" data-notifications-inline-cancel="${escapeHtml(id)}">Cancel</button>
-              <button type="button" class="btn btn--editBlue" data-notifications-open-edit="${escapeHtml(id)}">Edit</button>
+              <button type="button" class="btn btn--viewGrey" data-notifications-inline-save="${escapeHtml(instanceId)}">Save</button>
+              <button type="button" class="btn btn--ghost" data-notifications-inline-cancel="${escapeHtml(instanceId)}">Cancel</button>
+              <button type="button" class="btn btn--editBlue" data-notifications-open-edit="${escapeHtml(instanceId)}">Edit</button>
             </td>
           `
           : `
             <td>${escapeHtml(recipient)}</td>
-            <td>${escapeHtml(t.label)}</td>
-            <td>${String(cfg.enabled) === '1' ? 'Enabled' : 'Disabled'}</td>
+            <td>${escapeHtml(row.displayLabel)}</td>
+            <td>${String(instance.enabled) === '1' ? 'Enabled' : 'Disabled'}</td>
             <td>
-              <button type="button" class="btn btn--editBlue" data-notifications-inline-edit="${escapeHtml(id)}">Edit</button>
-              <button type="button" class="btn btn--danger" data-notifications-delete="${escapeHtml(id)}">Delete</button>
+              <button type="button" class="btn btn--editBlue" data-notifications-inline-edit="${escapeHtml(instanceId)}">Edit</button>
+              <button type="button" class="btn btn--danger" data-notifications-delete="${escapeHtml(instanceId)}">Delete</button>
             </td>
           `;
         notificationsListTbody.appendChild(tr);
@@ -25114,10 +25251,6 @@
         notificationsReplyToInput.placeholder = 'email@example.org';
       }
       if (notificationsSignatureInput) notificationsSignatureInput.value = String(s.signature || '');
-      if (notificationsTypeSelectEl && notificationsTypeSelectEl.options.length === 0) {
-        const ids = s.active_type_ids.length > 0 ? s.active_type_ids : allNotificationTypeIds;
-        populateNotificationsTypeSelect(ids);
-      }
       notificationsLoadTypeFields();
       notificationsSyncModeUi();
       renderNotificationsTable();
@@ -25160,23 +25293,35 @@
         notificationsModalTitle.textContent = notificationsModalMode === 'create' ? 'Create New Notification' : 'Edit Notification';
       }
 
-      const activeIds = [...(notificationsCurrentSettings.active_type_ids || [])];
-      const inactiveIds = allNotificationTypeIds.filter((id) => !activeIds.includes(id));
-      const availableIds = notificationsModalMode === 'create' ? inactiveIds : activeIds;
-      if (availableIds.length === 0) {
-        window.alert('No additional notification types are available to create.');
-        return;
+      notificationsEditingInstanceId = '';
+      notificationsModalDraft = null;
+      if (notificationsModalMode === 'create') {
+        const pickId = normalizeNotificationTypeId(typeId || defaultNotificationTypeId);
+        notificationsModalDraft = notificationsInstanceDefaultForType(pickId);
+        populateNotificationsTypeSelect(allNotificationTypeIds);
+        if (notificationsTypeSelectEl) {
+          notificationsTypeSelectEl.disabled = false;
+          notificationsTypeSelectEl.value = pickId;
+        }
+      } else {
+        const instance = notificationsGetInstance(notificationsCurrentSettings, typeId);
+        if (!instance) return;
+        notificationsEditingInstanceId = String(instance.instance_id || '');
+        populateNotificationsTypeSelect([instance.type_id]);
+        if (notificationsTypeSelectEl) {
+          notificationsTypeSelectEl.disabled = true;
+          notificationsTypeSelectEl.value = String(instance.type_id || defaultNotificationTypeId);
+        }
       }
-
-      populateNotificationsTypeSelect(availableIds);
-      const pickId = typeId && availableIds.includes(typeId) ? typeId : availableIds[0];
-      if (notificationsTypeSelectEl) notificationsTypeSelectEl.value = pickId;
       notificationsLoadTypeFields();
       notificationsSyncModeUi();
       openSimpleModal(notificationsModal, '#notificationsTypeSelect');
     };
 
     const closeNotificationsModal = () => {
+      notificationsEditingInstanceId = '';
+      notificationsModalDraft = null;
+      if (notificationsTypeSelectEl) notificationsTypeSelectEl.disabled = false;
       closeSimpleModal(notificationsModal);
     };
 
@@ -25278,13 +25423,13 @@
         const openEditBtn = e.target.closest('[data-notifications-open-edit]');
 
         if (inlineEditBtn) {
-          notificationsInlineEditTypeId = String(inlineEditBtn.getAttribute('data-notifications-inline-edit') || '');
+          notificationsInlineEditInstanceId = String(inlineEditBtn.getAttribute('data-notifications-inline-edit') || '');
           renderNotificationsTable();
           return;
         }
 
         if (inlineCancelBtn) {
-          notificationsInlineEditTypeId = '';
+          notificationsInlineEditInstanceId = '';
           renderNotificationsTable();
           return;
         }
@@ -25300,13 +25445,17 @@
           const statusEl = notificationsListTbody.querySelector(`[data-notifications-inline-status="${CSS.escape(id)}"]`);
           if (!statusEl) return;
           const next = normalizeNotificationsSettings({ ...notificationsCurrentSettings });
-          if (!next.types_config[id]) next.types_config[id] = notificationsTypeDefaultForId(id);
-          next.types_config[id] = { ...next.types_config[id], enabled: String(statusEl.value || '0') === '1' ? '1' : '0' };
+          const instanceIdx = notificationsGetInstanceIndex(next, id);
+          if (instanceIdx < 0) return;
+          next.instances[instanceIdx] = {
+            ...next.instances[instanceIdx],
+            enabled: String(statusEl.value || '0') === '1' ? '1' : '0',
+          };
           notificationsSetDisabled(true);
           const ok = await saveNotificationsSettings(next);
           notificationsSetDisabled(!notificationsCanEdit);
           if (ok) {
-            notificationsInlineEditTypeId = '';
+            notificationsInlineEditInstanceId = '';
             renderNotificationsTable();
           }
           return;
@@ -25318,12 +25467,12 @@
           const ok = window.confirm('Delete this notification?');
           if (!ok) return;
           const next = normalizeNotificationsSettings({ ...notificationsCurrentSettings });
-          next.active_type_ids = (next.active_type_ids || []).filter((x) => x !== id);
+          next.instances = (next.instances || []).filter((instance) => String(instance && instance.instance_id || '') !== id);
           notificationsSetDisabled(true);
           const saved = await saveNotificationsSettings(next);
           notificationsSetDisabled(!notificationsCanEdit);
           if (saved) {
-            notificationsInlineEditTypeId = '';
+            notificationsInlineEditInstanceId = '';
             renderNotificationsTable();
           }
         }
@@ -25337,20 +25486,14 @@
         if (!requireSettingsEditAccess('Email Notifications is view only for your account.', 'settings_email_notifications')) return;
         if (!notificationsCurrentSettings) return;
 
-        const selectedType = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '').trim() : '';
-        if (!selectedType) return;
-
-        const payload = notificationsReadFormPayload();
-        if (notificationsModalMode === 'create') {
-          if (!Array.isArray(payload.active_type_ids)) payload.active_type_ids = [];
-          if (!payload.active_type_ids.includes(selectedType)) payload.active_type_ids.push(selectedType);
-        }
+        const formState = notificationsReadFormPayload();
+        const payload = formState.settings;
 
         notificationsSetDisabled(true);
         const ok = await saveNotificationsSettings(payload);
         notificationsSetDisabled(!notificationsCanEdit);
         if (ok) {
-          notificationsInlineEditTypeId = '';
+          notificationsInlineEditInstanceId = '';
           closeNotificationsModal();
           renderNotificationsTable();
         }
@@ -25366,11 +25509,13 @@
           return;
         }
 
-        const typeId = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '') : (NOTIFICATION_TYPES[0] ? NOTIFICATION_TYPES[0].id : '');
+        const formState = notificationsReadFormPayload();
+        const typeId = String(formState.instance && formState.instance.type_id || defaultNotificationTypeId);
         const payload = {
           to: notificationsTestToInput ? String(notificationsTestToInput.value || '') : '',
           type: typeId,
-          settings: notificationsReadFormPayload(),
+          instance_id: String(formState.instance && formState.instance.instance_id || ''),
+          settings: formState.settings,
         };
 
         notificationsSetDisabled(true);

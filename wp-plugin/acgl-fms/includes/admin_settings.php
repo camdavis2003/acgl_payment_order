@@ -15,6 +15,7 @@ define('ACGL_FMS_NOTIFY_REPLY_TO_CLEARED_OPTION', 'acgl_fms_notify_reply_to_clea
 define('ACGL_FMS_NOTIFY_SUBJECT_OPTION', 'acgl_fms_notify_subject_v1');
 define('ACGL_FMS_NOTIFY_BODY_OPTION', 'acgl_fms_notify_body_v1');
 define('ACGL_FMS_NOTIFY_SIGNATURE_OPTION', 'acgl_fms_notify_signature_v1');
+define('ACGL_FMS_NOTIFY_INSTANCES_OPTION', 'acgl_fms_notify_instances_v1');
 define('ACGL_FMS_NOTIFY_TYPES_CONFIG_OPTION', 'acgl_fms_notify_types_config_v1');
 define('ACGL_FMS_NOTIFY_ACTIVE_TYPES_OPTION', 'acgl_fms_notify_active_type_ids_v1');
 
@@ -111,6 +112,138 @@ function acgl_fms_admin_normalize_notification_types_config($rawMap) {
     return $out;
 }
 
+function acgl_fms_admin_sanitize_notification_instance_id($rawInstanceId) {
+    $instanceId = trim((string) $rawInstanceId);
+    if ($instanceId === '') return '';
+    return preg_match('/^[a-z0-9._:-]+$/i', $instanceId) ? $instanceId : '';
+}
+
+function acgl_fms_admin_generate_notification_instance_id($typeId) {
+    $base = strtolower(trim((string) $typeId));
+    $base = preg_replace('/[^a-z0-9._:-]+/i', '_', $base);
+    if (!is_string($base) || $base === '') {
+        $base = 'notification';
+    }
+
+    if (function_exists('wp_generate_uuid4')) {
+        $uuid = str_replace('-', '', (string) wp_generate_uuid4());
+        return $base . ':' . substr($uuid, 0, 12);
+    }
+
+    return $base . ':' . str_replace('.', '', uniqid('', true));
+}
+
+function acgl_fms_admin_notification_instance_defaults($typeId, $instanceId = '') {
+    $defaultsMap = acgl_fms_admin_notification_type_defaults();
+    $resolvedTypeId = isset($defaultsMap[$typeId]) && is_array($defaultsMap[$typeId]) ? (string) $typeId : 'new_payment_order';
+    $default = isset($defaultsMap[$resolvedTypeId]) && is_array($defaultsMap[$resolvedTypeId]) ? $defaultsMap[$resolvedTypeId] : [
+        'enabled' => '1',
+        'subject' => '',
+        'body' => '',
+    ];
+    $resolvedInstanceId = acgl_fms_admin_sanitize_notification_instance_id($instanceId);
+    if ($resolvedInstanceId === '') {
+        $resolvedInstanceId = acgl_fms_admin_generate_notification_instance_id($resolvedTypeId);
+    }
+
+    return [
+        'instance_id' => $resolvedInstanceId,
+        'type_id' => $resolvedTypeId,
+        'enabled' => (string) ($default['enabled'] ?? '1') === '1' ? '1' : '0',
+        'subject' => (string) ($default['subject'] ?? ''),
+        'body' => (string) ($default['body'] ?? ''),
+        'recipients_mode' => '',
+        'manual_to' => '',
+    ];
+}
+
+function acgl_fms_admin_normalize_notification_instance($raw, $fallbackTypeId = 'new_payment_order', $fallbackInstanceId = '') {
+    $data = is_array($raw) ? $raw : [];
+    $defaultsMap = acgl_fms_admin_notification_type_defaults();
+    $typeId = isset($data['type_id']) ? trim((string) $data['type_id']) : '';
+    if ($typeId === '' && isset($data['type'])) {
+        $typeId = trim((string) $data['type']);
+    }
+    if ($typeId === '' || !isset($defaultsMap[$typeId]) || !is_array($defaultsMap[$typeId])) {
+        $typeId = isset($defaultsMap[$fallbackTypeId]) && is_array($defaultsMap[$fallbackTypeId]) ? (string) $fallbackTypeId : 'new_payment_order';
+    }
+
+    $instanceId = isset($data['instance_id']) ? (string) $data['instance_id'] : '';
+    if ($instanceId === '' && isset($data['id'])) {
+        $instanceId = (string) $data['id'];
+    }
+    if ($instanceId === '') {
+        $instanceId = (string) $fallbackInstanceId;
+    }
+
+    $default = acgl_fms_admin_notification_instance_defaults($typeId, $instanceId);
+    $enabledRaw = isset($data['enabled']) ? (string) $data['enabled'] : (string) ($default['enabled'] ?? '1');
+    $subject = isset($data['subject']) ? trim((string) $data['subject']) : '';
+    $body = isset($data['body']) ? trim((string) $data['body']) : '';
+    $recipientsMode = isset($data['recipients_mode']) ? trim((string) $data['recipients_mode']) : '';
+
+    if ($recipientsMode !== '') {
+        $recipientsMode = acgl_fms_admin_normalize_notification_recipients_mode($recipientsMode);
+    }
+
+    return [
+        'instance_id' => acgl_fms_admin_sanitize_notification_instance_id($instanceId) ?: (string) $default['instance_id'],
+        'type_id' => $typeId,
+        'enabled' => ($enabledRaw === '1' || $enabledRaw === 'true' || $enabledRaw === 'yes') ? '1' : '0',
+        'subject' => $subject !== '' ? (string) $data['subject'] : (string) ($default['subject'] ?? ''),
+        'body' => $body !== '' ? (string) $data['body'] : (string) ($default['body'] ?? ''),
+        'recipients_mode' => $recipientsMode,
+        'manual_to' => isset($data['manual_to']) ? trim((string) $data['manual_to']) : '',
+    ];
+}
+
+function acgl_fms_admin_legacy_notification_instances_from_settings($rawSettings) {
+    $settings = is_array($rawSettings) ? $rawSettings : [];
+    $typesConfig = acgl_fms_admin_normalize_notification_types_config(isset($settings['types_config']) ? $settings['types_config'] : []);
+    $activeTypeIds = acgl_fms_admin_normalize_notification_active_type_ids(isset($settings['active_type_ids']) ? $settings['active_type_ids'] : [], $typesConfig);
+
+    $instances = [];
+    foreach ($activeTypeIds as $typeId) {
+        $typeKey = trim((string) $typeId);
+        if ($typeKey === '') continue;
+        $rawType = isset($typesConfig[$typeKey]) && is_array($typesConfig[$typeKey]) ? $typesConfig[$typeKey] : [];
+        $instances[] = acgl_fms_admin_normalize_notification_instance(array_merge($rawType, [
+            'instance_id' => $typeKey,
+            'type_id' => $typeKey,
+        ]), $typeKey, $typeKey);
+    }
+
+    if (count($instances) > 0) return $instances;
+    return [acgl_fms_admin_notification_instance_defaults('new_payment_order', 'new_payment_order')];
+}
+
+function acgl_fms_admin_normalize_notification_instances($rawList, $legacySettings = null) {
+    if (!is_array($rawList)) {
+        return acgl_fms_admin_legacy_notification_instances_from_settings($legacySettings);
+    }
+
+    if (count($rawList) === 0) {
+        return [];
+    }
+
+    $out = [];
+    $seen = [];
+    foreach (array_values($rawList) as $entry) {
+        if (!is_array($entry)) continue;
+        $fallbackTypeId = isset($entry['type_id']) ? (string) $entry['type_id'] : 'new_payment_order';
+        $instance = acgl_fms_admin_normalize_notification_instance($entry, $fallbackTypeId);
+        $instanceId = (string) ($instance['instance_id'] ?? '');
+        while ($instanceId === '' || isset($seen[$instanceId])) {
+            $instanceId = acgl_fms_admin_generate_notification_instance_id((string) ($instance['type_id'] ?? 'notification'));
+        }
+        $instance['instance_id'] = $instanceId;
+        $seen[$instanceId] = true;
+        $out[] = $instance;
+    }
+
+    return $out;
+}
+
 function acgl_fms_admin_notification_defaults() {
     $types = acgl_fms_admin_notification_type_defaults();
     return [
@@ -118,6 +251,7 @@ function acgl_fms_admin_notification_defaults() {
         'manual_to' => '',
         'reply_to' => '',
         'signature' => "ACGL Financial Management System",
+        'instances' => [acgl_fms_admin_notification_instance_defaults('new_payment_order', 'new_payment_order')],
         'types_config' => $types,
         'active_type_ids' => array_values(array_keys($types)),
     ];
@@ -199,10 +333,21 @@ function acgl_fms_admin_get_notification_settings() {
     $replyToIsDefault = ($replyToFromDb === false);
     $replyTo = $replyToIsDefault ? $defaults['reply_to'] : (string) $replyToFromDb;
     $signature = (string) get_option(ACGL_FMS_NOTIFY_SIGNATURE_OPTION, $defaults['signature']);
+    $instancesRawStored = get_option(ACGL_FMS_NOTIFY_INSTANCES_OPTION, null);
     $typesRawStored = get_option(ACGL_FMS_NOTIFY_TYPES_CONFIG_OPTION, null);
     $activeTypesRawStored = get_option(ACGL_FMS_NOTIFY_ACTIVE_TYPES_OPTION, null);
 
     $recipientsMode = acgl_fms_admin_normalize_notification_recipients_mode($recipientsMode);
+
+    $instancesRaw = null;
+    if (is_array($instancesRawStored)) {
+        $instancesRaw = $instancesRawStored;
+    } elseif (is_string($instancesRawStored) && trim($instancesRawStored) !== '') {
+        $decoded = json_decode($instancesRawStored, true);
+        if (is_array($decoded)) {
+            $instancesRaw = $decoded;
+        }
+    }
 
     $typesConfigRaw = null;
     if (is_array($typesRawStored)) {
@@ -232,7 +377,6 @@ function acgl_fms_admin_get_notification_settings() {
         $typesConfigRaw['new_payment_order'] = $legacyType;
     }
 
-    $typesConfig = acgl_fms_admin_normalize_notification_types_config($typesConfigRaw);
     $activeTypeIdsRaw = null;
     if (is_array($activeTypesRawStored)) {
         $activeTypeIdsRaw = $activeTypesRawStored;
@@ -242,7 +386,10 @@ function acgl_fms_admin_get_notification_settings() {
             $activeTypeIdsRaw = $decoded;
         }
     }
-    $activeTypeIds = acgl_fms_admin_normalize_notification_active_type_ids($activeTypeIdsRaw, $typesConfig);
+    $instances = acgl_fms_admin_normalize_notification_instances($instancesRaw, [
+        'types_config' => $typesConfigRaw,
+        'active_type_ids' => $activeTypeIdsRaw,
+    ]);
 
     return [
         'recipients_mode' => $recipientsMode,
@@ -251,8 +398,7 @@ function acgl_fms_admin_get_notification_settings() {
         'reply_to_is_default' => $replyToIsDefault,
         'reply_to_cleared' => (!$replyToIsDefault && get_option(ACGL_FMS_NOTIFY_REPLY_TO_CLEARED_OPTION, '0') === '1'),
         'signature' => trim($signature) !== '' ? $signature : $defaults['signature'],
-        'types_config' => $typesConfig,
-        'active_type_ids' => $activeTypeIds,
+        'instances' => $instances,
     ];
 }
 
@@ -277,22 +423,33 @@ function acgl_fms_admin_save_notification_settings($input) {
         }
     }
 
-    $typesConfigInput = isset($data['types_config']) && is_array($data['types_config']) ? $data['types_config'] : [];
-    $typesConfig = acgl_fms_admin_normalize_notification_types_config($typesConfigInput);
-    $activeTypeIdsInput = isset($data['active_type_ids']) && is_array($data['active_type_ids']) ? $data['active_type_ids'] : [];
-    $activeTypeIds = acgl_fms_admin_normalize_notification_active_type_ids($activeTypeIdsInput, $typesConfig);
+    $instancesInput = isset($data['instances']) && is_array($data['instances']) ? $data['instances'] : [];
+    $instances = acgl_fms_admin_normalize_notification_instances($instancesInput, null);
     $anyEnabled = false;
-    foreach ($typesConfig as $typeCfg) {
-        if (is_array($typeCfg) && (string) ($typeCfg['enabled'] ?? '0') === '1') {
+    $usesGlobalManualList = false;
+    foreach ($instances as $idx => $instanceCfg) {
+        if (!is_array($instanceCfg)) continue;
+        $instanceModeRaw = isset($instanceCfg['recipients_mode']) ? trim((string) $instanceCfg['recipients_mode']) : '';
+        $instanceMode = $instanceModeRaw !== '' ? acgl_fms_admin_normalize_notification_recipients_mode($instanceModeRaw) : '';
+        $instanceManualEmails = acgl_fms_admin_parse_notification_emails(isset($instanceCfg['manual_to']) ? (string) $instanceCfg['manual_to'] : '');
+        $instances[$idx]['recipients_mode'] = $instanceMode;
+        $instances[$idx]['manual_to'] = implode(', ', $instanceManualEmails);
+
+        if ((string) ($instanceCfg['enabled'] ?? '0') === '1') {
             $anyEnabled = true;
-            break;
+            if ($instanceMode === 'manual_list' && count($instanceManualEmails) === 0) {
+                return [ 'ok' => false, 'error' => 'Each enabled notification using Manual list mode must include at least one valid recipient email.' ];
+            }
+            if ($instanceMode === '' && $mode === 'manual_list') {
+                $usesGlobalManualList = true;
+            }
         }
     }
 
     $signature = isset($data['signature']) ? trim((string) $data['signature']) : '';
     if ($signature === '') $signature = $defaults['signature'];
 
-    if ($mode === 'manual_list' && count($manualEmails) === 0 && $anyEnabled) {
+    if ($mode === 'manual_list' && count($manualEmails) === 0 && $anyEnabled && $usesGlobalManualList) {
         return [ 'ok' => false, 'error' => 'Add at least one valid recipient email for Manual list mode.' ];
     }
 
@@ -302,17 +459,16 @@ function acgl_fms_admin_save_notification_settings($input) {
     acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_REPLY_TO_CLEARED_OPTION, $replyTo === '' ? '1' : '0');
     acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_SIGNATURE_OPTION, $signature);
     if (function_exists('wp_json_encode')) {
-        acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_TYPES_CONFIG_OPTION, (string) wp_json_encode($typesConfig));
-        acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_ACTIVE_TYPES_OPTION, (string) wp_json_encode($activeTypeIds));
+        acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_INSTANCES_OPTION, (string) wp_json_encode($instances));
     } else {
-        acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_TYPES_CONFIG_OPTION, (string) json_encode($typesConfig));
-        acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_ACTIVE_TYPES_OPTION, (string) json_encode($activeTypeIds));
+        acgl_fms_admin_set_option_no_autoload(ACGL_FMS_NOTIFY_INSTANCES_OPTION, (string) json_encode($instances));
     }
 
     return [
         'ok' => true,
         'mode' => $mode,
         'manualCount' => count($manualEmails),
+        'instanceCount' => count($instances),
     ];
 }
 

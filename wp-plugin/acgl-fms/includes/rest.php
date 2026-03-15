@@ -348,6 +348,7 @@ function acgl_fms_notifications_build_order_link($year, $orderId) {
     }
 
     return (string) add_query_arg($params, $url);
+
 }
 
 function acgl_fms_notifications_send_public_submit($year, $order) {
@@ -386,34 +387,35 @@ function acgl_fms_notifications_send_public_submit($year, $order) {
         'paymentOrderLink' => $orderLink,
     ];
 
-    $subjectTpl = trim((string) ($typeConfig['subject'] ?? ''));
-    if ($subjectTpl === '') $subjectTpl = '[ACGL FMS] New Payment Order {{paymentOrderNo}}';
-
-    $bodyTpl = trim((string) ($typeConfig['body'] ?? ''));
-    if ($bodyTpl === '') {
-        $bodyTpl = "A new payment order has been submitted.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nCreated: {{createdAt}}\nID: {{id}}\nLink: {{paymentOrderLink}}";
+    $sentTo = [];
+    $sentCount = 0;
+    $firstError = '';
+    foreach ($enabledInstances as $instanceConfig) {
+        $result = acgl_fms_notifications_send_instance_email($settings, $instanceConfig, $vars, '');
+        if (!is_array($result) || empty($result['ok'])) {
+            if ($firstError === '') {
+                $firstError = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
+            }
+            continue;
+        }
+        $recipients = isset($result['to']) && is_array($result['to']) ? $result['to'] : [];
+        foreach ($recipients as $email) {
+            $emailKey = strtolower(trim((string) $email));
+            if ($emailKey !== '') {
+                $sentTo[$emailKey] = true;
+            }
+        }
+        $sentCount += count($recipients);
     }
 
-    $signature = trim((string) ($settings['signature'] ?? ''));
-    $subject = acgl_fms_notifications_apply_placeholders($subjectTpl, $vars);
-    $body = acgl_fms_notifications_build_body_html($bodyTpl, $vars, $signature);
-
-    $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
-    $replyTo = trim((string) ($settings['reply_to'] ?? ''));
-    if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
-        $headers[] = 'Reply-To: ' . $replyTo;
-    }
-
-    $ok = wp_mail($to, $subject, $body, $headers);
-    if (!$ok) {
-        return [ 'ok' => false, 'error' => 'mail_send_failed' ];
+    if ($sentCount === 0) {
+        return [ 'ok' => false, 'error' => $firstError !== '' ? $firstError : 'no_recipients' ];
     }
 
     return [
         'ok' => true,
-        'sent' => count($to),
-        'to' => $to,
-        'subject' => $subject,
+        'sent' => $sentCount,
+        'to' => array_values(array_keys($sentTo)),
         'paymentOrderLink' => $orderLink,
     ];
 }
@@ -692,41 +694,39 @@ function acgl_fms_docs_find_existing_attachment_id($kind, $year, $orderId = null
         'meta_query' => $meta,
     ]);
 
-    $sentTo = [];
-    $sentCount = 0;
-    $firstError = '';
-    foreach ($enabledInstances as $instanceConfig) {
-        $result = acgl_fms_notifications_send_instance_email($settings, $instanceConfig, $vars, '');
-        if (!is_array($result) || empty($result['ok'])) {
-            if ($firstError === '') {
-                $firstError = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
-            }
-            continue;
-        }
-        $recipients = isset($result['to']) && is_array($result['to']) ? $result['to'] : [];
-        foreach ($recipients as $email) {
-            $emailKey = strtolower(trim((string) $email));
-            if ($emailKey !== '') {
-                $sentTo[$emailKey] = true;
-            }
-        }
-        $sentCount += count($recipients);
+    if (is_array($ids) && count($ids) > 0) {
+        $id = (int) $ids[0];
+        return $id > 0 ? $id : 0;
     }
+    return 0;
+}
 
-    if ($sentCount === 0) {
-        return [ 'ok' => false, 'error' => $firstError !== '' ? $firstError : 'no_recipients' ];
+function acgl_fms_docs_write_json_attachment($kind, $year, $title, $subdir, $filename, $payload, $orderId = null) {
+    $kind = is_string($kind) ? trim($kind) : '';
+    $year = acgl_fms_sanitize_year_folder((string) $year);
+    $title = is_string($title) ? trim($title) : '';
+    $subdir = is_string($subdir) ? trim($subdir) : '';
+    $filename = is_string($filename) ? trim($filename) : '';
+    if ($kind === '' || $year === '' || $title === '' || $subdir === '' || $filename === '') return 0;
+
+    $uploads = wp_upload_dir(null, false);
+    $basedir = is_array($uploads) ? (string) ($uploads['basedir'] ?? '') : '';
+    $baseurl = is_array($uploads) ? (string) ($uploads['baseurl'] ?? '') : '';
+    if ($basedir === '' || $baseurl === '') return 0;
+
+    $sub = '/' . ltrim($subdir, '/');
     $sub = rtrim($sub, '/');
     $relative = ltrim($sub, '/') . '/' . $filename;
     $fullPath = rtrim($basedir, '/\\') . $sub . '/' . $filename;
     $fullDir = dirname($fullPath);
-        'sent' => $sentCount,
-        'to' => array_values(array_keys($sentTo)),
+    if (!wp_mkdir_p($fullDir)) return 0;
+
+    $json = wp_json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     if (!is_string($json)) $json = '';
     $written = @file_put_contents($fullPath, $json);
     if ($written === false) return 0;
 
     $existingId = acgl_fms_docs_find_existing_attachment_id($kind, $year, $orderId);
-
     $attachmentPost = [
         'post_mime_type' => 'application/json',
         'post_title' => sanitize_text_field($title),
@@ -745,7 +745,6 @@ function acgl_fms_docs_find_existing_attachment_id($kind, $year, $orderId = null
         if (!$attachId || is_wp_error($attachId)) return 0;
     }
 
-    // Ensure the URL and file are stable.
     $guid = rtrim($baseurl, '/') . $sub . '/' . rawurlencode($filename);
     wp_update_post([ 'ID' => $attachId, 'guid' => $guid ]);
 
@@ -767,7 +766,6 @@ function acgl_fms_docs_sync_for_orders_year($year, $ordersJson) {
     $decoded = json_decode($ordersJson, true);
     if (!is_array($decoded)) return;
 
-    // Build a stable list of orders.
     $orders = [];
     foreach ($decoded as $o) {
         if (!is_array($o)) continue;
@@ -777,7 +775,6 @@ function acgl_fms_docs_sync_for_orders_year($year, $ordersJson) {
         $orders[] = $o;
     }
 
-    // 1) Budget year file (index)
     acgl_fms_docs_write_json_attachment(
         'budget_year',
         $y,
@@ -791,7 +788,6 @@ function acgl_fms_docs_sync_for_orders_year($year, $ordersJson) {
         ]
     );
 
-    // 2) Per-order files
     $seenIds = [];
     foreach ($orders as $o) {
         $id = (string) ($o['id'] ?? '');
@@ -823,7 +819,6 @@ function acgl_fms_docs_sync_for_orders_year($year, $ordersJson) {
         );
     }
 
-    // 3) Cleanup: delete per-order docs that no longer exist.
     $existingDocIds = get_posts([
         'post_type' => 'attachment',
         'post_status' => 'inherit',
@@ -842,7 +837,6 @@ function acgl_fms_docs_sync_for_orders_year($year, $ordersJson) {
             $oid = (string) get_post_meta($aid, 'acgl_fms_order_id', true);
             $oid = trim($oid);
             if ($oid !== '' && !isset($seenIds[$oid])) {
-                // Deletes both the attachment and the underlying file.
                 wp_delete_attachment($aid, true);
             }
         }
@@ -1179,6 +1173,7 @@ function acgl_fms_register_rest_routes() {
             if (!is_array($data)) {
                 $data = $request->get_params();
             }
+
             $settingsOverride = is_array($data) && isset($data['settings']) && is_array($data['settings'])
                 ? $data['settings']
                 : [];
@@ -1207,24 +1202,30 @@ function acgl_fms_register_rest_routes() {
                 'amount' => '123.45',
                 'party' => 'Test party',
                 'moneyTransferNo' => 'MT 00-00',
+                'comments' => 'Test comments',
+                'directLink' => acgl_fms_notifications_build_app_direct_link('index.html'),
+                'refNo' => 'BL-00-00',
+                'subject' => 'Test subject',
+                'priority' => 'Medium',
+                'createdBy' => function_exists('wp_get_current_user') ? (string) (wp_get_current_user()->user_login ?? '') : '',
+            ];
 
             $result = acgl_fms_notifications_send_instance_email($settings, $typeConfig, $vars, $forcedTo);
             if (!is_array($result) || empty($result['ok'])) {
                 $error = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
                 $status = $error === 'mail_send_failed' ? 500 : 400;
                 return new WP_REST_Response([ 'ok' => false, 'error' => $error ], $status);
-            $ok = wp_mail($to, $subject, $body, $headers);
-            if (!$ok) {
-                return new WP_REST_Response([ 'ok' => false, 'error' => 'mail_send_failed' ], 500);
             }
-                'sent' => count(isset($result['to']) && is_array($result['to']) ? $result['to'] : []),
-                'to' => isset($result['to']) && is_array($result['to']) ? $result['to'] : [],
-                'subject' => isset($result['subject']) ? (string) $result['subject'] : '',
+
+            $to = isset($result['to']) && is_array($result['to']) ? $result['to'] : [];
+
+            return [
+                'ok' => true,
                 'sent' => count($to),
-                'instance_id' => (string) ($typeConfig['instance_id'] ?? ''),
                 'to' => $to,
-                'subject' => $subject,
+                'subject' => isset($result['subject']) ? (string) $result['subject'] : '',
                 'type' => $typeId,
+                'instance_id' => (string) ($typeConfig['instance_id'] ?? ''),
             ];
         },
     ]);

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Settings - ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=d99da68-20260314210121" />
+    <link rel="stylesheet" href="styles.css?v=f50bd6b-20260315134959" />
   </head>
   <body data-page="admin-settings">
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -416,6 +416,16 @@
                 >
                   Cloud Backup
                 </button>
+                <a
+                  id="backupOpenWpAdminLink"
+                  class="btn btn--viewGrey"
+                  href="#"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  hidden
+                >
+                  Cloud Settings
+                </a>
                 <button
                   type="button"
                   class="btn btn--ghost"
@@ -443,9 +453,123 @@
               </a>
             </p>
 
+            <p id="backupWpAdminUnavailable" class="subhead muted" hidden>
+              This shortcut is available in WordPress shared mode only.
+            </p>
+
             <div class="archive__grid" data-backup-grid></div>
             <p class="empty" data-backup-empty hidden>No backups yet.</p>
           </section>
+
+          <section
+            class="card"
+            aria-labelledby="notifications-title"
+            draggable="true"
+            data-settings-card="notifications"
+          >
+            <div class="list-header">
+              <h2 id="notifications-title">Email Notifications</h2>
+              <div class="list-actions">
+                <button type="button" class="btn btn--viewGrey" id="notificationsNewBtn">New</button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="table" id="notificationsTable">
+                <thead>
+                  <tr>
+                    <th scope="col">Recipient</th>
+                    <th scope="col">Notification Type</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="notificationsListTbody"></tbody>
+              </table>
+            </div>
+
+            <div id="notificationsEmptyState" class="empty" hidden>No notifications created yet.</div>
+
+            <p id="notificationsStatus" class="subhead muted"></p>
+            <p id="notificationsLastTest" class="subhead muted" hidden></p>
+          </section>
+
+          <div id="notificationsModal" class="modal" aria-hidden="true">
+            <div class="modal__backdrop" data-notifications-modal-close></div>
+            <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="notificationsModalTitle">
+              <div class="modal__header">
+                <div class="modal__headerText">
+                  <div id="notificationsModalTitle" class="modal__poHeader">Create New Notification</div>
+                </div>
+                <button type="button" class="modal__close" data-notifications-modal-close aria-label="Close">X</button>
+              </div>
+
+              <form id="notificationsForm" novalidate>
+                <div class="grid">
+                  <div class="field field--span2">
+                    <label for="notificationsTypeSelect">Notification type</label>
+                    <select id="notificationsTypeSelect"></select>
+                  </div>
+
+                  <div class="field field--span2">
+                    <label class="notificationsTypeOption" for="notificationsTypeEnabled">
+                      <input id="notificationsTypeEnabled" type="checkbox" />
+                      <span>Enable this notification</span>
+                    </label>
+                  </div>
+
+                  <div class="field field--span2">
+                    <label for="notificationsRecipientsMode">Recipients</label>
+                    <select id="notificationsRecipientsMode">
+                      <option value="all_users_with_email">All FMS users with an email address</option>
+                      <option value="manual_list">Manual recipient list</option>
+                    </select>
+                  </div>
+
+                  <div class="field field--span2" id="notificationsManualToWrap">
+                    <label for="notificationsManualTo">Manual recipients</label>
+                    <textarea id="notificationsManualTo" rows="3" placeholder="alerts@example.org, finance@example.org"></textarea>
+                    <div class="subhead muted">Comma-separated or line-separated emails.</div>
+                  </div>
+
+                  <div class="field field--span2">
+                    <label for="notificationsReplyTo">Reply-To (optional)</label>
+                    <input id="notificationsReplyTo" type="email" inputmode="email" autocomplete="email" />
+                  </div>
+
+                  <div class="field field--span2">
+                    <label for="notificationsTestTo">Send test to (optional override)</label>
+                    <input id="notificationsTestTo" type="email" inputmode="email" autocomplete="email" placeholder="leave blank to use configured recipients" />
+                  </div>
+
+                  <div class="field field--span2">
+                    <label for="notificationsSubject">Subject template</label>
+                    <input id="notificationsSubject" type="text" autocomplete="off" />
+                  </div>
+
+                  <div class="field field--span2">
+                    <label for="notificationsBody">Body template</label>
+                    <textarea id="notificationsBody" rows="6"></textarea>
+                  </div>
+
+                  <div class="field field--span2">
+                    <label for="notificationsSignature">Signature</label>
+                    <textarea id="notificationsSignature" rows="3"></textarea>
+                  </div>
+                </div>
+
+                <p class="subhead muted">
+                  Placeholders: {{paymentOrderNo}}, {{year}}, {{createdAt}}, {{id}}, {{paymentOrderLink}}, {{user}}, {{date}}, {{description}}, {{amount}}, {{party}}, {{moneyTransferNo}}, {{comments}}, {{refNo}}, {{subject}}, {{priority}}, {{createdBy}}
+                </p>
+
+                <div class="actions actions--right">
+                  <button type="button" class="btn btn--ghost" id="notificationsModalCancelBtn" data-notifications-modal-close>Cancel</button>
+                  <button type="button" class="btn btn--viewGrey" id="notificationsTestBtn">Send Test Email</button>
+                  <button type="submit" class="btn btn--primary" id="notificationsSaveBtn">Save</button>
+                </div>
+              </form>
+            </div>
+          </div>
 
           <section
             class="card"
@@ -1089,6 +1213,35 @@
               <div
                 class="rolesGrid__row rolesGrid__row--sub"
                 role="group"
+                aria-label="Email Notifications"
+              >
+                <div class="rolesGrid__label rolesGrid__label--sub">
+                  Email Notifications
+                </div>
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsEmailNotificationsWrite" />
+                  Admin</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsEmailNotificationsDelete" />
+                  Delete</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsEmailNotificationsCreate" />
+                  Create</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsEmailNotificationsPartial" />
+                  Write</label
+                >
+                <label class="rolesGrid__check"
+                  ><input type="checkbox" id="permSettingsEmailNotificationsRead" />
+                  View</label
+                >
+              </div>
+              <div
+                class="rolesGrid__row rolesGrid__row--sub"
+                role="group"
                 aria-label="Audit Log"
               >
                 <div class="rolesGrid__label rolesGrid__label--sub">
@@ -1319,6 +1472,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=d99da68-20260314210121" defer></script>
+    <script src="app.js?v=f50bd6b-20260315134959" defer></script>
   </body>
 </html>

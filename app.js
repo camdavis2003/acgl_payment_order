@@ -302,6 +302,25 @@
     return `${withSlash}${p}`;
   }
 
+  function getWpAdminSettingsUrl() {
+    const restBase = String(WP_REST_URL || '').trim();
+    if (!restBase) return '';
+
+    try {
+      const u = new URL(restBase, window.location.href);
+      const marker = '/wp-json/';
+      const idx = u.pathname.indexOf(marker);
+      u.pathname = idx >= 0
+        ? `${u.pathname.slice(0, idx)}${u.pathname.slice(0, idx).endsWith('/') ? '' : '/'}wp-admin/options-general.php`
+        : '/wp-admin/options-general.php';
+      u.search = 'page=acgl-fms';
+      u.hash = '';
+      return u.toString();
+    } catch {
+      return '';
+    }
+  }
+
   async function wpFetchJson(url, options) {
     const token = getWpToken();
     const mergedHeaders = {
@@ -618,6 +637,90 @@
   const AUTH_AUDIT_KEY = 'payment_order_auth_audit_v1';
   const APP_AUDIT_KEY = 'payment_order_app_audit_v1';
   const LAST_PAGE_KEY = 'acgl_fms_last_page_v1';
+  const NOTIFICATIONS_SETTINGS_KEY = 'payment_order_notifications_settings_v1';
+
+  const NOTIFICATION_TYPES = [
+    {
+      id: 'new_payment_order',
+      label: 'New Payment Order',
+      defaultSubject: '[ACGL FMS] New Payment Order {{paymentOrderNo}}',
+      defaultBody: 'A new payment order has been submitted.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nCreated: {{createdAt}}\nID: {{id}}\nLink: {{paymentOrderLink}}',
+    },
+    {
+      id: 'gs_review',
+      label: 'Grand Secretary Review',
+      defaultSubject: '[ACGL FMS] Payment Order Awaiting Grand Secretary Review',
+      defaultBody: 'Payment Order {{paymentOrderNo}} is awaiting Grand Secretary review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}',
+    },
+    {
+      id: 'gm_review',
+      label: 'Grand Master Review',
+      defaultSubject: '[ACGL FMS] Payment Order Awaiting Grand Master Review',
+      defaultBody: 'Payment Order {{paymentOrderNo}} is awaiting Grand Master review.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}',
+    },
+    {
+      id: 'gt_processing',
+      label: 'Grand Treasurer Processing',
+      defaultSubject: '[ACGL FMS] Payment Order Approved for Grand Treasurer Processing',
+      defaultBody: 'Payment Order {{paymentOrderNo}} has been approved and is ready for Grand Treasurer processing.\n\nPayment Order: {{paymentOrderNo}}\nYear: {{year}}\nLink: {{paymentOrderLink}}',
+    },
+    {
+      id: 'budget_update',
+      label: 'Budget Update',
+      defaultSubject: '[ACGL FMS] Budget Updated',
+      defaultBody: 'The budget for {{year}} has been updated by {{user}}.',
+    },
+    {
+      id: 'new_bank_eur',
+      label: 'New BankEUR',
+      defaultSubject: '[ACGL FMS] New BankEUR Entry',
+      defaultBody: 'A new BankEUR entry has been added.\n\nDate: {{date}}\nDescription: {{description}}\nAmount: {{amount}} EUR\nYear: {{year}}',
+    },
+    {
+      id: 'new_wise_eur',
+      label: 'New wiseEUR',
+      defaultSubject: '[ACGL FMS] New wiseEUR Entry',
+      defaultBody: 'A new wiseEUR entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}',
+    },
+    {
+      id: 'new_wise_usd',
+      label: 'New wiseUSD',
+      defaultSubject: '[ACGL FMS] New wiseUSD Entry',
+      defaultBody: 'A new wiseUSD entry has been added.\n\nDate: {{date}}\nParty: {{party}}\nYear: {{year}}',
+    },
+    {
+      id: 'mt_gs_verification',
+      label: 'Money Transfer GS Verification',
+      defaultSubject: '[ACGL FMS] New Money Transfer Created',
+      defaultBody: 'A new Money Transfer has been created and is awaiting GS verification.\n\nMoney Transfer No: {{moneyTransferNo}}\nDate: {{date}}\nComments: {{comments}}\nYear: {{year}}',
+    },
+    {
+      id: 'mt_gt_verification',
+      label: 'Money Transfer GT Verification',
+      defaultSubject: '[ACGL FMS] Money Transfer GS Verified',
+      defaultBody: 'A Money Transfer has been marked as GS Verified.\n\nDate: {{date}}\nDescription: {{description}}\nYear: {{year}}',
+    },
+    {
+      id: 'new_backlog',
+      label: 'New Backlog',
+      defaultSubject: '[ACGL FMS] New Backlog Item',
+      defaultBody: 'A new backlog item has been created.\n\nRef: {{refNo}}\nSubject: {{subject}}\nPriority: {{priority}}\nCreated by: {{createdBy}}',
+    },
+  ];
+
+  const fireNotificationEvent = async (type, vars) => {
+    if (!IS_WP_SHARED_MODE || !getWpToken()) return;
+    try {
+      const url = wpJoin('acgl-fms/v1/admin/notifications-send-event');
+      await wpFetchJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: String(type), vars: vars || {} }),
+      });
+    } catch {
+      // fire and forget — notification failures should not surface to user
+    }
+  };
 
   const HARD_CODED_ADMIN_USERNAME = 'admin.pass';
   const HARD_CODED_ADMIN_PASSWORD = 'acgl1962ADM';
@@ -1355,6 +1458,7 @@
     { key: 'settings_backlog', parent: 'settings' },
     { key: 'settings_numbering', parent: 'settings' },
     { key: 'settings_grandlodge', parent: 'settings' },
+    { key: 'settings_email_notifications', parent: 'settings' },
     { key: 'settings_backup', parent: 'settings' },
     { key: 'settings_audit', parent: 'settings' },
   ];
@@ -1376,6 +1480,7 @@
     { key: 'settings_backlog', idBase: 'SettingsBacklog', label: 'Backlog', group: 'sub' },
     { key: 'settings_numbering', idBase: 'SettingsNumbering', label: 'PO & MT Numbering', group: 'sub' },
     { key: 'settings_grandlodge', idBase: 'SettingsGrandLodge', label: 'GL Information', group: 'sub' },
+    { key: 'settings_email_notifications', idBase: 'SettingsEmailNotifications', label: 'Email Notifications', group: 'sub' },
     { key: 'settings_backup', idBase: 'SettingsBackup', label: 'Backup', group: 'sub' },
     { key: 'settings_audit', idBase: 'SettingsAudit', label: 'Audit Log', group: 'sub' },
   ];
@@ -4289,6 +4394,28 @@
   const grandSecretarySignatureFileInput = document.getElementById('grandSecretarySignatureFile');
   const grandLodgeSealSavedMeta = document.getElementById('grandLodgeSealSavedMeta');
   const grandSecretarySignatureSavedMeta = document.getElementById('grandSecretarySignatureSavedMeta');
+  const backupOpenWpAdminLink = document.getElementById('backupOpenWpAdminLink');
+  const backupWpAdminUnavailable = document.getElementById('backupWpAdminUnavailable');
+  const notificationsNewBtn = document.getElementById('notificationsNewBtn');
+  const notificationsListTbody = document.getElementById('notificationsListTbody');
+  const notificationsEmptyState = document.getElementById('notificationsEmptyState');
+  const notificationsModal = document.getElementById('notificationsModal');
+  const notificationsModalTitle = document.getElementById('notificationsModalTitle');
+  const notificationsForm = document.getElementById('notificationsForm');
+  const notificationsTypeSelectEl = document.getElementById('notificationsTypeSelect');
+  const notificationsTypeEnabledInput = document.getElementById('notificationsTypeEnabled');
+  const notificationsRecipientsModeInput = document.getElementById('notificationsRecipientsMode');
+  const notificationsManualToWrap = document.getElementById('notificationsManualToWrap');
+  const notificationsManualToInput = document.getElementById('notificationsManualTo');
+  const notificationsReplyToInput = document.getElementById('notificationsReplyTo');
+  const notificationsTestToInput = document.getElementById('notificationsTestTo');
+  const notificationsSubjectInput = document.getElementById('notificationsSubject');
+  const notificationsBodyInput = document.getElementById('notificationsBody');
+  const notificationsSignatureInput = document.getElementById('notificationsSignature');
+  const notificationsStatusEl = document.getElementById('notificationsStatus');
+  const notificationsLastTestEl = document.getElementById('notificationsLastTest');
+  const notificationsTestBtn = document.getElementById('notificationsTestBtn');
+  const notificationsSaveBtn = document.getElementById('notificationsSaveBtn');
 
   // Settings page (roles)
   const createUserForm = document.getElementById('createUserForm');
@@ -11550,6 +11677,12 @@
           }
 
           saveBacklogItems([nextItem, ...items]);
+          void fireNotificationEvent('new_backlog', {
+            refNo: String(nextItem.refNo || ''),
+            subject: String(nextItem.subject || ''),
+            priority: String(nextItem.priority || ''),
+            createdBy: String(nextItem.createdBy || ''),
+          });
         }
 
         closeBacklogItemModal();
@@ -12437,6 +12570,7 @@
       backlog: 'settings_backlog',
       numbering: 'settings_numbering',
       grandlodge: 'settings_grandlodge',
+      notifications: 'settings_email_notifications',
       backup: 'settings_backup',
       audit: 'settings_audit',
     };
@@ -13234,7 +13368,13 @@
       if (allRead) allRead.checked = false;
 
       for (const row of PERMISSION_FORM_ROWS) {
-        setModuleAccess(row.idBase, preset[row.idBase] || 'none');
+        const hasExplicit = Object.prototype.hasOwnProperty.call(preset, row.idBase);
+        const level = hasExplicit
+          ? preset[row.idBase]
+          : ((row.key && row.key.startsWith('settings_') && Object.prototype.hasOwnProperty.call(preset, 'Settings'))
+            ? preset.Settings
+            : 'none');
+        setModuleAccess(row.idBase, level || 'none');
       }
       return true;
     }
@@ -15066,6 +15206,14 @@
         const prev = all[idx] && typeof all[idx] === 'object' ? all[idx] : {};
         all[idx] = { ...prev, [field]: Boolean(input.checked) };
         saveMoneyTransfers(all, year);
+        if (field === 'gsVerified' && Boolean(input.checked)) {
+          const mt = all[idx] || {};
+          void fireNotificationEvent('mt_gt_verification', {
+            date: String(mt.date || ''),
+            description: String(mt.description || mt.receivedFromDisbursedTo || ''),
+            year: String(year),
+          });
+        }
         applyMoneyTransfersView();
       });
     }
@@ -15714,6 +15862,12 @@
               updatedAt: nowIso,
             };
             saveMoneyTransfers([record, ...(currentAll || [])], resolvedYear);
+            void fireNotificationEvent('mt_gs_verification', {
+              moneyTransferNo: String(record.moneyTransferNo || ''),
+              date: String(record.mtDate || ''),
+              comments: String(record.comments || ''),
+              year: String(resolvedYear),
+            });
             advanceMoneyTransferSequence();
           }
 
@@ -17062,6 +17216,15 @@
         }
 
         upsertIncomeEntry(entry, year);
+
+        if (!existing) {
+          void fireNotificationEvent('new_bank_eur', {
+            date: String(entry.date || ''),
+            description: String(entry.description || ''),
+            amount: String(entry.euro || ''),
+            year: String(year),
+          });
+        }
 
         // Keep negative BankEUR entries in sync with Reconciliation.
         // Negative amounts are expenditures: create/update a reconciliation order while still displaying the entry.
@@ -18969,6 +19132,14 @@
         } else {
           removeReconciliationOrderBySource('wiseEUR', entry.id, year);
           upsertWiseEurEntry(entry, year);
+          if (!existing) {
+            void fireNotificationEvent('new_wise_eur', {
+              date: String(entry.date || ''),
+              party: String(entry.receivedFromDisbursedTo || ''),
+              amount: String(entry.totalAmountInEuro || entry.euroAmount || ''),
+              year: String(year),
+            });
+          }
         }
         applyWiseEurView();
         closeWiseEurModal();
@@ -20643,6 +20814,14 @@
         } else {
           removeReconciliationOrderBySource('wiseUSD', entry.id, year);
           upsertWiseUsdEntry(entry, year);
+          if (!existing) {
+            void fireNotificationEvent('new_wise_usd', {
+              date: String(entry.date || ''),
+              party: String(entry.receivedFromDisbursedTo || ''),
+              amount: String(entry.totalAmountInUsd || entry.usdAmount || ''),
+              year: String(year),
+            });
+          }
         }
         applyWiseUsdView();
         closeWiseUsdModal();
@@ -22441,6 +22620,7 @@
       syncBudgetFromLedger(budgetYear);
       setEditing(false);
       editStartHtml = null;
+      void fireNotificationEvent('budget_update', { year: String(budgetYear), user: String(getTimelineUsername() || '') });
     });
 
     if (cancelBtn) {
@@ -24562,6 +24742,600 @@
     });
   }
 
+  if (notificationsForm) {
+    const allNotificationTypeIds = NOTIFICATION_TYPES.map((t) => t.id);
+
+    const normalizeNotificationsRecipientsMode = (modeRaw) => {
+      const mode = String(modeRaw || '').trim();
+      if (mode === 'all_users_with_email' || mode === 'manual_list') return mode;
+      if (mode.startsWith('user:')) {
+        const username = normalizeUsername(mode.slice(5));
+        if (username && /^[a-z0-9._-]+$/i.test(username)) return `user:${username}`;
+      }
+      return 'all_users_with_email';
+    };
+
+    const notificationsUserRecipientOptions = () => {
+      const users = Array.isArray(loadUsers()) ? loadUsers() : [];
+      return users
+        .filter((u) => {
+          const username = normalizeUsername(u && u.username);
+          return username && username !== normalizeUsername(HARD_CODED_ADMIN_USERNAME);
+        })
+        .map((u) => ({
+          username: normalizeUsername(u && u.username),
+          role: String((u && u.position) || '').trim(),
+        }))
+        .sort((a, b) => a.username.localeCompare(b.username));
+    };
+
+    const populateNotificationsRecipientOptions = () => {
+      if (!notificationsRecipientsModeInput) return;
+      const current = normalizeNotificationsRecipientsMode(notificationsRecipientsModeInput.value);
+      Array.from(notificationsRecipientsModeInput.querySelectorAll('option[data-user-recipient="1"]')).forEach((opt) => opt.remove());
+
+      notificationsUserRecipientOptions().forEach((u) => {
+        const opt = document.createElement('option');
+        opt.value = `user:${u.username}`;
+        opt.textContent = `${u.role || 'User'} (${u.username})`;
+        opt.dataset.userRecipient = '1';
+        notificationsRecipientsModeInput.appendChild(opt);
+      });
+
+      notificationsRecipientsModeInput.value = current;
+      if (notificationsRecipientsModeInput.value !== current) notificationsRecipientsModeInput.value = 'all_users_with_email';
+    };
+
+    const populateNotificationsTypeSelect = (typeIds) => {
+      if (!notificationsTypeSelectEl) return;
+      const ids = Array.isArray(typeIds) ? typeIds : allNotificationTypeIds;
+      notificationsTypeSelectEl.innerHTML = '';
+      ids.forEach((id) => {
+        const t = NOTIFICATION_TYPES.find((x) => x.id === id);
+        if (!t) return;
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.label;
+        notificationsTypeSelectEl.appendChild(opt);
+      });
+    };
+
+    const notificationsTypeDefaultForId = (id) => {
+      const def = NOTIFICATION_TYPES.find((t) => t.id === id);
+      return {
+        enabled: id === 'new_payment_order' ? '1' : '0',
+        subject: def ? def.defaultSubject : '',
+        body: def ? def.defaultBody : '',
+      };
+    };
+
+    const normalizeNotificationsTypeConfig = (id, raw) => {
+      const r = raw && typeof raw === 'object' ? raw : {};
+      const def = notificationsTypeDefaultForId(id);
+      return {
+        enabled: String(r.enabled || def.enabled) === '1' ? '1' : '0',
+        subject: String(r.subject || def.subject),
+        body: String(r.body || def.body),
+      };
+    };
+
+    const normalizeNotificationsTypesConfig = (rawMap) => {
+      const map = rawMap && typeof rawMap === 'object' ? rawMap : {};
+      const result = {};
+      for (const t of NOTIFICATION_TYPES) {
+        result[t.id] = normalizeNotificationsTypeConfig(t.id, map[t.id] || {});
+      }
+      return result;
+    };
+
+    const normalizeActiveTypeIds = (rawIds, normalizedTypesConfig) => {
+      const src = Array.isArray(rawIds) ? rawIds : [];
+      const known = new Set(allNotificationTypeIds);
+      const out = [];
+      src.forEach((v) => {
+        const id = String(v || '').trim();
+        if (!id || !known.has(id) || out.includes(id)) return;
+        out.push(id);
+      });
+      if (out.length > 0) return out;
+
+      const fallback = [];
+      allNotificationTypeIds.forEach((id) => {
+        const cfg = normalizedTypesConfig[id] || notificationsTypeDefaultForId(id);
+        if (String(cfg.enabled || '0') === '1') fallback.push(id);
+      });
+      return fallback;
+    };
+
+    const notificationsDefaults = {
+      recipients_mode: 'all_users_with_email',
+      manual_to: '',
+      reply_to: '',
+      signature: 'ACGL FMS',
+      types_config: normalizeNotificationsTypesConfig({}),
+      active_type_ids: ['new_payment_order'],
+    };
+
+    const normalizeNotificationsSettings = (settingsRaw) => {
+      const s = settingsRaw && typeof settingsRaw === 'object' ? settingsRaw : {};
+      const mode = normalizeNotificationsRecipientsMode(s.recipients_mode || notificationsDefaults.recipients_mode);
+      const typesConfig = normalizeNotificationsTypesConfig(s.types_config || {});
+      return {
+        recipients_mode: mode,
+        manual_to: String(s.manual_to || notificationsDefaults.manual_to),
+        reply_to: String(s.reply_to || notificationsDefaults.reply_to),
+        signature: String(s.signature || notificationsDefaults.signature),
+        types_config: typesConfig,
+        active_type_ids: normalizeActiveTypeIds(s.active_type_ids || [], typesConfig),
+      };
+    };
+
+    const loadNotificationsSettingsLocal = () => {
+      try {
+        const raw = String(localStorage.getItem(NOTIFICATIONS_SETTINGS_KEY) || '').trim();
+        if (!raw) return { ...notificationsDefaults };
+        return normalizeNotificationsSettings(safeJsonParse(raw, notificationsDefaults));
+      } catch {
+        return { ...notificationsDefaults };
+      }
+    };
+
+    const saveNotificationsSettingsLocal = (settingsRaw) => {
+      const normalized = normalizeNotificationsSettings(settingsRaw);
+      localStorage.setItem(NOTIFICATIONS_SETTINGS_KEY, JSON.stringify(normalized));
+      return normalized;
+    };
+
+    const setNotificationsStatus = (msg, isError = false) => {
+      if (!notificationsStatusEl) return;
+      notificationsStatusEl.textContent = String(msg || '');
+      notificationsStatusEl.style.color = isError ? 'var(--danger)' : '';
+    };
+
+    const setNotificationsLastTest = (msg) => {
+      if (!notificationsLastTestEl) return;
+      const text = String(msg || '').trim();
+      notificationsLastTestEl.textContent = text;
+      notificationsLastTestEl.hidden = text === '';
+    };
+
+    const notificationsSyncModeUi = () => {
+      const mode = String(notificationsRecipientsModeInput && notificationsRecipientsModeInput.value || 'all_users_with_email');
+      const manual = mode === 'manual_list';
+      if (notificationsManualToWrap) notificationsManualToWrap.hidden = !manual;
+      if (notificationsManualToInput) notificationsManualToInput.disabled = !manual;
+    };
+
+    const recipientSummary = (settings) => {
+      const mode = normalizeNotificationsRecipientsMode(settings && settings.recipients_mode);
+      if (mode === 'manual_list') {
+        const count = String(settings && settings.manual_to || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).length;
+        return count > 0 ? `Manual (${count})` : 'Manual (empty)';
+      }
+      if (mode.startsWith('user:')) {
+        return mode.slice(5);
+      }
+      return 'All users';
+    };
+
+    let notificationsCurrentSettings = null;
+    let notificationsInlineEditTypeId = '';
+    let notificationsCanEdit = false;
+    let notificationsModalMode = 'edit';
+
+    const notificationsLoadTypeFields = () => {
+      if (!notificationsCurrentSettings) return;
+      const id = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '').trim() : '';
+      if (!id) return;
+      const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
+      if (notificationsTypeEnabledInput) notificationsTypeEnabledInput.checked = String(cfg.enabled || '0') === '1';
+      if (notificationsSubjectInput) notificationsSubjectInput.value = String(cfg.subject || '');
+      if (notificationsBodyInput) notificationsBodyInput.value = String(cfg.body || '');
+    };
+
+    const notificationsFlushTypeFields = () => {
+      if (!notificationsCurrentSettings) return;
+      const id = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '').trim() : '';
+      if (!id) return;
+      if (!notificationsCurrentSettings.types_config) notificationsCurrentSettings.types_config = {};
+      notificationsCurrentSettings.types_config[id] = {
+        enabled: notificationsTypeEnabledInput && notificationsTypeEnabledInput.checked ? '1' : '0',
+        subject: notificationsSubjectInput ? String(notificationsSubjectInput.value || '') : '',
+        body: notificationsBodyInput ? String(notificationsBodyInput.value || '') : '',
+      };
+    };
+
+    const notificationsReadFormPayload = () => {
+      notificationsFlushTypeFields();
+      return {
+        recipients_mode: normalizeNotificationsRecipientsMode(notificationsRecipientsModeInput ? String(notificationsRecipientsModeInput.value || '') : 'all_users_with_email'),
+        manual_to: notificationsManualToInput ? String(notificationsManualToInput.value || '') : '',
+        reply_to: notificationsReplyToInput ? String(notificationsReplyToInput.value || '') : '',
+        signature: notificationsSignatureInput ? String(notificationsSignatureInput.value || '') : '',
+        types_config: notificationsCurrentSettings ? { ...notificationsCurrentSettings.types_config } : {},
+        active_type_ids: notificationsCurrentSettings ? [...(notificationsCurrentSettings.active_type_ids || [])] : [],
+      };
+    };
+
+    const notificationsSetDisabled = (disabled) => {
+      const isDisabled = Boolean(disabled);
+      const controls = [
+        notificationsNewBtn,
+        notificationsTypeSelectEl,
+        notificationsTypeEnabledInput,
+        notificationsRecipientsModeInput,
+        notificationsManualToInput,
+        notificationsReplyToInput,
+        notificationsTestToInput,
+        notificationsSubjectInput,
+        notificationsBodyInput,
+        notificationsSignatureInput,
+        notificationsTestBtn,
+        notificationsSaveBtn,
+      ];
+      controls.forEach((el) => {
+        if (el) el.disabled = isDisabled;
+      });
+      if (notificationsListTbody) {
+        Array.from(notificationsListTbody.querySelectorAll('button,select')).forEach((el) => {
+          el.disabled = isDisabled || !notificationsCanEdit;
+        });
+      }
+      notificationsSyncModeUi();
+    };
+
+    const renderNotificationsTable = () => {
+      if (!notificationsListTbody || !notificationsCurrentSettings) return;
+      const rows = Array.isArray(notificationsCurrentSettings.active_type_ids) ? notificationsCurrentSettings.active_type_ids : [];
+      const recipient = recipientSummary(notificationsCurrentSettings);
+      notificationsListTbody.innerHTML = '';
+
+      rows.forEach((id) => {
+        const t = NOTIFICATION_TYPES.find((x) => x.id === id);
+        if (!t) return;
+        const cfg = (notificationsCurrentSettings.types_config || {})[id] || notificationsTypeDefaultForId(id);
+        const isInline = notificationsInlineEditTypeId === id;
+        const tr = document.createElement('tr');
+        tr.innerHTML = isInline
+          ? `
+            <td>${escapeHtml(recipient)}</td>
+            <td>${escapeHtml(t.label)}</td>
+            <td>
+              <select data-notifications-inline-status="${escapeHtml(id)}">
+                <option value="1" ${String(cfg.enabled) === '1' ? 'selected' : ''}>Enabled</option>
+                <option value="0" ${String(cfg.enabled) !== '1' ? 'selected' : ''}>Disabled</option>
+              </select>
+            </td>
+            <td>
+              <button type="button" class="btn btn--viewGrey" data-notifications-inline-save="${escapeHtml(id)}">Save</button>
+              <button type="button" class="btn btn--ghost" data-notifications-inline-cancel="${escapeHtml(id)}">Cancel</button>
+              <button type="button" class="btn btn--editBlue" data-notifications-open-edit="${escapeHtml(id)}">Edit</button>
+            </td>
+          `
+          : `
+            <td>${escapeHtml(recipient)}</td>
+            <td>${escapeHtml(t.label)}</td>
+            <td>${String(cfg.enabled) === '1' ? 'Enabled' : 'Disabled'}</td>
+            <td>
+              <button type="button" class="btn btn--editBlue" data-notifications-inline-edit="${escapeHtml(id)}">Edit</button>
+              <button type="button" class="btn btn--x" data-notifications-delete="${escapeHtml(id)}">Delete</button>
+            </td>
+          `;
+        notificationsListTbody.appendChild(tr);
+      });
+
+      if (notificationsEmptyState) notificationsEmptyState.hidden = rows.length !== 0;
+      notificationsSetDisabled(!notificationsCanEdit);
+    };
+
+    const notificationsApplySettings = (settingsRaw) => {
+      const s = normalizeNotificationsSettings(settingsRaw);
+      notificationsCurrentSettings = s;
+      populateNotificationsRecipientOptions();
+      if (notificationsRecipientsModeInput) notificationsRecipientsModeInput.value = s.recipients_mode;
+      if (notificationsManualToInput) notificationsManualToInput.value = String(s.manual_to || '');
+      if (notificationsReplyToInput) notificationsReplyToInput.value = String(s.reply_to || '');
+      if (notificationsSignatureInput) notificationsSignatureInput.value = String(s.signature || '');
+      if (notificationsTypeSelectEl && notificationsTypeSelectEl.options.length === 0) {
+        const ids = s.active_type_ids.length > 0 ? s.active_type_ids : allNotificationTypeIds;
+        populateNotificationsTypeSelect(ids);
+      }
+      notificationsLoadTypeFields();
+      notificationsSyncModeUi();
+      renderNotificationsTable();
+    };
+
+    const saveNotificationsSettings = async (settingsRaw) => {
+      const payload = normalizeNotificationsSettings(settingsRaw);
+
+      if (!IS_WP_SHARED_MODE) {
+        const saved = saveNotificationsSettingsLocal(payload);
+        notificationsApplySettings(saved);
+        setNotificationsStatus('Saved (local mode).');
+        return true;
+      }
+
+      const url = wpJoin('acgl-fms/v1/admin/notifications-settings');
+      const res = await wpFetchJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+
+      if (!res.ok || !data || !data.ok) {
+        const msg = data && data.error ? String(data.error) : 'Could not save notification settings.';
+        setNotificationsStatus(msg, true);
+        return false;
+      }
+
+      notificationsApplySettings(data.settings || payload);
+      setNotificationsStatus('Saved.');
+      return true;
+    };
+
+    const openNotificationsModal = (typeId, mode) => {
+      if (!notificationsModal || !notificationsCurrentSettings) return;
+      notificationsModalMode = mode === 'create' ? 'create' : 'edit';
+      if (notificationsModalTitle) {
+        notificationsModalTitle.textContent = notificationsModalMode === 'create' ? 'Create New Notification' : 'Edit Notification';
+      }
+
+      const activeIds = [...(notificationsCurrentSettings.active_type_ids || [])];
+      const inactiveIds = allNotificationTypeIds.filter((id) => !activeIds.includes(id));
+      const availableIds = notificationsModalMode === 'create' ? inactiveIds : activeIds;
+      if (availableIds.length === 0) {
+        window.alert('No additional notification types are available to create.');
+        return;
+      }
+
+      populateNotificationsTypeSelect(availableIds);
+      const pickId = typeId && availableIds.includes(typeId) ? typeId : availableIds[0];
+      if (notificationsTypeSelectEl) notificationsTypeSelectEl.value = pickId;
+      notificationsLoadTypeFields();
+      notificationsSyncModeUi();
+      openSimpleModal(notificationsModal, '#notificationsTypeSelect');
+    };
+
+    const closeNotificationsModal = () => {
+      closeSimpleModal(notificationsModal);
+    };
+
+    const loadNotificationsSettingsFromWp = async () => {
+      if (!IS_WP_SHARED_MODE) {
+        const localSettings = loadNotificationsSettingsLocal();
+        notificationsApplySettings(localSettings);
+        const hasAnyUsers = loadUsers().length > 0;
+        const currentUser = getCurrentUser();
+        notificationsCanEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_email_notifications') : false);
+        notificationsSetDisabled(!notificationsCanEdit);
+        setNotificationsStatus(notificationsCanEdit ? 'Loaded (local mode).' : 'View only for your account.');
+        return;
+      }
+
+      if (!getWpToken()) {
+        notificationsCanEdit = false;
+        notificationsSetDisabled(true);
+        setNotificationsStatus('Please sign in to load notification settings.', true);
+        return;
+      }
+
+      setNotificationsStatus('Loading...');
+      setNotificationsLastTest('');
+      try {
+        const url = wpJoin('acgl-fms/v1/admin/notifications-settings');
+        const res = await wpFetchJson(url, { method: 'GET' });
+        let data = null;
+        try { data = await res.json(); } catch { data = null; }
+
+        if (!res.ok || !data || !data.ok) {
+          const msg = data && data.error ? String(data.error) : 'Could not load notification settings.';
+          notificationsCanEdit = false;
+          notificationsSetDisabled(true);
+          setNotificationsStatus(msg, true);
+          return;
+        }
+
+        notificationsApplySettings(data.settings || {});
+        const hasAnyUsers = loadUsers().length > 0;
+        const currentUser = getCurrentUser();
+        notificationsCanEdit = !hasAnyUsers || (currentUser ? canWrite(currentUser, 'settings_email_notifications') : false);
+        notificationsSetDisabled(!notificationsCanEdit);
+        setNotificationsStatus(notificationsCanEdit ? 'Loaded.' : 'View only for your account.');
+      } catch {
+        notificationsCanEdit = false;
+        notificationsSetDisabled(true);
+        setNotificationsStatus('Could not load notification settings.', true);
+      }
+    };
+
+    if (notificationsRecipientsModeInput && !notificationsRecipientsModeInput.dataset.bound) {
+      notificationsRecipientsModeInput.dataset.bound = '1';
+      notificationsRecipientsModeInput.addEventListener('change', notificationsSyncModeUi);
+    }
+
+    if (notificationsTypeSelectEl && !notificationsTypeSelectEl.dataset.bound) {
+      notificationsTypeSelectEl.dataset.bound = '1';
+      notificationsTypeSelectEl.addEventListener('change', notificationsLoadTypeFields);
+    }
+
+    if (notificationsNewBtn && !notificationsNewBtn.dataset.bound) {
+      notificationsNewBtn.dataset.bound = '1';
+      notificationsNewBtn.addEventListener('click', () => {
+        if (!requireSettingsEditAccess('Email Notifications is view only for your account.', 'settings_email_notifications')) return;
+        openNotificationsModal('', 'create');
+      });
+    }
+
+    if (notificationsListTbody && !notificationsListTbody.dataset.bound) {
+      notificationsListTbody.dataset.bound = '1';
+      notificationsListTbody.addEventListener('click', async (e) => {
+        if (!requireSettingsEditAccess('Email Notifications is view only for your account.', 'settings_email_notifications')) return;
+        const inlineEditBtn = e.target.closest('[data-notifications-inline-edit]');
+        const inlineCancelBtn = e.target.closest('[data-notifications-inline-cancel]');
+        const inlineSaveBtn = e.target.closest('[data-notifications-inline-save]');
+        const deleteBtn = e.target.closest('[data-notifications-delete]');
+        const openEditBtn = e.target.closest('[data-notifications-open-edit]');
+
+        if (inlineEditBtn) {
+          notificationsInlineEditTypeId = String(inlineEditBtn.getAttribute('data-notifications-inline-edit') || '');
+          renderNotificationsTable();
+          return;
+        }
+
+        if (inlineCancelBtn) {
+          notificationsInlineEditTypeId = '';
+          renderNotificationsTable();
+          return;
+        }
+
+        if (openEditBtn) {
+          const id = String(openEditBtn.getAttribute('data-notifications-open-edit') || '');
+          openNotificationsModal(id, 'edit');
+          return;
+        }
+
+        if (inlineSaveBtn && notificationsCurrentSettings) {
+          const id = String(inlineSaveBtn.getAttribute('data-notifications-inline-save') || '');
+          const statusEl = notificationsListTbody.querySelector(`[data-notifications-inline-status="${CSS.escape(id)}"]`);
+          if (!statusEl) return;
+          const next = normalizeNotificationsSettings({ ...notificationsCurrentSettings });
+          if (!next.types_config[id]) next.types_config[id] = notificationsTypeDefaultForId(id);
+          next.types_config[id] = { ...next.types_config[id], enabled: String(statusEl.value || '0') === '1' ? '1' : '0' };
+          notificationsSetDisabled(true);
+          const ok = await saveNotificationsSettings(next);
+          notificationsSetDisabled(!notificationsCanEdit);
+          if (ok) {
+            notificationsInlineEditTypeId = '';
+            renderNotificationsTable();
+          }
+          return;
+        }
+
+        if (deleteBtn && notificationsCurrentSettings) {
+          const id = String(deleteBtn.getAttribute('data-notifications-delete') || '');
+          if (!id) return;
+          const ok = window.confirm('Delete this notification?');
+          if (!ok) return;
+          const next = normalizeNotificationsSettings({ ...notificationsCurrentSettings });
+          next.active_type_ids = (next.active_type_ids || []).filter((x) => x !== id);
+          notificationsSetDisabled(true);
+          const saved = await saveNotificationsSettings(next);
+          notificationsSetDisabled(!notificationsCanEdit);
+          if (saved) {
+            notificationsInlineEditTypeId = '';
+            renderNotificationsTable();
+          }
+        }
+      });
+    }
+
+    if (notificationsForm && !notificationsForm.dataset.bound) {
+      notificationsForm.dataset.bound = '1';
+      notificationsForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!requireSettingsEditAccess('Email Notifications is view only for your account.', 'settings_email_notifications')) return;
+        if (!notificationsCurrentSettings) return;
+
+        const selectedType = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '').trim() : '';
+        if (!selectedType) return;
+
+        const payload = notificationsReadFormPayload();
+        if (notificationsModalMode === 'create') {
+          if (!Array.isArray(payload.active_type_ids)) payload.active_type_ids = [];
+          if (!payload.active_type_ids.includes(selectedType)) payload.active_type_ids.push(selectedType);
+        }
+
+        notificationsSetDisabled(true);
+        const ok = await saveNotificationsSettings(payload);
+        notificationsSetDisabled(!notificationsCanEdit);
+        if (ok) {
+          notificationsInlineEditTypeId = '';
+          closeNotificationsModal();
+          renderNotificationsTable();
+        }
+      });
+    }
+
+    if (notificationsTestBtn && !notificationsTestBtn.dataset.bound) {
+      notificationsTestBtn.dataset.bound = '1';
+      notificationsTestBtn.addEventListener('click', async () => {
+        if (!requireSettingsEditAccess('Email Notifications is view only for your account.', 'settings_email_notifications')) return;
+        if (!IS_WP_SHARED_MODE) {
+          setNotificationsStatus('Test send is available in WordPress shared mode only.');
+          return;
+        }
+
+        const typeId = notificationsTypeSelectEl ? String(notificationsTypeSelectEl.value || '') : (NOTIFICATION_TYPES[0] ? NOTIFICATION_TYPES[0].id : '');
+        const payload = {
+          to: notificationsTestToInput ? String(notificationsTestToInput.value || '') : '',
+          type: typeId,
+          settings: notificationsReadFormPayload(),
+        };
+
+        notificationsSetDisabled(true);
+        setNotificationsStatus('Sending test email...');
+        setNotificationsLastTest('');
+
+        try {
+          const url = wpJoin('acgl-fms/v1/admin/notifications-settings/test');
+          const res = await wpFetchJson(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          let data = null;
+          try { data = await res.json(); } catch { data = null; }
+
+          notificationsSetDisabled(!notificationsCanEdit);
+
+          if (!res.ok || !data || !data.ok) {
+            const msg = data && data.error ? String(data.error) : 'Could not send test email.';
+            setNotificationsStatus(msg, true);
+            return;
+          }
+
+          const sent = Number(data.sent || 0);
+          setNotificationsStatus(sent > 0 ? `Test email sent to ${sent} recipient(s).` : 'Test email sent.');
+          const recipients = Array.isArray(data.to)
+            ? data.to.map((v) => String(v || '').trim()).filter(Boolean)
+            : [];
+          const recipientText = recipients.length > 0
+            ? (recipients.length <= 3 ? recipients.join(', ') : `${recipients.slice(0, 3).join(', ')}, +${recipients.length - 3} more`)
+            : `${sent} recipient(s)`;
+          setNotificationsLastTest(`Last test: ${new Date().toLocaleString()} | To: ${recipientText}`);
+        } catch {
+          notificationsSetDisabled(!notificationsCanEdit);
+          setNotificationsStatus('Could not send test email.', true);
+        }
+      });
+    }
+
+    if (notificationsModal && !notificationsModal.dataset.bound) {
+      notificationsModal.dataset.bound = '1';
+      notificationsModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-notifications-modal-close]');
+        if (closeTarget) closeNotificationsModal();
+      });
+    }
+
+    notificationsSyncModeUi();
+    void loadNotificationsSettingsFromWp();
+  }
+
+  if (backupOpenWpAdminLink) {
+    const adminUrl = getWpAdminSettingsUrl();
+    if (adminUrl) {
+      backupOpenWpAdminLink.href = adminUrl;
+      backupOpenWpAdminLink.hidden = false;
+      if (backupWpAdminUnavailable) backupWpAdminUnavailable.hidden = true;
+    } else {
+      backupOpenWpAdminLink.hidden = true;
+      if (backupWpAdminUnavailable) backupWpAdminUnavailable.hidden = false;
+    }
+  }
+
   // Settings page roles management
   initRolesSettingsPage();
   initBackupPage();
@@ -24988,6 +25762,18 @@
           }
         } else {
           upsertOrder(updated, year);
+
+          // Fire notification events for status/with transitions.
+          {
+            const baseVars = { paymentOrderNo: String(updated.paymentOrderNo || ''), year: String(year), paymentOrderLink: '' };
+            if (nextWith === 'Grand Secretary' && nextStatus === 'Review') {
+              void fireNotificationEvent('gs_review', baseVars);
+            } else if (nextWith === 'Grand Master' && nextStatus === 'Review') {
+              void fireNotificationEvent('gm_review', baseVars);
+            } else if (nextWith === 'Grand Treasurer' && nextStatus === 'Approved') {
+              void fireNotificationEvent('gt_processing', baseVars);
+            }
+          }
         }
         updateWiseEntryBudgetNoFromOrderEdit(updated, year, nowIso);
         updateWiseEntryIdTrackFromOrderEdit(updated, year, nowIso);
@@ -25369,6 +26155,21 @@
     initPaymentOrdersHeaderFilters();
     seedMockOrdersIfDev();
     applyPaymentOrdersView();
+
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const targetId = String(params.get('orderId') || '').trim();
+      const targetYearRaw = String(params.get('year') || '').trim();
+      const targetYear = /^\d{4}$/.test(targetYearRaw) ? Number(targetYearRaw) : getActiveBudgetYear();
+      if (targetId) {
+        const order = loadOrders(targetYear).find((o) => String((o && o.id) || '') === targetId);
+        if (order) {
+          openModalWithOrder(order);
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   if (newPoBtn) {

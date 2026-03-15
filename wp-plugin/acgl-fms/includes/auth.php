@@ -164,6 +164,7 @@ function acgl_fms_normalize_permissions($perms) {
         'settings_backlog' => $pick('settings_backlog', 'settings'),
         'settings_numbering' => $pick('settings_numbering', 'settings'),
         'settings_grandlodge' => $pick('settings_grandlodge', 'settings'),
+        'settings_email_notifications' => $pick('settings_email_notifications', 'settings'),
         'settings_backup' => $pick('settings_backup', 'settings'),
         'settings_audit' => $pick('settings_audit', 'settings'),
     ];

@@ -1,0 +1,1752 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>User Guide – ACGL FMS</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* ── Guide-specific overrides ── */
+      .ug-wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 24px 80px;
+      }
+
+      .ug-toc {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px 28px;
+        margin-bottom: 40px;
+      }
+
+      .ug-toc h2 {
+        margin-top: 0;
+        font-size: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+
+      .ug-toc ol {
+        margin: 0;
+        padding-left: 20px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px 32px;
+      }
+
+      .ug-toc li {
+        margin: 2px 0;
+      }
+
+      .ug-toc a {
+        color: var(--focus);
+        text-decoration: none;
+      }
+
+      .ug-toc a:hover {
+        text-decoration: underline;
+      }
+
+      .ug-section {
+        margin-bottom: 48px;
+        scroll-margin-top: 16px;
+      }
+
+      .ug-section h2 {
+        font-size: 1.35rem;
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 6px;
+        margin-bottom: 16px;
+      }
+
+      .ug-section h3 {
+        font-size: 1.05rem;
+        margin-top: 24px;
+        margin-bottom: 8px;
+        color: var(--text);
+      }
+
+      .ug-section h4 {
+        font-size: 0.95rem;
+        margin-top: 18px;
+        margin-bottom: 6px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .ug-section p {
+        margin: 0 0 12px;
+        line-height: 1.6;
+      }
+
+      .ug-section ul,
+      .ug-section ol {
+        margin: 0 0 12px;
+        padding-left: 22px;
+        line-height: 1.7;
+      }
+
+      /* ── Process flow diagram ── */
+      .flow {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0;
+        margin: 16px 0 24px;
+      }
+
+      .flow__step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: 104px;
+        flex: 1;
+        text-align: center;
+      }
+
+      .flow__node {
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        white-space: nowrap;
+        width: 100%;
+      }
+
+      .flow__label {
+        font-size: 0.72rem;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      .flow__arrow {
+        font-size: 1.4rem;
+        color: var(--muted);
+        padding: 0 2px;
+        margin-bottom: 18px;
+        flex-shrink: 0;
+      }
+
+      /* Status colour palette – matches the app exactly */
+      .s-submitted {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+      .s-review {
+        background: #fef9c3;
+        color: #854d0e;
+      }
+      .s-returned {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .s-rejected {
+        background: #1f2937;
+        color: #f87171;
+      }
+      .s-approved {
+        background: var(--caution, #ffed29);
+        color: #111827;
+      }
+      .s-paid {
+        background: #dcfce7;
+        color: #15803d;
+      }
+
+      /* ── Colour key swatches ── */
+      .color-key {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin: 12px 0 20px;
+      }
+
+      .color-key__row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .color-key__swatch {
+        width: 110px;
+        min-width: 110px;
+        height: 32px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.78rem;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+
+      .color-key__desc {
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+
+      /* ── Permission table ── */
+      .perm-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.88rem;
+        margin: 12px 0 20px;
+      }
+
+      .perm-table th,
+      .perm-table td {
+        border: 1px solid var(--border);
+        padding: 7px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .perm-table thead th {
+        background: var(--table-head);
+        font-weight: 700;
+      }
+
+      .perm-table tr:nth-child(even) td {
+        background: var(--bg);
+      }
+
+      .perm-table .check {
+        color: #16a34a;
+        font-weight: 700;
+        text-align: center;
+      }
+      .perm-table .cross {
+        color: var(--danger);
+        font-weight: 700;
+        text-align: center;
+      }
+      .perm-table .partial {
+        color: #b45309;
+        font-weight: 700;
+        text-align: center;
+      }
+
+      /* ── Notification events table ── */
+      .notif-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.88rem;
+        margin: 12px 0 20px;
+      }
+
+      .notif-table th,
+      .notif-table td {
+        border: 1px solid var(--border);
+        padding: 7px 10px;
+        vertical-align: top;
+      }
+
+      .notif-table thead th {
+        background: var(--table-head);
+        font-weight: 700;
+      }
+
+      .notif-table tr:nth-child(even) td {
+        background: var(--bg);
+      }
+
+      /* ── Info callout ── */
+      .callout {
+        background: #eff6ff;
+        border-left: 4px solid var(--focus);
+        border-radius: 4px;
+        padding: 12px 16px;
+        margin: 14px 0;
+        font-size: 0.9rem;
+        line-height: 1.6;
+      }
+
+      html[data-theme="dark"] .callout {
+        background: #1e3a5f;
+        border-left-color: #60a5fa;
+      }
+
+      .callout strong {
+        color: var(--focus);
+      }
+
+      /* ── Access level badge ── */
+      .al {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        border-radius: 4px;
+        padding: 1px 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .al-none {
+        background: #f3f4f6;
+        color: #6b7280;
+        border: 1px solid #d1d5db;
+      }
+      .al-read {
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
+      .al-write {
+        background: #fef9c3;
+        color: #92400e;
+      }
+      .al-create {
+        background: #dcfce7;
+        color: #15803d;
+      }
+      .al-delete {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .al-full {
+        background: #111827;
+        color: #f9fafb;
+      }
+
+      @media (max-width: 640px) {
+        .ug-toc ol {
+          grid-template-columns: 1fr;
+        }
+        .flow {
+          flex-direction: column;
+        }
+        .flow__arrow {
+          transform: rotate(90deg);
+          margin: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <div class="headerTitleBlock">
+                  <h1>User Guide</h1>
+                  <p class="subhead">
+                    ACGL Financial Management System (FMS) — Complete reference
+                    for all modules, roles, and workflows.
+                  </p>
+                </div>
+              </div>
+              <div class="header-actions">
+                <div class="headerThemeBlock">
+                  <img
+                    class="headerThemeBlock__seal"
+                    src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+                    alt="ACGL"
+                    loading="lazy"
+                  />
+                  <label class="switch" for="themeToggle">
+                    <input
+                      type="checkbox"
+                      id="themeToggle"
+                      class="switch__input"
+                      role="switch"
+                      aria-label="Dark mode"
+                    />
+                    <span class="switch__track" aria-hidden="true"></span>
+                    <span class="switch__text">Dark mode</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          <div class="ug-wrap">
+            <!-- ── TABLE OF CONTENTS ── -->
+            <nav class="ug-toc" aria-label="Table of contents">
+              <h2>Contents</h2>
+              <ol>
+                <li><a href="#overview">Application Overview</a></li>
+                <li><a href="#navigation">Navigation &amp; Layout</a></li>
+                <li><a href="#signing-in">Signing In</a></li>
+                <li><a href="#roles">User Roles &amp; Permissions</a></li>
+                <li><a href="#payment-orders">Payment Orders</a></li>
+                <li><a href="#itemize">Itemizing a Payment Order</a></li>
+                <li><a href="#po-lifecycle">Payment Order Lifecycle</a></li>
+                <li><a href="#reconciliation">Reconciliation</a></li>
+                <li><a href="#budget">Budget</a></li>
+                <li><a href="#budget-dashboard">Budget Dashboard</a></li>
+                <li><a href="#ledger">Ledger</a></li>
+                <li><a href="#income">BankEUR Income</a></li>
+                <li><a href="#wise">wiseEUR &amp; wiseUSD</a></li>
+                <li><a href="#money-transfers">Money Transfers</a></li>
+                <li><a href="#archive">Archive</a></li>
+                <li><a href="#color-guide">Color Highlighting Guide</a></li>
+                <li><a href="#notifications">Email Notifications</a></li>
+                <li><a href="#settings">Admin Settings</a></li>
+                <li><a href="#backup">Backup &amp; Restore</a></li>
+                <li><a href="#backlog">Backlog</a></li>
+              </ol>
+            </nav>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 1. OVERVIEW                               -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="overview" class="ug-section">
+              <h2>1. Application Overview</h2>
+              <p>
+                The <strong>ACGL Financial Management System (FMS)</strong> is a
+                browser-based financial workflow application for the Ancient,
+                Accepted, and Consecrated Order of the Grand Lodge (ACGL). It
+                manages the full lifecycle of Payment Orders and tracks annual
+                budget activity across multiple account types and currencies.
+              </p>
+              <p>The system can operate in two modes:</p>
+              <ul>
+                <li>
+                  <strong>Standalone mode</strong> — data is stored in the
+                  browser's local storage. Suitable for development or offline
+                  use.
+                </li>
+                <li>
+                  <strong>WordPress shared mode</strong> — data is stored on a
+                  WordPress REST API backend, enabling multi-user shared access.
+                  This is the standard production mode.
+                </li>
+              </ul>
+              <p>
+                Key capabilities include: Payment Order request &amp; approval
+                workflow, budget tracking, multi-account income ledger (BankEUR,
+                wiseEUR, wiseUSD), Money Transfer management, archive access,
+                email notifications, and Google Drive cloud backup.
+              </p>
+
+              <div class="callout">
+                <strong>Version:</strong> 0.1.3 &nbsp;|&nbsp;
+                <strong>Developer:</strong> Cameron Davis &nbsp;|&nbsp;
+                <strong>Created:</strong> 19 February 2026
+              </div>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 2. NAVIGATION                             -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="navigation" class="ug-section">
+              <h2>2. Navigation &amp; Layout</h2>
+              <p>
+                The application uses a consistent shell layout across all pages:
+              </p>
+              <ul>
+                <li>
+                  <strong>Left sidebar (Navigation Tree)</strong> — click the
+                  hamburger icon (☰) in the top-left to open or close the
+                  sidebar. The tree lists all modules available to the signed-in
+                  user. Year-specific sub-pages (Budget, Payment Orders, Ledger,
+                  etc.) appear as expandable branches.
+                </li>
+                <li>
+                  <strong>Header</strong> — contains the page title, the ACGL
+                  seal logo, a dark-mode toggle, and the Sign In / user button.
+                </li>
+                <li>
+                  <strong>Main content area</strong> — tables, forms, and cards
+                  relevant to each module.
+                </li>
+              </ul>
+              <h3>Top-level navigation items</h3>
+              <ul>
+                <li>Payment Order Request (home)</li>
+                <li>Budget (with Dashboard sub-page)</li>
+                <li>
+                  Payment Orders (per budget year, with Reconciliation sub-page)
+                </li>
+                <li>
+                  Ledger (per budget year, with BankEUR / wiseEUR / wiseUSD
+                  sub-pages)
+                </li>
+                <li>Money Transfers</li>
+                <li>Archive</li>
+                <li>Admin Settings <em>(admin / privileged users only)</em></li>
+              </ul>
+              <h3>Dark Mode</h3>
+              <p>
+                Toggle dark mode using the switch in the top-right corner of any
+                page. The preference is persisted in browser storage.
+              </p>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 3. SIGNING IN                             -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="signing-in" class="ug-section">
+              <h2>3. Signing In</h2>
+              <p>
+                Click the <strong>Sign in</strong> button in the header. Enter
+                your username and password, then click <em>Sign In</em>.
+              </p>
+              <ul>
+                <li>Sessions are maintained in browser session storage.</li>
+                <li>
+                  After a period of inactivity the session expires automatically
+                  and you will see the sign-in prompt again.
+                </li>
+                <li>
+                  All sign-in events (successful, failed, and lock-outs) are
+                  recorded in the <strong>Audit Log</strong> (Admin Settings →
+                  Audit Log).
+                </li>
+                <li>
+                  Repeated failed attempts trigger a temporary lock-out with a
+                  countdown timer.
+                </li>
+              </ul>
+              <div class="callout">
+                <strong>Tip:</strong> If you share the FMS link with another
+                user, the WordPress REST URL and nonce are automatically
+                appended to the URL so they land in the correct shared-storage
+                context.
+              </div>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 4. USER ROLES & PERMISSIONS               -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="roles" class="ug-section">
+              <h2>4. User Roles &amp; Permissions</h2>
+              <p>
+                Permissions are assigned per-module to each user by an
+                administrator in <strong>Admin Settings → User Roles</strong>.
+                There is no fixed named role (e.g. "Treasurer"); instead, each
+                user receives a combination of module-level access levels.
+              </p>
+
+              <h3>Access Levels</h3>
+              <p>Each module can be granted one of the following levels:</p>
+              <ul>
+                <li>
+                  <span class="al al-none">none</span> — module hidden; access
+                  blocked.
+                </li>
+                <li>
+                  <span class="al al-read">read</span> — view only; no create,
+                  edit, or delete.
+                </li>
+                <li>
+                  <span class="al al-write">write</span> — view and edit
+                  existing records.
+                </li>
+                <li>
+                  <span class="al al-create">create</span> — view, edit, and
+                  create new records.
+                </li>
+                <li>
+                  <span class="al al-delete">delete</span> — view, edit, create,
+                  and delete records.
+                </li>
+                <li>
+                  <span class="al al-full">full</span> — unrestricted access
+                  including all administrative actions.
+                </li>
+              </ul>
+
+              <h3>Module Permission Keys</h3>
+              <table class="perm-table">
+                <thead>
+                  <tr>
+                    <th>Module</th>
+                    <th>Sub-module</th>
+                    <th>What it controls</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Budget</strong></td>
+                    <td>—</td>
+                    <td>Access to the annual budget table.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>Dashboard</td>
+                    <td>Access to the budget charts dashboard.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Payment Orders</strong></td>
+                    <td>—</td>
+                    <td>Submit, view, and manage payment orders.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>Itemize Payment Order</td>
+                    <td>Break a payment order into individual line items.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>Reconciliation</td>
+                    <td>
+                      Move pending entries into the main payment orders list.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Ledger</strong></td>
+                    <td>—</td>
+                    <td>
+                      View the consolidated income + payment order ledger.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>BankEUR</td>
+                    <td>Manage Commerzbank EUR transactions.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>wiseEUR</td>
+                    <td>Manage Wise EUR transactions.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>wiseUSD</td>
+                    <td>Manage Wise USD transactions.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Money Transfers</strong></td>
+                    <td>—</td>
+                    <td>Create and manage money transfer records.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Archive</strong></td>
+                    <td>—</td>
+                    <td>Browse previous years' data.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Admin Settings</strong></td>
+                    <td>—</td>
+                    <td>Access the settings page.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>User Roles</td>
+                    <td>Create, edit, and delete user accounts.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>Backlog</td>
+                    <td>Manage the task backlog.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>PO &amp; MT Numbering</td>
+                    <td>
+                      Configure the auto-numbering scheme for POs and MTs.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>GL Information</td>
+                    <td>
+                      Update Grand Lodge seal and Grand Secretary signature.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>Email Notifications</td>
+                    <td>Configure notification events and recipients.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>Backup</td>
+                    <td>Create, download, restore, or delete backups.</td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td>Audit Log</td>
+                    <td>View sign-in and application audit trail.</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <h3>Typical Role Configurations</h3>
+              <table class="perm-table">
+                <thead>
+                  <tr>
+                    <th>Suggested Role</th>
+                    <th>Typical Permissions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Requestor</strong></td>
+                    <td>
+                      Payment Orders: <span class="al al-create">create</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Grand Secretary</strong></td>
+                    <td>
+                      Budget: <span class="al al-full">full</span>, Payment
+                      Orders: <span class="al al-full">full</span>, Ledger:
+                      <span class="al al-full">full</span>, Money Transfers:
+                      <span class="al al-full">full</span>, Archive:
+                      <span class="al al-read">read</span>, Settings:
+                      <span class="al al-full">full</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Grand Treasurer</strong></td>
+                    <td>
+                      Budget: <span class="al al-write">write</span>, Payment
+                      Orders: <span class="al al-write">write</span>, Ledger:
+                      <span class="al al-full">full</span>, Money Transfers:
+                      <span class="al al-full">full</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Read-only Reviewer</strong></td>
+                    <td>All modules: <span class="al al-read">read</span></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="callout">
+                <strong>Admin account:</strong> A built-in administrator account
+                is seeded automatically with full access to all modules. It is
+                used for initial setup and cannot be deleted via the UI.
+              </div>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 5. PAYMENT ORDERS                         -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="payment-orders" class="ug-section">
+              <h2>5. Payment Orders</h2>
+              <p>
+                Payment Orders (POs) are the core financial document of the FMS.
+                A PO represents a request for reimbursement or expenditure
+                authorisation. All POs are year-scoped.
+              </p>
+
+              <h3>Submitting a New Payment Order</h3>
+              <ol>
+                <li>
+                  Navigate to <strong>Payment Order Request</strong> (the home
+                  page).
+                </li>
+                <li>
+                  The <strong>Payment Order Nr.</strong> is generated
+                  automatically based on the numbering scheme in Settings and
+                  cannot be edited.
+                </li>
+                <li>
+                  Fill in the required fields (marked with
+                  <span style="color: var(--danger)">*</span>):
+                  <ul>
+                    <li><strong>Date</strong> — date of the request.</li>
+                    <li>
+                      <strong>Euro (€)</strong> / <strong>USD ($)</strong> —
+                      amount(s) requested. Click either field to open the
+                      <em>Itemize</em> panel and break the total into individual
+                      expense lines.
+                    </li>
+                    <li>
+                      <strong>Budget Number</strong> — the 4-digit account code.
+                    </li>
+                    <li><strong>Payable To</strong> — name of the payee.</li>
+                    <li>
+                      <strong>Purpose</strong> — brief description of the
+                      expense.
+                    </li>
+                    <li>
+                      <strong>Source</strong> — funding source (Commerzbank,
+                      wiseEUR, wiseUSD, or Form Submission).
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  Optionally complete supplementary fields: IBAN/BIC (validated
+                  automatically), With (routing, e.g. Grand Secretary), and any
+                  notes.
+                </li>
+                <li>
+                  Click <strong>Download PDF</strong> to generate and save the
+                  official PDF document for the PO, then click
+                  <strong>Submit</strong> to save the record.
+                </li>
+              </ol>
+
+              <h3>Payment Orders List</h3>
+              <p>
+                Navigate to <strong>Payment Orders → [Year]</strong> to see all
+                submitted POs for that year. The list is sortable by clicking
+                column headers and supports full-text search. Use the
+                <strong>Status</strong> dropdown filter to narrow by status.
+              </p>
+              <p>
+                Each row shows: PO Number, Date, Payable To, Amount, Budget
+                Number, Source, With, Status, and action buttons (View PDF /
+                Edit / Delete).
+              </p>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 6. ITEMIZING A PAYMENT ORDER              -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="itemize" class="ug-section">
+              <h2>6. Itemizing a Payment Order</h2>
+              <p>
+                When a payment order covers multiple expense categories (e.g.
+                flights, hotel, meals), click the <strong>Euro</strong> or
+                <strong>USD</strong> amount field on the Request Form to open
+                the <em>Itemize Payment Order</em> page.
+              </p>
+              <ul>
+                <li>
+                  Click <strong>Add Item</strong> to enter a line item with a
+                  title, euro amount, and/or USD amount.
+                </li>
+                <li>
+                  Click <strong>Add Mileage</strong> to log a mileage expense;
+                  the kilometre rate is applied automatically.
+                </li>
+                <li>
+                  The running totals for EUR and USD update automatically as
+                  items are added or edited.
+                </li>
+                <li>
+                  Click <strong>Save Items</strong> to write the totals back to
+                  the request form.
+                </li>
+              </ul>
+              <div class="callout">
+                <strong>Currency conversion:</strong> If receipts are in a
+                different currency, you must attach either an OANDA Currency
+                Converter PDF for the payment date or a bank statement in the
+                submitted currency.
+              </div>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 7. PAYMENT ORDER LIFECYCLE                -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="po-lifecycle" class="ug-section">
+              <h2>7. Payment Order Lifecycle</h2>
+              <p>
+                Every Payment Order moves through a defined set of statuses. An
+                authorised user updates the status in the Payment Orders list
+                using the <strong>Status</strong> dropdown on each row.
+              </p>
+
+              <!-- Process flow diagram -->
+              <div class="flow" aria-label="Payment order process flow">
+                <div class="flow__step">
+                  <div class="flow__node s-submitted">Submitted</div>
+                  <div class="flow__label">Requestor submits PO</div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-review">Review</div>
+                  <div class="flow__label">GS or GM reviewing</div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-approved">Approved</div>
+                  <div class="flow__label">Ready for GT processing</div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-paid">Paid</div>
+                  <div class="flow__label">Payment executed</div>
+                </div>
+              </div>
+
+              <p>Alternative outcomes:</p>
+              <div class="flow" aria-label="Alternative payment order outcomes">
+                <div class="flow__step">
+                  <div class="flow__node s-review">Review</div>
+                  <div class="flow__label"></div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-returned">Returned</div>
+                  <div class="flow__label">Sent back for corrections</div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-submitted">Submitted</div>
+                  <div class="flow__label">Requestor resubmits</div>
+                </div>
+              </div>
+
+              <div class="flow" aria-label="Rejection flow">
+                <div class="flow__step">
+                  <div class="flow__node s-review">Review</div>
+                  <div class="flow__label"></div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-rejected">Rejected</div>
+                  <div class="flow__label">PO not approved</div>
+                </div>
+              </div>
+
+              <h3>Status Descriptions</h3>
+              <ul>
+                <li>
+                  <strong>Submitted</strong> — the PO has been submitted by the
+                  requestor and is awaiting initial review.
+                </li>
+                <li>
+                  <strong>Review</strong> — the PO is under active review by the
+                  Grand Secretary and/or Grand Master.
+                </li>
+                <li>
+                  <strong>Returned</strong> — the PO was returned to the
+                  requestor for corrections or additional documentation.
+                </li>
+                <li>
+                  <strong>Rejected</strong> — the PO was declined and will not
+                  be processed.
+                </li>
+                <li>
+                  <strong>Approved</strong> — the PO has been authorised and is
+                  ready for the Grand Treasurer to execute payment.
+                  <em>Approved rows are highlighted in yellow in the table.</em>
+                </li>
+                <li>
+                  <strong>Paid</strong> — payment has been executed and the PO
+                  is closed.
+                </li>
+              </ul>
+
+              <h3>Budget Impact</h3>
+              <p>
+                When a PO is set to <strong>Approved</strong>, its amount is
+                automatically deducted from the relevant budget line (OUT
+                account) for that year. This keeps the Budget table current
+                without manual entry. Paid POs are also reflected in the Ledger.
+              </p>
+
+              <h3>Routing ("With") Field</h3>
+              <p>
+                The <em>With</em> field records the current custodian of the PO
+                during the review process. Options are:
+              </p>
+              <ul>
+                <li>Requestor</li>
+                <li>Grand Secretary</li>
+                <li>Grand Master</li>
+                <li>Grand Treasurer</li>
+                <li>Archives</li>
+              </ul>
+
+              <h3>Email Notifications Triggered</h3>
+              <ul>
+                <li>
+                  <strong>New Payment Order</strong> — fires when a PO is
+                  submitted.
+                </li>
+                <li>
+                  <strong>Grand Secretary Review</strong> — fires when status
+                  moves to Review.
+                </li>
+                <li>
+                  <strong>Grand Master Review</strong> — fires when escalated to
+                  GM.
+                </li>
+                <li>
+                  <strong>Grand Treasurer Processing</strong> — fires when
+                  Approved.
+                </li>
+              </ul>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 8. RECONCILIATION                         -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="reconciliation" class="ug-section">
+              <h2>8. Reconciliation</h2>
+              <p>
+                The Reconciliation page (<strong
+                  >Payment Orders → [Year] → Reconciliation</strong
+                >) holds Payment Order entries that were created outside the
+                normal submission flow (e.g. imported records or administrative
+                corrections) and need to be verified before joining the main
+                Payment Orders list.
+              </p>
+              <ol>
+                <li>Review each entry and confirm the details are correct.</li>
+                <li>
+                  Click <strong>Reconcile</strong> to move the entry into the
+                  main Payment Orders list for that year.
+                </li>
+                <li>
+                  Click the back link to return to the Payment Orders list after
+                  reconciliation.
+                </li>
+              </ol>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 9. BUDGET                                 -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="budget" class="ug-section">
+              <h2>9. Budget</h2>
+              <p>
+                The Budget page (<strong>Budget → [Year]</strong>) presents the
+                annual budget table with IN (income/receipts) and OUT
+                (expenditure) accounts. It is the financial plan for the year.
+              </p>
+
+              <h3>Columns</h3>
+              <ul>
+                <li><strong>Code</strong> — 4-digit account code.</li>
+                <li><strong>Description</strong> — account name.</li>
+                <li>
+                  <strong>Anticipated</strong> — the planned budget amount.
+                </li>
+                <li>
+                  <strong>Approved</strong> — total of Approved Payment Orders
+                  charged to this account (auto-calculated).
+                </li>
+                <li>
+                  <strong>Receipts</strong> — income received against this
+                  account.
+                </li>
+                <li><strong>Expenditures</strong> — actual payments made.</li>
+                <li>
+                  <strong>Balance</strong> — computed from the above columns.
+                </li>
+              </ul>
+
+              <h3>Actions</h3>
+              <ul>
+                <li>
+                  <strong>Save Budget</strong> — persists any manual edits to
+                  the budget table.
+                </li>
+                <li>
+                  <strong>Set Active Budget</strong> — marks this year as the
+                  active budget. The sidebar "Budget" link will open this year's
+                  dashboard until deactivated.
+                </li>
+                <li>
+                  <strong>Checksums toggle</strong> — reveals checksum rows
+                  comparing two data sources to verify integrity.
+                </li>
+              </ul>
+
+              <h3>Budget Number Tooltips</h3>
+              <p>
+                Throughout the app, hovering over a budget number (e.g.
+                <em>2200 – Per Diem and Travel Expenses</em>) displays a tooltip
+                with the full account description.
+              </p>
+
+              <h3>Balance Calculation Logic</h3>
+              <p>
+                For most OUT accounts:
+                <strong>Balance = Anticipated − Receipts − Expenditures</strong
+                >. For specific income-linked accounts (New Lodge Petitions,
+                Grand Lodge Charity, Grand Master's Charity):
+                <strong>Balance = Approved + Receipts − Expenditures</strong>.
+              </p>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 10. BUDGET DASHBOARD                      -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="budget-dashboard" class="ug-section">
+              <h2>10. Budget Dashboard</h2>
+              <p>
+                Accessed via <strong>Budget → [Year] → Dashboard</strong> (or
+                the sidebar "Budget" link when an active budget is set).
+                Displays bar charts of <em>Expenditures vs Balance</em> for each
+                OUT account, grouped into Anticipated and Actual sections.
+              </p>
+              <ul>
+                <li>
+                  Use the search box to filter charts by account code or
+                  description.
+                </li>
+                <li>
+                  Chart colours:
+                  <span style="color: #fdba74; font-weight: 700">■ Orange</span>
+                  = Expenditures,
+                  <span style="color: #60a5fa; font-weight: 700">■ Blue</span> =
+                  Balance.
+                </li>
+                <li>
+                  Click <strong>← Back to [Year] Budget</strong> to return to
+                  the full table.
+                </li>
+              </ul>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 11. LEDGER                                -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="ledger" class="ug-section">
+              <h2>11. Ledger</h2>
+              <p>
+                The Ledger (<strong>Ledger → [Year]</strong>) is a consolidated
+                view that combines all income entries (BankEUR) and
+                Approved/Paid Payment Orders for the selected year on a single
+                scrollable table.
+              </p>
+              <ul>
+                <li>
+                  <strong>Income rows</strong> are shown alongside PO rows,
+                  giving a running picture of cash in vs cash out.
+                </li>
+                <li>
+                  <strong>Approved / GT-Review rows</strong> are highlighted in
+                  yellow (see
+                  <a href="#color-guide">Color Highlighting Guide</a>).
+                </li>
+                <li>
+                  Income rows that are eligible for a Money Transfer but have no
+                  MT number assigned are highlighted in a pale yellow
+                  (<code>#fff6bf</code>) to flag them as pending.
+                </li>
+                <li>
+                  The footer row shows running totals for income and expenditure
+                  columns.
+                </li>
+              </ul>
+              <h3>Sub-ledger Links</h3>
+              <p>
+                Within the Ledger page, buttons link to the individual account
+                sub-pages:
+              </p>
+              <ul>
+                <li>
+                  <strong>BankEUR</strong> — Commerzbank EUR transactions.
+                </li>
+                <li><strong>wiseEUR</strong> — Wise EUR transactions.</li>
+                <li><strong>wiseUSD</strong> — Wise USD transactions.</li>
+              </ul>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 12. BANKEUR INCOME                        -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="income" class="ug-section">
+              <h2>12. BankEUR Income</h2>
+              <p>
+                Accessed via <strong>Ledger → [Year] → BankEUR</strong>. Lists
+                Commerzbank EUR transactions for the selected year.
+              </p>
+              <h3>Adding an Entry</h3>
+              <ol>
+                <li>Click <strong>Add Entry</strong>.</li>
+                <li>
+                  Enter the date, description, amount, and optionally a budget
+                  number.
+                </li>
+                <li>Save.</li>
+              </ol>
+              <h3>Row Highlighting</h3>
+              <p>
+                Income rows <strong>missing a Budget Number</strong> are
+                highlighted in the primary colour (dark background) to indicate
+                they require attention. Assign a budget number via the edit
+                action.
+              </p>
+              <div class="callout">
+                <strong>Note:</strong> Only unassigned positive income entries
+                are eligible to be linked to a Money Transfer. The linkage is
+                explicit (user selects the entries) — date-range filtering is
+                not used.
+              </div>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 13. WISEEUR & WISEUSD                     -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="wise" class="ug-section">
+              <h2>13. wiseEUR &amp; wiseUSD</h2>
+              <p>
+                Accessed from <strong>Ledger → [Year]</strong>. These pages list
+                transactions processed through the Wise platform in EUR and USD
+                respectively.
+              </p>
+              <ul>
+                <li>
+                  Transaction data can be imported from a CSV file (the seeded
+                  CSV format is <code>wise_eur_YYYY_seed.csv</code> /
+                  <code>wise_usd_YYYY_seed.csv</code>).
+                </li>
+                <li>
+                  The <em>Received From</em> column is truncated for display but
+                  the full name appears on hover.
+                </li>
+                <li>
+                  Totals (incoming, outgoing, net) are shown in the footer row.
+                </li>
+              </ul>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 14. MONEY TRANSFERS                       -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="money-transfers" class="ug-section">
+              <h2>14. Money Transfers</h2>
+              <p>
+                Money Transfers (MTs) record the transfer of funds from one
+                account to another (e.g. wiseEUR to Commerzbank). Each MT groups
+                one or more BankEUR income entries and records the transfer
+                details.
+              </p>
+
+              <h3>Money Transfers List</h3>
+              <p>
+                Navigate to <strong>Money Transfers → [Year]</strong> to see all
+                MTs. Each row shows: MT Number, Date, Comments, total EUR/USD
+                amounts, GS-verified status, GT-verified status, and actions.
+              </p>
+
+              <h3>Creating a Money Transfer</h3>
+              <ol>
+                <li>
+                  Click <strong>New M.T.</strong> to open the Money Transfer
+                  builder page.
+                </li>
+                <li>Set the <strong>MT Date</strong> using the date picker.</li>
+                <li>
+                  The table shows all unassigned positive BankEUR income entries
+                  for the year. Select the entries to include by checking their
+                  checkboxes.
+                </li>
+                <li>Add any comments and click <strong>Save</strong>.</li>
+              </ol>
+
+              <h3>Verification Workflow</h3>
+              <div class="flow" aria-label="Money Transfer verification flow">
+                <div class="flow__step">
+                  <div class="flow__node s-submitted">Created</div>
+                  <div class="flow__label">MT saved by GS</div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-review">GS Verified</div>
+                  <div class="flow__label">Grand Secretary confirms</div>
+                </div>
+                <div class="flow__arrow" aria-hidden="true">→</div>
+                <div class="flow__step">
+                  <div class="flow__node s-approved">GT Verified</div>
+                  <div class="flow__label">Grand Treasurer confirms</div>
+                </div>
+              </div>
+
+              <ul>
+                <li>
+                  Email notifications are sent at each verification step (see
+                  <a href="#notifications">Email Notifications</a>).
+                </li>
+                <li>
+                  Once income entries are assigned to a MT, they are removed
+                  from the eligible pool and their MT number is displayed in the
+                  Ledger.
+                </li>
+              </ul>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 15. ARCHIVE                               -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="archive" class="ug-section">
+              <h2>15. Archive</h2>
+              <p>
+                The Archive page (<strong>Archive</strong> in the sidebar)
+                provides links to historical years' data, grouped by functional
+                area (Budget, Payment Orders, Ledger, Money Transfers, etc.).
+              </p>
+              <ul>
+                <li>
+                  Year links navigate directly to the year-scoped version of
+                  each module.
+                </li>
+                <li>
+                  Access is controlled by the <em>Archive</em> permission key.
+                  Users without this permission will not see the Archive link in
+                  the sidebar.
+                </li>
+              </ul>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 16. COLOR HIGHLIGHTING GUIDE              -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="color-guide" class="ug-section">
+              <h2>16. Color Highlighting Guide</h2>
+              <p>
+                The FMS uses consistent color cues across tables to draw
+                attention to important states. The same colors apply in both
+                light mode and dark mode (with appropriate contrast
+                adjustments).
+              </p>
+
+              <h3>Payment Order Table Row Colors</h3>
+              <div class="color-key">
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="background: var(--caution, #ffed29); color: #111827"
+                  >
+                    Yellow
+                  </div>
+                  <div class="color-key__desc">
+                    <strong>Approved / GT-Review status.</strong> The PO has
+                    been approved and is awaiting Grand Treasurer payment
+                    execution. Requires immediate attention from the Grand
+                    Treasurer.
+                  </div>
+                </div>
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="
+                      background: var(--primary-bg, #111827);
+                      color: var(--primary-text, #fff);
+                    "
+                  >
+                    Dark
+                  </div>
+                  <div class="color-key__desc">
+                    <strong>Missing required fields.</strong> A Payment Order
+                    row is highlighted in the primary (dark) color when it is
+                    missing one or more required fields. Edit the record to
+                    resolve.
+                  </div>
+                </div>
+              </div>
+
+              <h3>Ledger Table Row Colors</h3>
+              <div class="color-key">
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="background: var(--caution, #ffed29); color: #111827"
+                  >
+                    Yellow
+                  </div>
+                  <div class="color-key__desc">
+                    <strong>Approved / GT-Review Payment Orders</strong> in the
+                    Ledger. Same meaning as in the PO table.
+                  </div>
+                </div>
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="background: #fff6bf; color: #111827"
+                  >
+                    Pale Yellow
+                  </div>
+                  <div class="color-key__desc">
+                    <strong>Missing Money Transfer number.</strong> A BankEUR
+                    income row that is eligible for a Money Transfer but has not
+                    yet been assigned to one.
+                  </div>
+                </div>
+              </div>
+
+              <h3>BankEUR Income Table Row Colors</h3>
+              <div class="color-key">
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="
+                      background: var(--primary-bg, #111827);
+                      color: var(--primary-text, #fff);
+                    "
+                  >
+                    Dark
+                  </div>
+                  <div class="color-key__desc">
+                    <strong>Missing Budget Number.</strong> An income row with
+                    no budget number assigned. Assign a budget number via the
+                    edit action.
+                  </div>
+                </div>
+              </div>
+
+              <h3>Status Badge Colors (Payment Order Status)</h3>
+              <div class="color-key">
+                <div class="color-key__row">
+                  <div class="color-key__swatch s-submitted">Submitted</div>
+                  <div class="color-key__desc">
+                    Initial state after requestor submits.
+                  </div>
+                </div>
+                <div class="color-key__row">
+                  <div class="color-key__swatch s-review">Review</div>
+                  <div class="color-key__desc">Under GS / GM review.</div>
+                </div>
+                <div class="color-key__row">
+                  <div class="color-key__swatch s-returned">Returned</div>
+                  <div class="color-key__desc">Sent back for corrections.</div>
+                </div>
+                <div class="color-key__row">
+                  <div class="color-key__swatch s-rejected">Rejected</div>
+                  <div class="color-key__desc">PO was declined.</div>
+                </div>
+                <div class="color-key__row">
+                  <div class="color-key__swatch s-approved">Approved</div>
+                  <div class="color-key__desc">
+                    Authorised; ready for GT to pay. Row highlighted yellow.
+                  </div>
+                </div>
+                <div class="color-key__row">
+                  <div class="color-key__swatch s-paid">Paid</div>
+                  <div class="color-key__desc">
+                    Payment executed and closed.
+                  </div>
+                </div>
+              </div>
+
+              <h3>Interface Accent Colors</h3>
+              <div class="color-key">
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="background: #2563eb; color: #fff"
+                  >
+                    Blue
+                  </div>
+                  <div class="color-key__desc">
+                    Focus / interactive elements, links, primary actions.
+                  </div>
+                </div>
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="background: #b91c1c; color: #fff"
+                  >
+                    Red
+                  </div>
+                  <div class="color-key__desc">
+                    Danger / delete / validation errors.
+                  </div>
+                </div>
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="background: #60a5fa; color: #111827"
+                  >
+                    Light Blue
+                  </div>
+                  <div class="color-key__desc">
+                    Budget Dashboard — Balance bar.
+                  </div>
+                </div>
+                <div class="color-key__row">
+                  <div
+                    class="color-key__swatch"
+                    style="background: #fdba74; color: #111827"
+                  >
+                    Orange
+                  </div>
+                  <div class="color-key__desc">
+                    Budget Dashboard — Expenditures bar.
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 17. EMAIL NOTIFICATIONS                   -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="notifications" class="ug-section">
+              <h2>17. Email Notifications</h2>
+              <p>
+                The FMS can send automatic email notifications when key events
+                occur. Notifications are only active in
+                <strong>WordPress shared mode</strong> and require configuration
+                in <strong>Admin Settings → Email Notifications</strong>.
+              </p>
+
+              <h3>Available Notification Events</h3>
+              <table class="notif-table">
+                <thead>
+                  <tr>
+                    <th>Event</th>
+                    <th>Triggered When</th>
+                    <th>Default Subject</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>New Payment Order</td>
+                    <td>A PO is submitted.</td>
+                    <td>[ACGL FMS] New Payment Order {{paymentOrderNo}}</td>
+                  </tr>
+                  <tr>
+                    <td>Grand Secretary Review</td>
+                    <td>PO status set to Review.</td>
+                    <td>[ACGL FMS] Payment Order Awaiting GS Review</td>
+                  </tr>
+                  <tr>
+                    <td>Grand Master Review</td>
+                    <td>PO escalated to GM.</td>
+                    <td>[ACGL FMS] Payment Order Awaiting GM Review</td>
+                  </tr>
+                  <tr>
+                    <td>Grand Treasurer Processing</td>
+                    <td>PO status set to Approved.</td>
+                    <td>[ACGL FMS] Payment Order Approved for GT Processing</td>
+                  </tr>
+                  <tr>
+                    <td>Budget Update</td>
+                    <td>Budget table is saved.</td>
+                    <td>[ACGL FMS] Budget Updated</td>
+                  </tr>
+                  <tr>
+                    <td>New BankEUR</td>
+                    <td>A BankEUR income entry is added.</td>
+                    <td>[ACGL FMS] New BankEUR Entry</td>
+                  </tr>
+                  <tr>
+                    <td>New wiseEUR</td>
+                    <td>A wiseEUR entry is added.</td>
+                    <td>[ACGL FMS] New wiseEUR Entry</td>
+                  </tr>
+                  <tr>
+                    <td>New wiseUSD</td>
+                    <td>A wiseUSD entry is added.</td>
+                    <td>[ACGL FMS] New wiseUSD Entry</td>
+                  </tr>
+                  <tr>
+                    <td>Money Transfer GS Verification</td>
+                    <td>A new MT is created (awaiting GS verification).</td>
+                    <td>[ACGL FMS] New Money Transfer Created</td>
+                  </tr>
+                  <tr>
+                    <td>Money Transfer GT Verification</td>
+                    <td>MT marked as GS Verified.</td>
+                    <td>[ACGL FMS] Money Transfer GS Verified</td>
+                  </tr>
+                  <tr>
+                    <td>New Backlog</td>
+                    <td>A backlog item is created.</td>
+                    <td>[ACGL FMS] New Backlog Item</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <h3>Template Variables</h3>
+              <p>
+                Email subjects and bodies support placeholders that are replaced
+                automatically at send time. Supported placeholders currently
+                used by the built-in templates include:
+              </p>
+              <ul>
+                <li><code>{{paymentOrderNo}}</code> — the PO number.</li>
+                <li>
+                  <code>{{paymentOrderLink}}</code> — link back to the PO in the
+                  FMS.
+                </li>
+                <li><code>{{year}}</code> — the budget year.</li>
+                <li><code>{{createdAt}}</code> — creation timestamp.</li>
+                <li>
+                  <code>{{id}}</code> — record ID (used in New Payment Order).
+                </li>
+                <li><code>{{date}}</code> — entry or event date.</li>
+                <li>
+                  <code>{{description}}</code> — transaction/entry description.
+                </li>
+                <li><code>{{amount}}</code> — amount value.</li>
+                <li>
+                  <code>{{party}}</code> — sender/party label (wise entries).
+                </li>
+                <li><code>{{comments}}</code> — money transfer comments.</li>
+                <li>
+                  <code>{{directLink}}</code> — direct deep-link to the record.
+                </li>
+                <li><code>{{moneyTransferNo}}</code> — the MT number.</li>
+                <li><code>{{refNo}}</code> — backlog reference number.</li>
+                <li><code>{{subject}}</code> — backlog subject/title.</li>
+                <li><code>{{priority}}</code> — backlog priority level.</li>
+                <li><code>{{createdBy}}</code> — backlog creator name.</li>
+                <li>
+                  <code>{{user}}</code> — the username of the person who
+                  triggered the event.
+                </li>
+              </ul>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 18. ADMIN SETTINGS                        -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="settings" class="ug-section">
+              <h2>18. Admin Settings</h2>
+              <p>
+                Accessed via <strong>Admin Settings</strong> in the sidebar
+                (requires the <em>settings</em> permission). The Settings page
+                contains several collapsible sections that can be re-ordered by
+                dragging.
+              </p>
+
+              <h3>User Roles</h3>
+              <p>
+                Search, add, edit, and delete user accounts. For each user, set
+                a username, email, password, and per-module access level. See
+                <a href="#roles">User Roles &amp; Permissions</a> for details.
+              </p>
+
+              <h3>PO &amp; MT Numbering</h3>
+              <p>
+                Configure the automatic numbering scheme for Payment Orders and
+                Money Transfers. The number prefix, separator, and starting
+                counter can be adjusted here.
+              </p>
+
+              <h3>GL Information</h3>
+              <p>
+                Upload the Grand Lodge seal image and the Grand Secretary's
+                signature image. These are embedded in generated PDF documents.
+              </p>
+
+              <h3>Email Notifications</h3>
+              <p>
+                Enable/disable individual notification events, set recipient
+                email addresses, and customise subject and body templates.
+              </p>
+
+              <h3>Backup</h3>
+              <p>
+                Create, download, restore, and delete backup snapshots. See
+                <a href="#backup">Backup &amp; Restore</a> for the full
+                workflow.
+              </p>
+
+              <h3>Audit Log</h3>
+              <p>
+                A read-only log of authentication events (sign-in, sign-out,
+                failed attempts) and key application actions. The audit log can
+                be exported.
+              </p>
+
+              <h3>Backlog</h3>
+              <p>
+                A simple task/issue tracker for outstanding items. See
+                <a href="#backlog">Backlog</a>.
+              </p>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 19. BACKUP & RESTORE                      -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="backup" class="ug-section">
+              <h2>19. Backup &amp; Restore</h2>
+              <p>
+                The FMS supports three backup mechanisms, all accessible from
+                <strong>Admin Settings → Backup</strong>.
+              </p>
+
+              <h3>WordPress Backup (per year)</h3>
+              <ol>
+                <li>Select the budget year to back up.</li>
+                <li>Click <strong>Create Backup</strong>.</li>
+                <li>Download the JSON file or store it in WordPress.</li>
+                <li>
+                  To restore, click <strong>Restore</strong> on a listed backup
+                  card and confirm.
+                </li>
+              </ol>
+
+              <h3>Cloud Backup (Google Drive)</h3>
+              <p>
+                Cloud backup stores a single all-years JSON snapshot in Google
+                Drive. It must be enabled first by completing the Google OAuth
+                setup:
+              </p>
+              <ol>
+                <li>
+                  In WordPress admin, open ACGL FMS settings and enter your
+                  Google OAuth Client ID and Client Secret.
+                </li>
+                <li>
+                  Save, then click the Google authorization button and complete
+                  consent.
+                </li>
+                <li>
+                  Return to the Backup section and click
+                  <strong>Cloud Backup</strong>.
+                </li>
+                <li>
+                  Use <strong>Download</strong> or <strong>Restore</strong> on a
+                  cloud backup entry as needed.
+                </li>
+              </ol>
+              <div class="callout">
+                <strong>Note:</strong> Cloud backup stores one all-years file.
+                WordPress backup cards remain year-based.
+              </div>
+
+              <h3>Local File Export</h3>
+              <p>
+                Any backup can be downloaded as a JSON file to your device for
+                offline safekeeping.
+              </p>
+            </section>
+
+            <!-- ══════════════════════════════════════════ -->
+            <!-- 20. BACKLOG                               -->
+            <!-- ══════════════════════════════════════════ -->
+            <section id="backlog" class="ug-section">
+              <h2>20. Backlog</h2>
+              <p>
+                The Backlog section (<strong>Admin Settings → Backlog</strong>)
+                is a lightweight task tracker for the Grand Lodge team. It is
+                not a financial record.
+              </p>
+              <ul>
+                <li>
+                  Click <strong>Add Item</strong> to create a new backlog item
+                  with a subject, priority, and description.
+                </li>
+                <li>Items can be searched, edited, and marked as archived.</li>
+                <li>
+                  Click <strong>Archive</strong> to toggle the archived items
+                  panel.
+                </li>
+                <li>
+                  Creating a backlog item triggers the
+                  <em>New Backlog</em> email notification if configured.
+                </li>
+              </ul>
+              <p class="muted" style="font-size: 0.85rem; margin-top: 24px">
+                ACGL FMS User Guide &nbsp;·&nbsp; Version 0.1.3 &nbsp;·&nbsp;
+                Current as of March 2026
+              </p>
+            </section>
+          </div>
+          <!-- /.ug-wrap -->
+        </main>
+      </div>
+      <!-- /.appMain -->
+    </div>
+    <!-- /.appShell -->
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

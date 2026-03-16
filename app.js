@@ -2294,6 +2294,7 @@
       },
       { key: 'archive', label: 'Archive', href: 'archive.html' },
       { key: 'settings', label: 'Admin Settings', href: 'settings.html' },
+      { key: null, label: 'User Guide', href: 'user_guide.html' },
       { key: null, label: 'About', href: 'about.html' },
       { key: null, label: 'Log out', href: 'index.html?logout=1' },
     ]);

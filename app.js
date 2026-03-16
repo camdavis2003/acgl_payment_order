@@ -2189,12 +2189,14 @@
     const years = migrateLegacyBudgetIfNeeded();
     const navYears = years.length > 0 ? years : [getCurrentBudgetYearFromDate(new Date())];
     const currentUser = getCurrentUser();
+    const currentPageYear = getBudgetYearFromUrl();
     const activeYear = (() => {
       const stored = loadActiveBudgetYear();
       if (stored && navYears.includes(stored)) return stored;
       return null;
     })();
     const resolvedYear = (() => {
+      if (currentPageYear && (years.length === 0 || navYears.includes(currentPageYear))) return currentPageYear;
       const storedActive = loadActiveBudgetYear();
       if (storedActive && navYears.includes(storedActive)) return storedActive;
       const candidate = getCurrentBudgetYearFromDate(new Date());

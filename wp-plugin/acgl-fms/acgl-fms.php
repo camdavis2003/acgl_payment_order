@@ -32,9 +32,9 @@ define('ACGL_FMS_OPTION_FULLPAGE_SLUG', 'acgl_fms_fullpage_slug_v1');
 
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/db.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/auth.php';
+require_once ACGL_FMS_PLUGIN_DIR . 'includes/admin_settings.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/rest.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/shortcode.php';
-require_once ACGL_FMS_PLUGIN_DIR . 'includes/admin_settings.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/gdrive_backup.php';
 
 define('ACGL_FMS_GDRIVE_CRON_HOOK', 'acgl_fms_gdrive_backup_daily');

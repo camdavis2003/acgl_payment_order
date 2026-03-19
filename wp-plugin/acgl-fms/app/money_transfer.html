@@ -151,6 +151,7 @@
               <table
                 id="mtBuilderTable"
                 class="table"
+                data-table-enhance="off"
                 aria-describedby="mt-builder-help"
               >
                 <caption id="mt-builder-help" class="sr-only">
@@ -159,13 +160,15 @@
                 </caption>
                 <thead>
                   <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">Budget Nr.</th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Creditor</th>
-                    <th scope="col" class="num">Euro (€)</th>
-                    <th scope="col" class="num">USD ($)</th>
-                    <th scope="col">Details</th>
+                    <th scope="col" data-sort-key="date">Date</th>
+                    <th scope="col" data-sort-key="budgetNumber">Budget Nr.</th>
+                    <th scope="col" data-sort-key="source">Source</th>
+                    <th scope="col" data-sort-key="creditorDebtor">Creditor</th>
+                    <th scope="col" class="num" data-sort-key="euro">
+                      Euro (€)
+                    </th>
+                    <th scope="col" class="num" data-sort-key="usd">USD ($)</th>
+                    <th scope="col" data-sort-key="details">Details</th>
                   </tr>
                 </thead>
                 <tbody id="mtBuilderTbody">
@@ -221,17 +224,19 @@
             aria-label="Eligible transactions"
             tabindex="0"
           >
-            <table id="mtEntrySelectTable" class="table">
+            <table id="mtEntrySelectTable" class="table" data-table-enhance="off">
               <thead>
                 <tr>
                   <th scope="col">Select</th>
-                  <th scope="col">Date</th>
-                  <th scope="col">Budget Nr.</th>
-                  <th scope="col">Source</th>
-                  <th scope="col">Creditor</th>
-                  <th scope="col" class="num">Euro (EUR)</th>
-                  <th scope="col" class="num">USD ($)</th>
-                  <th scope="col">Details</th>
+                  <th scope="col" data-sort-key="date">Date</th>
+                  <th scope="col" data-sort-key="budgetNumber">Budget Nr.</th>
+                  <th scope="col" data-sort-key="source">Source</th>
+                  <th scope="col" data-sort-key="creditorDebtor">Creditor</th>
+                  <th scope="col" class="num" data-sort-key="euro">
+                    Euro (EUR)
+                  </th>
+                  <th scope="col" class="num" data-sort-key="usd">USD ($)</th>
+                  <th scope="col" data-sort-key="details">Details</th>
                 </tr>
               </thead>
               <tbody id="mtEntrySelectTbody"></tbody>

@@ -45,15 +45,15 @@ html[data-theme="dark"] {
 * { box-sizing: border-box; }
 
 #wiseEurTable .wiseEurCol--receivedFrom {
-  max-width: 170px;
-  width: 170px;
+  max-width: none;
+  width: auto;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
 #wiseUsdTable .wiseUsdCol--receivedFrom {
-  max-width: 170px;
-  width: 170px;
+  max-width: none;
+  width: auto;
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -2445,9 +2445,28 @@ body[data-page="about"] main.container > section.card {
   padding-left: 8px;
 }
 
+.tableEnhanceControls--inlineSearch {
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-left: 0;
+}
+
+.list-actions > .tableEnhanceControls--inlineSearch {
+  flex: 0 0 auto;
+}
+
 .tableEnhanceColumnsBtn {
   min-height: 34px;
   min-width: 92px;
+  border: 2px solid #6b7280;
+}
+
+.tableEnhanceColumnsBtn:hover {
+  border-color: #4b5563;
+}
+
+.tableEnhanceColumnsBtn:focus-visible {
+  border-color: #374151;
 }
 
 .tableEnhancePanel {
@@ -2539,6 +2558,12 @@ body[data-page="about"] main.container > section.card {
 
 .tableEnhanceItem__grip:active {
   cursor: grabbing;
+}
+
+.tableEnhanceItem__grip--disabled,
+.tableEnhanceItem__grip--disabled:active {
+  cursor: default;
+  opacity: 0.25;
 }
 
 .tableEnhanceItem.tableEnhancePanelDragging {
@@ -2888,6 +2913,7 @@ body.isTableResizing {
 /* Payment Orders header background like Budget table */
 #ordersTable thead th {
   background: var(--table-head);
+  white-space: nowrap;
 }
 
 /* Income header background like Budget table */
@@ -3162,26 +3188,42 @@ input[type='checkbox'].cb {
   white-space: nowrap;
 }
 
-/* Payment Orders: center Euro / USD columns (including totals) */
-#ordersTable td.num,
-#ordersTable th.num {
+/* Payment Orders: center all columns except Actions and totals label */
+#ordersTable th,
+#ordersTable td {
   text-align: center;
 }
 
-/* Payment Orders: center selected columns only */
-#ordersTable th:nth-child(2),
-#ordersTable td:nth-child(2),
-#ordersTable th:nth-child(3),
-#ordersTable td:nth-child(3),
-#ordersTable th:nth-child(5),
-#ordersTable td:nth-child(5),
-#ordersTable th:nth-child(6),
-#ordersTable td:nth-child(6),
-#ordersTable th:nth-child(7),
-#ordersTable td:nth-child(7),
-#ordersTable th:nth-child(8),
-#ordersTable td:nth-child(8) {
+#ordersTable th.col-actions,
+#ordersTable td.actions {
+  text-align: left;
+}
+
+#ordersTable .ordersTotalsRow__label {
+  text-align: left;
+}
+
+/* Reconciliation: center all columns except Actions and totals label */
+#reconcileOrdersTable th,
+#reconcileOrdersTable td {
   text-align: center;
+}
+
+#reconcileOrdersTable th.col-actions,
+#reconcileOrdersTable td.actions {
+  text-align: left;
+}
+
+#reconcileOrdersTable .ordersTotalsRow__label {
+  text-align: left;
+}
+
+/* Payment Orders + Reconciliation: left-align Purpose column */
+#ordersTable th:nth-child(9),
+#ordersTable td:nth-child(9),
+#reconcileOrdersTable th:nth-child(9),
+#reconcileOrdersTable td:nth-child(9) {
+  text-align: left;
 }
 
 /* Payment Orders: keep Date on one line */
@@ -3194,10 +3236,67 @@ input[type='checkbox'].cb {
   white-space: nowrap;
 }
 
-/* wiseUSD: center all columns except Description */
+/* wiseUSD: center all columns */
 #wiseUsdTable th,
 #wiseUsdTable td {
   text-align: center;
+}
+
+/* Wise tables: fixed layout so all 12 columns share space equally. */
+#wiseEurTable,
+#wiseUsdTable {
+  width: 100%;
+  table-layout: fixed;
+}
+
+#wiseEurTable th,
+#wiseEurTable td,
+#wiseUsdTable th,
+#wiseUsdTable td {
+  width: 8.33%;
+}
+
+#wiseEurTable td,
+#wiseUsdTable td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Headers stay on one line — clip with ellipsis if too narrow */
+#wiseEurTable th,
+#wiseUsdTable th {
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Keep Counterparty header on one line even with equal-width columns. */
+#wiseEurTable th.wiseEurCol--receivedFrom,
+#wiseUsdTable th.wiseUsdCol--receivedFrom {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+/* Date data cells stay on one line */
+#wiseEurTable td:nth-child(2),
+#wiseEurTable td:nth-child(8),
+#wiseUsdTable td:nth-child(2),
+#wiseUsdTable td:nth-child(8) {
+  white-space: nowrap;
+}
+
+#wiseEurTable th:nth-child(7),
+#wiseEurTable td:nth-child(7),
+#wiseEurTable th:nth-child(11),
+#wiseEurTable td:nth-child(11),
+#wiseUsdTable th:nth-child(7),
+#wiseUsdTable td:nth-child(7),
+#wiseUsdTable th:nth-child(11),
+#wiseUsdTable td:nth-child(11) {
+  text-align: left;
 }
 
 /* Money Transfer builder: center selected columns */
@@ -3260,12 +3359,12 @@ input[type='checkbox'].cb {
 #moneyTransfersTable td:nth-child(7) { width: 12%; }
 #moneyTransfersTable th:nth-child(8),
 #moneyTransfersTable td:nth-child(8) {
-  width: 24%;
+  width: 31%;
   text-align: left;
 }
 #moneyTransfersTable th:nth-child(9),
 #moneyTransfersTable td:nth-child(9) {
-  width: 16%;
+  width: 9%;
   text-align: center;
 }
 
@@ -3282,6 +3381,12 @@ input[type='checkbox'].cb {
 #moneyTransfersTable td.actions .btn + .btn {
   margin-left: 4px;
   margin-top: 0;
+}
+
+#moneyTransfersTable th.col-actions,
+#moneyTransfersTable td.actions {
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 @media (max-width: 1200px) {
@@ -3301,12 +3406,12 @@ input[type='checkbox'].cb {
 
   #moneyTransfersTable th:nth-child(8),
   #moneyTransfersTable td:nth-child(8) {
-    width: 25%;
+    width: 32%;
   }
 
   #moneyTransfersTable th:nth-child(9),
   #moneyTransfersTable td:nth-child(9) {
-    width: 17%;
+    width: 10%;
   }
 }
 
@@ -3316,12 +3421,12 @@ input[type='checkbox'].cb {
 
   #moneyTransfersTable th:nth-child(8),
   #moneyTransfersTable td:nth-child(8) {
-    width: 27%;
+    width: 34%;
   }
 
   #moneyTransfersTable th:nth-child(9),
   #moneyTransfersTable td:nth-child(9) {
-    width: 17%;
+    width: 10%;
   }
 
   #moneyTransfersTable th:nth-child(5),
@@ -3351,28 +3456,12 @@ input[type='checkbox'].cb {
   }
 }
 
-/* Description column (7th) stays left-aligned */
-#wiseUsdTable th:nth-child(7),
-#wiseUsdTable td:nth-child(7) {
-  text-align: left;
-}
-
-/* Override global numeric alignment for wiseUSD */
-#wiseUsdTable td.num,
-#wiseUsdTable th.num {
-  text-align: center;
-}
-
-/* wiseEUR: center all columns except Description */
+/* Wise tables: keep all columns centered */
 #wiseEurTable th,
-#wiseEurTable td {
+#wiseEurTable td,
+#wiseUsdTable th,
+#wiseUsdTable td {
   text-align: center;
-}
-
-/* Description column (7th) stays left-aligned */
-#wiseEurTable th:nth-child(7),
-#wiseEurTable td:nth-child(7) {
-  text-align: left;
 }
 
 /* Override global numeric alignment for wiseEUR */
@@ -3382,10 +3471,34 @@ input[type='checkbox'].cb {
 }
 
 /* Ledger: center all columns except Creditor/Debtor and Details */
+#gsLedgerTable {
+  table-layout: fixed;
+}
+
 #gsLedgerTable th,
 #gsLedgerTable td {
   text-align: center;
 }
+
+/* Ledger column width map to prevent Date from over-expanding */
+#gsLedgerTable th:nth-child(1),
+#gsLedgerTable td:nth-child(1) { width: 5%; }
+#gsLedgerTable th:nth-child(2),
+#gsLedgerTable td:nth-child(2) { width: 9%; }
+#gsLedgerTable th:nth-child(3),
+#gsLedgerTable td:nth-child(3) { width: 12%; }
+#gsLedgerTable th:nth-child(4),
+#gsLedgerTable td:nth-child(4) { width: 18%; }
+#gsLedgerTable th:nth-child(5),
+#gsLedgerTable td:nth-child(5) { width: 12%; }
+#gsLedgerTable th:nth-child(6),
+#gsLedgerTable td:nth-child(6) { width: 9%; }
+#gsLedgerTable th:nth-child(7),
+#gsLedgerTable td:nth-child(7) { width: 9%; }
+#gsLedgerTable th:nth-child(8),
+#gsLedgerTable td:nth-child(8) { width: 10%; }
+#gsLedgerTable th:nth-child(9),
+#gsLedgerTable td:nth-child(9) { width: 16%; }
 
 /* Creditor/Debtor (4th) and Details (9th) stay left-aligned */
 #gsLedgerTable th:nth-child(4),
@@ -3393,6 +3506,14 @@ input[type='checkbox'].cb {
 #gsLedgerTable th:nth-child(9),
 #gsLedgerTable td:nth-child(9) {
   text-align: left;
+}
+
+/* Ledger Date column: reduce horizontal padding/width to avoid wasted space */
+#gsLedgerTable th:nth-child(1),
+#gsLedgerTable td:nth-child(1) {
+  white-space: nowrap;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 /* Override global numeric alignment for the Ledger */

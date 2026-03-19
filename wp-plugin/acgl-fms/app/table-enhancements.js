@@ -42,6 +42,22 @@
     for (var j = 0; j < keys.length; j += 1) {
       if (next.indexOf(keys[j]) === -1) next.push(keys[j]);
     }
+
+    // Keep locked columns at their original header positions.
+    // Unlocked columns remain user-reorderable.
+    var locked = (Array.isArray(columns) ? columns : []).filter(function (col) { return !!(col && col.locked); });
+    for (var l = 0; l < locked.length; l += 1) {
+      var lockedKey = locked[l].key;
+      var originalIndex = keys.indexOf(lockedKey);
+      if (originalIndex === -1) continue;
+
+      var currentIndex = next.indexOf(lockedKey);
+      if (currentIndex !== -1) next.splice(currentIndex, 1);
+
+      if (originalIndex >= next.length) next.push(lockedKey);
+      else next.splice(originalIndex, 0, lockedKey);
+    }
+
     return next;
   }
 
@@ -131,11 +147,31 @@
       used.add(key);
 
       var lockAttr = normalizeWhitespace(th.getAttribute('data-column-lock')).toLowerCase();
-      var locked = lockAttr === '1' || lockAttr === 'true' || th.classList.contains('col-delete') || th.classList.contains('col-actions');
+      var label = getColumnLabel(th, i);
+      var labelLower = normalizeWhitespace(label).toLowerCase();
+      var ariaLower = normalizeWhitespace(th.getAttribute('aria-label')).toLowerCase();
+
+      // Treat delete/action columns as locked across all tables even when
+      // those headers do not use col-delete/col-actions classes.
+      var isDeleteLike = (
+        labelLower === 'delete' ||
+        labelLower === 'x' ||
+        labelLower === 'delete x' ||
+        ariaLower === 'delete'
+      );
+      var isActionsLike = (labelLower === 'actions' || ariaLower === 'actions');
+
+      var locked =
+        lockAttr === '1' ||
+        lockAttr === 'true' ||
+        th.classList.contains('col-delete') ||
+        th.classList.contains('col-actions') ||
+        isDeleteLike ||
+        isActionsLike;
 
       cols.push({
         key: key,
-        label: getColumnLabel(th, i),
+        label: label,
         locked: locked,
       });
     }
@@ -148,61 +184,104 @@
     return value === '1' || value === 'true' || value === 'yes' || value === 'on';
   }
 
-  function getLocalStorage(storage) {
-    if (storage) return storage;
+  function cookieSafeName(key) {
+    return String(key || '').replace(/[^a-zA-Z0-9!#$%&'*+\-.^_`|~]/g, '_');
+  }
+
+  function getCookieValue(name) {
     if (!canUseDom()) return null;
     try {
-      return window.localStorage;
+      var safeName = cookieSafeName(name);
+      var pattern = new RegExp('(?:^|;\\s*)' + safeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)');
+      var match = document.cookie.match(pattern);
+      return match ? decodeURIComponent(match[1]) : null;
     } catch (err) {
       return null;
     }
   }
 
-  function loadState(instance) {
-    var storage = getLocalStorage(instance.storage);
-    if (!storage) {
-      return {
-        order: sanitizeOrder([], instance.columns),
-        hidden: sanitizeHidden([], instance.columns),
-      };
-    }
-
+  function setCookieValue(name, value) {
+    if (!canUseDom()) return;
     try {
-      var raw = storage.getItem(instance.storageKey);
+      var safeName = cookieSafeName(name);
+      var expires = new Date();
+      expires.setFullYear(expires.getFullYear() + 1);
+      document.cookie = safeName + '=' + encodeURIComponent(value) + '; expires=' + expires.toUTCString() + '; path=/; SameSite=Lax';
+    } catch (err) {
+      // Ignore cookie access failures.
+    }
+  }
+
+
+  function getColumnKeyByLabel(columns, labelText) {
+    var target = normalizeWhitespace(labelText).toLowerCase();
+    if (!target) return '';
+    for (var i = 0; i < (Array.isArray(columns) ? columns : []).length; i += 1) {
+      var col = columns[i];
+      if (!col) continue;
+      var colLabel = normalizeWhitespace(col.label).toLowerCase();
+      if (colLabel === target) return String(col.key || '');
+    }
+    return '';
+  }
+
+  function normalizeMoneyTransfersCommentsOrder(instance, order, allowCommentsMoved) {
+    if (!instance || !instance.table || instance.table.id !== 'moneyTransfersTable') return order;
+    if (allowCommentsMoved) return order;
+
+    var commentsKey = getColumnKeyByLabel(instance.columns, 'comments');
+    var actionsKey = getColumnKeyByLabel(instance.columns, 'actions');
+    if (!commentsKey || !actionsKey) return order;
+
+    var next = Array.isArray(order) ? order.slice() : [];
+    var commentsIndex = next.indexOf(commentsKey);
+    var actionsIndex = next.indexOf(actionsKey);
+    if (commentsIndex === -1 || actionsIndex === -1) return order;
+    if (commentsIndex === actionsIndex - 1) return order;
+
+    next.splice(commentsIndex, 1);
+    actionsIndex = next.indexOf(actionsKey);
+    if (actionsIndex === -1) return order;
+    next.splice(actionsIndex, 0, commentsKey);
+    return next;
+  }
+
+  function loadState(instance) {
+    try {
+      var raw = getCookieValue(instance.storageKey);
       if (!raw) {
         return {
           order: sanitizeOrder([], instance.columns),
           hidden: sanitizeHidden([], instance.columns),
+          allowCommentsMoved: false,
         };
       }
 
       var parsed = JSON.parse(raw);
+      var allowCommentsMoved = !!(parsed && parsed.allowCommentsMoved);
+      var order = sanitizeOrder(parsed && parsed.order, instance.columns);
+      order = normalizeMoneyTransfersCommentsOrder(instance, order, allowCommentsMoved);
       return {
-        order: sanitizeOrder(parsed && parsed.order, instance.columns),
+        order: order,
         hidden: sanitizeHidden(parsed && parsed.hidden, instance.columns),
+        allowCommentsMoved: allowCommentsMoved,
       };
     } catch (err) {
       return {
         order: sanitizeOrder([], instance.columns),
         hidden: sanitizeHidden([], instance.columns),
+        allowCommentsMoved: false,
       };
     }
   }
 
   function saveState(instance) {
-    var storage = getLocalStorage(instance.storage);
-    if (!storage) return;
-
     var payload = {
       order: sanitizeOrder(instance.state.order, instance.columns),
       hidden: sanitizeHidden(instance.state.hidden, instance.columns),
+      allowCommentsMoved: !!instance.allowCommentsMoved,
     };
-
-    try {
-      storage.setItem(instance.storageKey, JSON.stringify(payload));
-    } catch (err) {
-      // Ignore localStorage quota and private mode failures.
-    }
+    setCookieValue(instance.storageKey, JSON.stringify(payload));
   }
 
   function rowCells(row) {
@@ -324,9 +403,32 @@
 
     if (next.length !== cells.length) return;
 
+    // Only move cells if they are already out of order. Skipping unnecessary
+    // appendChild calls prevents the MutationObserver from firing and causing
+    // an infinite RAF loop when the order hasn't changed.
+    var needsReorder = false;
+    for (var n = 0; n < next.length; n += 1) {
+      if (cells[n] !== next[n]) { needsReorder = true; break; }
+    }
+
     for (var k = 0; k < next.length; k += 1) {
-      row.appendChild(next[k]);
+      if (needsReorder) row.appendChild(next[k]);
       setCellVisibilityFromState(instance, next[k]);
+    }
+  }
+
+  function redistributeEqualWidths(instance) {
+    if (!instance || !instance.table) return;
+    if (instance.table.getAttribute('data-equal-columns') !== 'true') return;
+    var headerRow = getHeaderRow(instance.table);
+    if (!headerRow) return;
+    var cells = rowCells(headerRow);
+    var visible = cells.filter(function (c) { return !c.classList.contains('tableEnhanceCell--hidden'); });
+    var count = visible.length;
+    if (count === 0) return;
+    var pct = (100 / count).toFixed(4) + '%';
+    for (var i = 0; i < cells.length; i += 1) {
+      cells[i].style.width = cells[i].classList.contains('tableEnhanceCell--hidden') ? '' : pct;
     }
   }
 
@@ -352,6 +454,7 @@
         }
       }
 
+      redistributeEqualWidths(instance);
       updatePanelUi(instance);
     } finally {
       instance.syncing = false;
@@ -422,6 +525,7 @@
     var table = instance.table;
     var host = table.closest('.table-wrap') || table.parentElement;
     if (!host) return null;
+    var hidePanelGrip = !!(table && (table.id === 'usersTable' || table.id === 'notificationsTable'));
 
     // Full-screen backdrop overlay
     var overlay = document.createElement('div');
@@ -501,7 +605,8 @@
       var grip = document.createElement('span');
       grip.className = 'tableEnhanceItem__grip';
       grip.setAttribute('aria-hidden', 'true');
-      grip.draggable = true;
+      grip.draggable = !col.locked;
+      if (col.locked) grip.classList.add('tableEnhanceItem__grip--disabled');
 
       // Eye toggle button
       var eyeBtn = document.createElement('button');
@@ -527,7 +632,7 @@
       var dot = document.createElement('span');
       dot.className = 'tableEnhanceItem__dot';
 
-      item.appendChild(grip);
+      if (!col.locked && !hidePanelGrip) item.appendChild(grip);
       item.appendChild(eyeBtn);
       item.appendChild(labelSpan);
       item.appendChild(dot);
@@ -548,7 +653,30 @@
 
         instance.state.hidden = sanitizeHidden(Array.from(nextHidden), instance.columns);
         saveState(instance);
-        syncTableToState(instance);
+
+        // Apply visibility directly via CSS class only — no DOM restructuring,
+        // so the MutationObserver never fires and there is no RAF loop.
+        // This keeps the panel open and responsive for successive toggles.
+        var tbl = instance.table;
+        var sections = [tbl.tHead];
+        for (var bi = 0; bi < tbl.tBodies.length; bi += 1) sections.push(tbl.tBodies[bi]);
+        if (tbl.tFoot) sections.push(tbl.tFoot);
+        for (var si = 0; si < sections.length; si += 1) {
+          if (!sections[si]) continue;
+          for (var ri = 0; ri < sections[si].rows.length; ri += 1) {
+            var cells = rowCells(sections[si].rows[ri]);
+            for (var ci = 0; ci < cells.length; ci += 1) {
+              if (cells[ci].dataset && cells[ci].dataset.teColKey === key) {
+                setCellVisibilityFromState(instance, cells[ci]);
+              }
+            }
+          }
+        }
+
+        // Update this eye button's visual state directly.
+        var isNowHidden = instance.state.hidden.indexOf(key) !== -1;
+        target.setAttribute('aria-pressed', String(!isNowHidden));
+        target.classList.toggle('tableEnhanceItem__eye--off', isNowHidden);
       });
     }
 
@@ -563,9 +691,34 @@
     });
 
     controls.appendChild(button);
-    host.insertBefore(controls, table);
 
-    bindPanelDragAndDrop(instance, list);
+    // Prefer placing the Columns control next to the global search input.
+    // Default: immediately to the right of search. Ledger: to the left.
+    var placedNearSearch = false;
+    var card = table.closest('.card');
+    var searchWrap = card ? card.querySelector('.list-actions .list-search') : null;
+    if (searchWrap && searchWrap.parentElement) {
+      var searchParent = searchWrap.parentElement;
+      var searchInput = searchWrap.querySelector('input[id$="GlobalSearch"]');
+      var isLedgerSearch = !!(searchInput && searchInput.id === 'gsLedgerGlobalSearch');
+
+      controls.classList.add('tableEnhanceControls--inlineSearch');
+      if (isLedgerSearch) {
+        controls.classList.add('tableEnhanceControls--ledgerLeft');
+        searchParent.insertBefore(controls, searchWrap);
+      } else if (searchWrap.nextSibling) {
+        searchParent.insertBefore(controls, searchWrap.nextSibling);
+      } else {
+        searchParent.appendChild(controls);
+      }
+      placedNearSearch = true;
+    }
+
+    if (!placedNearSearch) {
+      host.insertBefore(controls, table);
+    }
+
+    if (!hidePanelGrip) bindPanelDragAndDrop(instance, list);
 
     button.addEventListener('click', function () {
       if (panel.hasAttribute('hidden')) openPanel(instance);
@@ -622,6 +775,11 @@
       if (!item) return;
       var key = String(item.getAttribute('data-col-key') || '');
       if (!key) return;
+      var col = instance.columnsByKey[key];
+      if (!col || col.locked) {
+        event.preventDefault();
+        return;
+      }
       panelDragKey = key;
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
@@ -635,6 +793,11 @@
       if (!item || !list.contains(item)) return;
       var key = String(item.getAttribute('data-col-key') || '');
       if (!key) return;
+      var col = instance.columnsByKey[key];
+      if (!col || col.locked) {
+        clearPanelDropMarkers();
+        return;
+      }
       event.preventDefault();
       clearPanelDropMarkers();
       var rect = item.getBoundingClientRect();
@@ -656,8 +819,17 @@
       clearPanelDropMarkers();
       var dragging = list.querySelector('.tableEnhancePanelDragging');
       if (dragging) dragging.classList.remove('tableEnhancePanelDragging');
+      var fromCol = instance.columnsByKey[fromKey];
+      var toCol = instance.columnsByKey[toKey];
+      if (!fromCol || fromCol.locked || !toCol || toCol.locked) return;
       if (!fromKey || !toKey || fromKey === toKey) return;
       instance.state.order = sanitizeOrder(moveOrderKey(instance.state.order, fromKey, toKey, panelPlaceAfter), instance.columns);
+
+      var commentsKey = getColumnKeyByLabel(instance.columns, 'comments');
+      if (commentsKey && (fromKey === commentsKey || toKey === commentsKey)) {
+        instance.allowCommentsMoved = true;
+      }
+
       saveState(instance);
       syncTableToState(instance);
     });
@@ -685,20 +857,31 @@
   function bindDragAndDrop(instance) {
     var headerRow = getHeaderRow(instance.table);
     if (!headerRow) return;
+    var hideDragGrip = !!(instance.table && (instance.table.id === 'usersTable' || instance.table.id === 'notificationsTable'));
 
     for (var i = 0; i < headerRow.cells.length; i += 1) {
       var th = headerRow.cells[i];
       if (!(th.tagName === 'TH' || th.tagName === 'TD')) continue;
       if (!th.dataset.teColKey) th.dataset.teColKey = instance.columns[i].key;
-      th.draggable = true;
+      var key = String(th.dataset.teColKey || '');
+      var col = instance.columnsByKey[key];
+      var isLocked = !!(col && col.locked);
+      th.draggable = !isLocked && !hideDragGrip;
       th.classList.add('tableEnhanceHeaderCell');
-      if (!th.querySelector('.tableEnhanceDragHandle')) {
+      if (!isLocked && !hideDragGrip && !th.querySelector('.tableEnhanceDragHandle')) {
         var handle = document.createElement('span');
         handle.className = 'tableEnhanceDragHandle';
         handle.setAttribute('aria-hidden', 'true');
         th.insertBefore(handle, th.firstChild);
+      } else if (isLocked || hideDragGrip) {
+        var existingHandle = th.querySelector('.tableEnhanceDragHandle');
+        if (existingHandle && existingHandle.parentElement) {
+          existingHandle.parentElement.removeChild(existingHandle);
+        }
       }
     }
+
+    if (hideDragGrip) return;
 
     headerRow.addEventListener('dragstart', function (event) {
       var th = event.target && event.target.closest ? event.target.closest('th,td') : null;
@@ -706,6 +889,11 @@
 
       var key = String(th.dataset.teColKey || '');
       if (!key) return;
+      var col = instance.columnsByKey[key];
+      if (!col || col.locked) {
+        event.preventDefault();
+        return;
+      }
 
       instance.drag.fromKey = key;
       if (event.dataTransfer) {
@@ -724,6 +912,11 @@
       if (!th || !headerRow.contains(th)) return;
       var key = String(th.dataset.teColKey || '');
       if (!key) return;
+      var col = instance.columnsByKey[key];
+      if (!col || col.locked) {
+        clearDropMarkers(headerRow);
+        return;
+      }
 
       event.preventDefault();
       clearDropMarkers(headerRow);
@@ -747,6 +940,12 @@
 
       var target = event.target && event.target.closest ? event.target.closest('th,td') : null;
       var toKey = target ? String(target.dataset.teColKey || '') : String(instance.drag.toKey || '');
+      var fromCol = instance.columnsByKey[fromKey];
+      var toCol = instance.columnsByKey[toKey];
+      if (!fromCol || fromCol.locked || !toCol || toCol.locked) {
+        clearDropMarkers(headerRow);
+        return;
+      }
       if (!fromKey || !toKey || fromKey === toKey) {
         clearDropMarkers(headerRow);
         return;
@@ -759,6 +958,12 @@
       }
 
       instance.state.order = sanitizeOrder(moveOrderKey(instance.state.order, fromKey, toKey, placeAfter), instance.columns);
+
+      var commentsKey = getColumnKeyByLabel(instance.columns, 'comments');
+      if (commentsKey && (fromKey === commentsKey || toKey === commentsKey)) {
+        instance.allowCommentsMoved = true;
+      }
+
       saveState(instance);
       syncTableToState(instance);
       clearDropMarkers(headerRow);
@@ -861,6 +1066,8 @@
     if (!normalizeBodyAndFooter(instance)) return null;
 
     instance.state = loadState(instance);
+    instance.allowCommentsMoved = !!instance.state.allowCommentsMoved;
+    delete instance.state.allowCommentsMoved;
     instance.controls = buildControls(instance);
     bindDragAndDrop(instance);
     syncTableToState(instance);

@@ -46,6 +46,7 @@
 
   const APP_TAB_TITLE = 'ACGL - FMS';
   const APP_VERSION = '1.0.0';
+  const TABLE_ENHANCER_FILE = 'table-enhancements.js';
 
   function applyAppTabTitle() {
     setBrowserTabTitle(APP_TAB_TITLE);
@@ -89,6 +90,90 @@
 
   applyAppTabTitle();
   applyAppVersion();
+
+  function readAssetVersionFromScript(fileName) {
+    const target = String(fileName || '').trim();
+    if (!target) return '';
+    try {
+      const scripts = Array.from(document.querySelectorAll('script[src]'));
+      for (let i = scripts.length - 1; i >= 0; i -= 1) {
+        const src = String(scripts[i].getAttribute('src') || '').trim();
+        if (!src) continue;
+        const parsed = new URL(src, window.location.href);
+        const path = String(parsed.pathname || '');
+        if (!path.endsWith(`/${target}`) && path !== `/${target}` && path !== target) continue;
+        const v = String(parsed.searchParams.get('v') || '').trim();
+        if (v) return v;
+      }
+    } catch {
+      // ignore
+    }
+    return '';
+  }
+
+  function loadSharedTableEnhancer() {
+    if (window.ACGLTableEnhancer && typeof window.ACGLTableEnhancer.initAllTables === 'function') {
+      return Promise.resolve(window.ACGLTableEnhancer);
+    }
+
+    if (window.__acglTableEnhancerLoaderPromise) {
+      return window.__acglTableEnhancerLoaderPromise;
+    }
+
+    window.__acglTableEnhancerLoaderPromise = new Promise((resolve) => {
+      try {
+        const existing = Array.from(document.querySelectorAll('script[src]')).find((el) => {
+          const src = String(el.getAttribute('src') || '').trim();
+          return src.includes(TABLE_ENHANCER_FILE);
+        });
+        if (existing) {
+          existing.addEventListener('load', () => resolve(window.ACGLTableEnhancer || null), { once: true });
+          existing.addEventListener('error', () => resolve(null), { once: true });
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.defer = true;
+        const version = readAssetVersionFromScript('app.js');
+        script.src = version
+          ? `${TABLE_ENHANCER_FILE}?v=${encodeURIComponent(version)}`
+          : TABLE_ENHANCER_FILE;
+        script.addEventListener('load', () => resolve(window.ACGLTableEnhancer || null), { once: true });
+        script.addEventListener('error', () => resolve(null), { once: true });
+        document.head.appendChild(script);
+      } catch {
+        resolve(null);
+      }
+    });
+
+    return window.__acglTableEnhancerLoaderPromise;
+  }
+
+  async function initSharedTableEnhancements() {
+    if (window.__acglSharedTableEnhancementsBound) return;
+
+    const enhancer = await loadSharedTableEnhancer();
+    if (!enhancer || typeof enhancer.initAllTables !== 'function') return;
+
+    enhancer.initAllTables({
+      selector: 'table.table:not([data-table-enhance="off"]), table[data-table-enhance="on"]',
+    });
+
+    const refresh = () => {
+      if (enhancer && typeof enhancer.refreshAll === 'function') enhancer.refreshAll();
+    };
+
+    window.addEventListener('resize', refresh);
+
+    const navToggleBtn = document.getElementById('navToggle');
+    if (navToggleBtn) {
+      navToggleBtn.addEventListener('click', () => {
+        window.setTimeout(refresh, 220);
+      });
+    }
+
+    window.__acglSharedTableEnhancementsBound = true;
+  }
 
   function repairJsonEscapes(textRaw) {
     const text = String(textRaw ?? '');
@@ -26457,6 +26542,8 @@
   if (mtBuilderTbody) {
     initMoneyTransferBuilderPage();
   }
+
+  await initSharedTableEnhancements();
 
   // ---- Itemize page logic ----
 

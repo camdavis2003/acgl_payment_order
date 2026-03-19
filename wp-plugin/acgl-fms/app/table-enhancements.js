@@ -13,6 +13,9 @@
   var INSTANCE_COUNTER = { value: 0 };
   var instances = new Map();
 
+  var EYE_OPEN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true" focusable="false"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true" focusable="false"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
   function normalizeWhitespace(text) {
     return String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
   }
@@ -373,39 +376,45 @@
     if (!instance || !instance.controls || !instance.controls.panel || !instance.controls.button) return;
     instance.controls.panel.setAttribute('hidden', '');
     instance.controls.button.setAttribute('aria-expanded', 'false');
+    if (instance.controls.overlay) instance.controls.overlay.setAttribute('hidden', '');
   }
 
   function openPanel(instance) {
     if (!instance || !instance.controls || !instance.controls.panel || !instance.controls.button) return;
     instance.controls.panel.removeAttribute('hidden');
     instance.controls.button.setAttribute('aria-expanded', 'true');
+    if (instance.controls.overlay) instance.controls.overlay.removeAttribute('hidden');
+    if (instance.controls.closeBtn && instance.controls.closeBtn.focus) {
+      instance.controls.closeBtn.focus();
+    }
   }
 
   function updatePanelUi(instance) {
     if (!instance || !instance.controls || !instance.controls.list) return;
     var list = instance.controls.list;
 
-    var labelsByKey = {};
+    var itemsByKey = {};
     for (var i = 0; i < list.children.length; i += 1) {
-      var label = list.children[i];
-      var key = String(label.getAttribute('data-col-key') || '');
-      if (key) labelsByKey[key] = label;
+      var item = list.children[i];
+      var key = String(item.getAttribute('data-col-key') || '');
+      if (key) itemsByKey[key] = item;
     }
 
     for (var orderIdx = 0; orderIdx < instance.state.order.length; orderIdx += 1) {
       var colKey = instance.state.order[orderIdx];
-      if (labelsByKey[colKey]) list.appendChild(labelsByKey[colKey]);
+      if (itemsByKey[colKey]) list.appendChild(itemsByKey[colKey]);
     }
 
-    var checkboxes = list.querySelectorAll('input[type="checkbox"][data-col-key]');
-    for (var cbIdx = 0; cbIdx < checkboxes.length; cbIdx += 1) {
-      var checkbox = checkboxes[cbIdx];
-      var key = String(checkbox.getAttribute('data-col-key') || '');
+    var eyeBtns = list.querySelectorAll('.tableEnhanceItem__eye[data-col-key]');
+    for (var btnIdx = 0; btnIdx < eyeBtns.length; btnIdx += 1) {
+      var btn = eyeBtns[btnIdx];
+      var key = String(btn.getAttribute('data-col-key') || '');
       var col = instance.columnsByKey[key];
       if (!col) continue;
       var isHidden = instance.state.hidden.indexOf(key) !== -1;
-      checkbox.checked = !isHidden;
-      checkbox.disabled = !!col.locked;
+      btn.setAttribute('aria-pressed', String(!isHidden));
+      btn.disabled = !!col.locked;
+      btn.classList.toggle('tableEnhanceItem__eye--off', isHidden);
     }
   }
 
@@ -413,6 +422,12 @@
     var table = instance.table;
     var host = table.closest('.table-wrap') || table.parentElement;
     if (!host) return null;
+
+    // Full-screen backdrop overlay
+    var overlay = document.createElement('div');
+    overlay.className = 'tableEnhanceOverlay';
+    overlay.setAttribute('hidden', '');
+    document.body.appendChild(overlay);
 
     var controls = document.createElement('div');
     controls.className = 'tableEnhanceControls';
@@ -427,58 +442,108 @@
     button.setAttribute('aria-expanded', 'false');
     button.setAttribute('aria-controls', panelId);
 
+    // Modal panel – appended to body so it sits above everything
     var panel = document.createElement('div');
     panel.className = 'tableEnhancePanel';
     panel.id = panelId;
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Column settings');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Manage Columns');
     panel.setAttribute('hidden', '');
+    panel.tabIndex = -1;
+    document.body.appendChild(panel);
 
-    var title = document.createElement('p');
+    // Header row: title + close button
+    var head = document.createElement('div');
+    head.className = 'tableEnhancePanel__head';
+
+    var title = document.createElement('h2');
     title.className = 'tableEnhancePanel__title';
-    title.textContent = 'Show columns';
-    panel.appendChild(title);
+    title.textContent = 'Manage Columns';
 
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'tableEnhancePanel__close';
+    closeBtn.setAttribute('aria-label', 'Close column settings');
+    closeBtn.innerHTML = '&times;';
+
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    panel.appendChild(head);
+
+    // Subheader: "Column Visibility" / "Drag to reorder"
+    var subhead = document.createElement('div');
+    subhead.className = 'tableEnhancePanel__subhead';
+
+    var subLeft = document.createElement('span');
+    subLeft.textContent = 'Column Visibility';
+
+    var subRight = document.createElement('span');
+    subRight.textContent = 'Drag to reorder';
+
+    subhead.appendChild(subLeft);
+    subhead.appendChild(subRight);
+    panel.appendChild(subhead);
+
+    // Scrollable column list
     var list = document.createElement('div');
     list.className = 'tableEnhanceList';
 
     for (var i = 0; i < instance.columns.length; i += 1) {
       var col = instance.columns[i];
-      var id = 'table-col-' + slugify(instance.instanceKey + '-' + col.key, 'col-' + String(i + 1));
 
-      var label = document.createElement('label');
-      label.className = 'tableEnhanceCheck';
-      label.setAttribute('data-col-key', col.key);
-      label.setAttribute('for', id);
+      var item = document.createElement('div');
+      item.className = 'tableEnhanceItem';
+      item.setAttribute('data-col-key', col.key);
 
-      var input = document.createElement('input');
-      input.type = 'checkbox';
-      input.id = id;
-      input.setAttribute('data-col-key', col.key);
-      input.checked = instance.state.hidden.indexOf(col.key) === -1;
-      input.disabled = !!col.locked;
+      // 6-dot grip handle — only this element is draggable so clicks on
+      // the eye button are never swallowed by the browser's drag logic.
+      var grip = document.createElement('span');
+      grip.className = 'tableEnhanceItem__grip';
+      grip.setAttribute('aria-hidden', 'true');
+      grip.draggable = true;
 
-      var text = document.createElement('span');
-      text.textContent = col.label;
+      // Eye toggle button
+      var eyeBtn = document.createElement('button');
+      eyeBtn.type = 'button';
+      eyeBtn.className = 'tableEnhanceItem__eye';
+      eyeBtn.setAttribute('data-col-key', col.key);
+      eyeBtn.setAttribute('aria-label', 'Toggle ' + col.label + ' visibility');
+      var isColHidden = instance.state.hidden.indexOf(col.key) !== -1;
+      eyeBtn.setAttribute('aria-pressed', String(!isColHidden));
+      eyeBtn.disabled = !!col.locked;
+      eyeBtn.classList.toggle('tableEnhanceItem__eye--off', isColHidden);
+      // Both SVG states are embedded once at creation time. updatePanelUi
+      // only toggles the --off class — no innerHTML replacement ever happens,
+      // so the click event target is never detached mid-bubble.
+      eyeBtn.innerHTML =
+        '<span class="eye-icon--on" aria-hidden="true">' + EYE_OPEN_SVG + '</span>' +
+        '<span class="eye-icon--off" aria-hidden="true">' + EYE_OFF_SVG + '</span>';
 
-      label.appendChild(input);
-      label.appendChild(text);
-      list.appendChild(label);
+      var labelSpan = document.createElement('span');
+      labelSpan.className = 'tableEnhanceItem__label';
+      labelSpan.textContent = col.label;
 
-      input.addEventListener('change', function (event) {
+      var dot = document.createElement('span');
+      dot.className = 'tableEnhanceItem__dot';
+
+      item.appendChild(grip);
+      item.appendChild(eyeBtn);
+      item.appendChild(labelSpan);
+      item.appendChild(dot);
+      list.appendChild(item);
+
+      eyeBtn.addEventListener('click', function (event) {
         var target = event.currentTarget;
         if (!target) return;
         var key = String(target.getAttribute('data-col-key') || '');
         if (!key) return;
 
         var column = instance.columnsByKey[key];
-        if (!column || column.locked) {
-          target.checked = true;
-          return;
-        }
+        if (!column || column.locked) return;
 
         var nextHidden = new Set(instance.state.hidden);
-        if (target.checked) nextHidden.delete(key);
+        if (nextHidden.has(key)) nextHidden.delete(key);
         else nextHidden.add(key);
 
         instance.state.hidden = sanitizeHidden(Array.from(nextHidden), instance.columns);
@@ -489,27 +554,32 @@
 
     panel.appendChild(list);
 
-    var hint = document.createElement('p');
-    hint.className = 'tableEnhancePanel__hint';
-    hint.textContent = 'Tip: drag table headers to reorder columns.';
-    panel.appendChild(hint);
+    // Stop clicks inside the panel from bubbling to document-level handlers.
+    // Without this, any app-level "close on outside click" handler that checks
+    // e.target.contains() would mis-fire because updatePanelUi moves DOM nodes
+    // during the same event bubble.
+    panel.addEventListener('click', function (event) {
+      event.stopPropagation();
+    });
 
     controls.appendChild(button);
-    controls.appendChild(panel);
-
     host.insertBefore(controls, table);
+
+    bindPanelDragAndDrop(instance, list);
 
     button.addEventListener('click', function () {
       if (panel.hasAttribute('hidden')) openPanel(instance);
       else closePanel(instance);
     });
 
-    document.addEventListener('click', function (event) {
-      if (!panel || panel.hasAttribute('hidden')) return;
-      var target = event.target;
-      if (!target) return;
-      if (controls.contains(target)) return;
+    closeBtn.addEventListener('click', function () {
       closePanel(instance);
+      if (button.focus) button.focus();
+    });
+
+    overlay.addEventListener('click', function () {
+      closePanel(instance);
+      if (button.focus) button.focus();
     });
 
     document.addEventListener('keydown', function (event) {
@@ -523,8 +593,83 @@
       root: controls,
       button: button,
       panel: panel,
+      overlay: overlay,
+      closeBtn: closeBtn,
       list: list,
     };
+  }
+
+  function bindPanelDragAndDrop(instance, list) {
+    var panelDragKey = '';
+    var panelDragToKey = '';
+    var panelPlaceAfter = false;
+
+    function clearPanelDropMarkers() {
+      var items = list.querySelectorAll('.tableEnhanceItem');
+      for (var k = 0; k < items.length; k += 1) {
+        items[k].classList.remove('tableEnhancePanelDropBefore', 'tableEnhancePanelDropAfter');
+      }
+    }
+
+    list.addEventListener('dragstart', function (event) {
+      // Only allow drags initiated from the grip handle.
+      var grip = event.target && event.target.closest ? event.target.closest('.tableEnhanceItem__grip') : null;
+      if (!grip || !list.contains(grip)) {
+        event.preventDefault();
+        return;
+      }
+      var item = grip.closest('.tableEnhanceItem');
+      if (!item) return;
+      var key = String(item.getAttribute('data-col-key') || '');
+      if (!key) return;
+      panelDragKey = key;
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        try { event.dataTransfer.setData('text/plain', key); } catch (err) {}
+      }
+      item.classList.add('tableEnhancePanelDragging');
+    });
+
+    list.addEventListener('dragover', function (event) {
+      var item = event.target && event.target.closest ? event.target.closest('.tableEnhanceItem') : null;
+      if (!item || !list.contains(item)) return;
+      var key = String(item.getAttribute('data-col-key') || '');
+      if (!key) return;
+      event.preventDefault();
+      clearPanelDropMarkers();
+      var rect = item.getBoundingClientRect();
+      panelPlaceAfter = event.clientY > rect.top + rect.height / 2;
+      item.classList.add(panelPlaceAfter ? 'tableEnhancePanelDropAfter' : 'tableEnhancePanelDropBefore');
+      panelDragToKey = key;
+    });
+
+    list.addEventListener('dragleave', function (event) {
+      var related = event.relatedTarget;
+      if (related && list.contains(related)) return;
+      clearPanelDropMarkers();
+    });
+
+    list.addEventListener('drop', function (event) {
+      event.preventDefault();
+      var fromKey = panelDragKey;
+      var toKey = panelDragToKey;
+      clearPanelDropMarkers();
+      var dragging = list.querySelector('.tableEnhancePanelDragging');
+      if (dragging) dragging.classList.remove('tableEnhancePanelDragging');
+      if (!fromKey || !toKey || fromKey === toKey) return;
+      instance.state.order = sanitizeOrder(moveOrderKey(instance.state.order, fromKey, toKey, panelPlaceAfter), instance.columns);
+      saveState(instance);
+      syncTableToState(instance);
+    });
+
+    list.addEventListener('dragend', function () {
+      panelDragKey = '';
+      panelDragToKey = '';
+      panelPlaceAfter = false;
+      clearPanelDropMarkers();
+      var dragging = list.querySelector('.tableEnhancePanelDragging');
+      if (dragging) dragging.classList.remove('tableEnhancePanelDragging');
+    });
   }
 
   function clearDropMarkers(headerRow) {
@@ -547,6 +692,12 @@
       if (!th.dataset.teColKey) th.dataset.teColKey = instance.columns[i].key;
       th.draggable = true;
       th.classList.add('tableEnhanceHeaderCell');
+      if (!th.querySelector('.tableEnhanceDragHandle')) {
+        var handle = document.createElement('span');
+        handle.className = 'tableEnhanceDragHandle';
+        handle.setAttribute('aria-hidden', 'true');
+        th.insertBefore(handle, th.firstChild);
+      }
     }
 
     headerRow.addEventListener('dragstart', function (event) {
@@ -727,6 +878,12 @@
         if (instance.observerRaf) cancelAnimationFrame(instance.observerRaf);
         if (instance.controls && instance.controls.root && instance.controls.root.parentElement) {
           instance.controls.root.parentElement.removeChild(instance.controls.root);
+        }
+        if (instance.controls && instance.controls.panel && instance.controls.panel.parentElement) {
+          instance.controls.panel.parentElement.removeChild(instance.controls.panel);
+        }
+        if (instance.controls && instance.controls.overlay && instance.controls.overlay.parentElement) {
+          instance.controls.overlay.parentElement.removeChild(instance.controls.overlay);
         }
         instances.delete(table);
       },

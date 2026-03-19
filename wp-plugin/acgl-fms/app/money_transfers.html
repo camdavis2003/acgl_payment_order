@@ -116,6 +116,7 @@
               <table
                 id="moneyTransfersTable"
                 class="table"
+                data-table-enhance="off"
                 aria-describedby="money-transfers-help"
               >
                 <caption id="money-transfers-help" class="sr-only">
@@ -124,14 +125,22 @@
                 <thead>
                   <tr>
                     <th scope="col" aria-label="Delete"></th>
-                    <th scope="col">Money Transfer No.</th>
-                    <th scope="col">MT Date</th>
-                    <th scope="col">GS Verified</th>
-                    <th scope="col">Grand Secretary Name</th>
-                    <th scope="col">GT Verified</th>
-                    <th scope="col">Grand Treasurer Name</th>
-                    <th scope="col">Comments</th>
-                    <th scope="col">Actions</th>
+                    <th scope="col" data-sort-key="moneyTransferNo">
+                      Money Transfer No.
+                    </th>
+                    <th scope="col" data-sort-key="mtDate">MT Date</th>
+                    <th scope="col" data-sort-key="gsVerified">GS Verified</th>
+                    <th scope="col" data-sort-key="grandSecretaryName">
+                      Grand Secretary Name
+                    </th>
+                    <th scope="col" data-sort-key="gtVerified">GT Verified</th>
+                    <th scope="col" data-sort-key="grandTreasurerName">
+                      Grand Treasurer Name
+                    </th>
+                    <th scope="col" data-sort-key="comments">Comments</th>
+                    <th scope="col" class="col-actions" data-column-lock="true">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody id="moneyTransfersTbody">

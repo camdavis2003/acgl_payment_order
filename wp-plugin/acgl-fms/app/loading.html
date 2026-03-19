@@ -2,6 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <script>
+      try {
+        var __t = localStorage.getItem("payment_order_theme");
+        if (__t === "dark" || __t === "light")
+          document.documentElement.setAttribute("data-theme", __t);
+      } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
 
@@ -182,10 +189,10 @@
           // Some hosts block/handle HEAD oddly for static plugin files, so try HEAD then GET.
           try {
             const head = await fetch(target, {
-              method: 'HEAD',
-              cache: 'no-store',
-              credentials: 'same-origin',
-              redirect: 'follow',
+              method: "HEAD",
+              cache: "no-store",
+              credentials: "same-origin",
+              redirect: "follow",
             });
             if (head && head.ok) return true;
           } catch (e) {
@@ -194,10 +201,10 @@
 
           try {
             const res = await fetch(target, {
-              method: 'GET',
-              cache: 'no-store',
-              credentials: 'same-origin',
-              redirect: 'follow',
+              method: "GET",
+              cache: "no-store",
+              credentials: "same-origin",
+              redirect: "follow",
             });
             return Boolean(res && res.ok);
           } catch (e) {
@@ -212,7 +219,9 @@
           while (attempt < maxAttempts) {
             // Small stagger; if the server/CDN is mid-deploy, this avoids surfacing a hard error page.
             const backoff = 350 * Math.pow(1.5, attempt);
-            await new Promise((r) => window.setTimeout(r, attempt === 0 ? delayMs : backoff));
+            await new Promise((r) =>
+              window.setTimeout(r, attempt === 0 ? delayMs : backoff),
+            );
 
             const ok = await preflightOnce();
             if (ok) {

@@ -42,7 +42,24 @@ That script copies the current static app files into `wp-plugin/acgl-fms/app/`.
 Copy these files from the repo root into `wp-plugin/acgl-fms/app/`:
 - `index.html`, `menu.html`, `budget.html`, `budget_dashboard.html`, `income.html`, `reconciliation.html`, `grand_secretary_ledger.html`, `settings.html`, `itemize.html`, `loading.html`
 - `app.js`
+- `table-enhancements.js`
 - `styles.css`
+
+## Table enhancement system (shared)
+The app includes a reusable table enhancement module that applies to eligible tables and adds:
+- a `Columns` panel to hide/show columns
+- drag-and-drop column reordering from table headers
+- per-table persistence using `localStorage`
+
+Default behavior:
+- Tables with class `table` are enhanced automatically.
+- Use `data-table-enhance="off"` on a table to opt out.
+- Use `data-table-enhance="on"` on non-`.table` tables to opt in.
+
+Optional attributes:
+- `data-table-instance="unique-key"` for a stable storage key per table instance
+- `data-column-lock="1"` on a `th` to make that column always visible
+- `data-column-label="Label"` on a `th` to override the label shown in the `Columns` panel
 
 ## REST API (KV store)
 - `GET /wp-json/acgl-fms/v1/kv` → returns `{ items: [{k,v}, ...] }`

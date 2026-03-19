@@ -2,9 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>try{var __t=localStorage.getItem('payment_order_theme');if(__t==='dark'||__t==='light')document.documentElement.setAttribute('data-theme',__t);}catch(e){}</script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=b5baff9-20260316135615" />
+    <link rel="stylesheet" href="styles.css?v=3759ec8-20260319200320" />
   </head>
   <body data-page="wise-eur">
     <div class="appShell appShell--navClosed" data-app-shell>
@@ -170,6 +171,7 @@
               <table
                 id="wiseEurTable"
                 class="table"
+                data-equal-columns="true"
                 aria-describedby="wise-eur-help"
               >
                 <caption id="wise-eur-help" class="sr-only">
@@ -194,8 +196,7 @@
                       aria-sort="none"
                       data-sort-key="datePL"
                     >
-                      Action<br />
-                      Date
+                      Action Date
                     </th>
                     <th
                       scope="col"
@@ -354,6 +355,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=b5baff9-20260316135615" defer></script>
+    <script src="app.js?v=3759ec8-20260319200320" defer></script>
   </body>
 </html>

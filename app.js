@@ -46,6 +46,7 @@
 
   const APP_TAB_TITLE = 'ACGL - FMS';
   const APP_VERSION = '1.0.0';
+  const TABLE_ENHANCER_FILE = 'table-enhancements.js';
 
   function applyAppTabTitle() {
     setBrowserTabTitle(APP_TAB_TITLE);
@@ -89,6 +90,90 @@
 
   applyAppTabTitle();
   applyAppVersion();
+
+  function readAssetVersionFromScript(fileName) {
+    const target = String(fileName || '').trim();
+    if (!target) return '';
+    try {
+      const scripts = Array.from(document.querySelectorAll('script[src]'));
+      for (let i = scripts.length - 1; i >= 0; i -= 1) {
+        const src = String(scripts[i].getAttribute('src') || '').trim();
+        if (!src) continue;
+        const parsed = new URL(src, window.location.href);
+        const path = String(parsed.pathname || '');
+        if (!path.endsWith(`/${target}`) && path !== `/${target}` && path !== target) continue;
+        const v = String(parsed.searchParams.get('v') || '').trim();
+        if (v) return v;
+      }
+    } catch {
+      // ignore
+    }
+    return '';
+  }
+
+  function loadSharedTableEnhancer() {
+    if (window.ACGLTableEnhancer && typeof window.ACGLTableEnhancer.initAllTables === 'function') {
+      return Promise.resolve(window.ACGLTableEnhancer);
+    }
+
+    if (window.__acglTableEnhancerLoaderPromise) {
+      return window.__acglTableEnhancerLoaderPromise;
+    }
+
+    window.__acglTableEnhancerLoaderPromise = new Promise((resolve) => {
+      try {
+        const existing = Array.from(document.querySelectorAll('script[src]')).find((el) => {
+          const src = String(el.getAttribute('src') || '').trim();
+          return src.includes(TABLE_ENHANCER_FILE);
+        });
+        if (existing) {
+          existing.addEventListener('load', () => resolve(window.ACGLTableEnhancer || null), { once: true });
+          existing.addEventListener('error', () => resolve(null), { once: true });
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.defer = true;
+        const version = readAssetVersionFromScript('app.js');
+        script.src = version
+          ? `${TABLE_ENHANCER_FILE}?v=${encodeURIComponent(version)}`
+          : TABLE_ENHANCER_FILE;
+        script.addEventListener('load', () => resolve(window.ACGLTableEnhancer || null), { once: true });
+        script.addEventListener('error', () => resolve(null), { once: true });
+        document.head.appendChild(script);
+      } catch {
+        resolve(null);
+      }
+    });
+
+    return window.__acglTableEnhancerLoaderPromise;
+  }
+
+  async function initSharedTableEnhancements() {
+    if (window.__acglSharedTableEnhancementsBound) return;
+
+    const enhancer = await loadSharedTableEnhancer();
+    if (!enhancer || typeof enhancer.initAllTables !== 'function') return;
+
+    enhancer.initAllTables({
+      selector: 'table.table:not([data-table-enhance="off"]), table[data-table-enhance="on"]',
+    });
+
+    const refresh = () => {
+      if (enhancer && typeof enhancer.refreshAll === 'function') enhancer.refreshAll();
+    };
+
+    window.addEventListener('resize', refresh);
+
+    const navToggleBtn = document.getElementById('navToggle');
+    if (navToggleBtn) {
+      navToggleBtn.addEventListener('click', () => {
+        window.setTimeout(refresh, 220);
+      });
+    }
+
+    window.__acglSharedTableEnhancementsBound = true;
+  }
 
   function repairJsonEscapes(textRaw) {
     const text = String(textRaw ?? '');
@@ -15011,9 +15096,21 @@
 
   const moneyTransfersViewState = {
     globalFilter: '',
+    sortKey: null,
+    sortDir: 'asc',
     defaultEmptyText: null,
     canVerify: false,
     canWrite: false,
+  };
+
+  const MONEY_TRANSFERS_COL_TYPES = {
+    moneyTransferNo: 'text',
+    mtDate: 'date',
+    gsVerified: 'boolean',
+    grandSecretaryName: 'text',
+    gtVerified: 'boolean',
+    grandTreasurerName: 'text',
+    comments: 'text',
   };
 
   function ensureMoneyTransfersDefaultEmptyText() {
@@ -15061,6 +15158,103 @@
     return (withIndexRows || []).filter(({ row }) => {
       return cols.some((k) => normalizeTextForSearch(getMoneyTransfersDisplayValueForColumn(row, k)).includes(needle));
     });
+  }
+
+  function getMoneyTransfersSortValueForColumn(row, colKey, colType) {
+    if (!row) return null;
+    if (colType === 'date') {
+      const raw = String(normalizeMoneyTransferDate(row) || '').trim();
+      return raw || null;
+    }
+    if (colType === 'boolean') {
+      if (colKey === 'gsVerified') return row.gsVerified ? 1 : 0;
+      if (colKey === 'gtVerified') return row.gtVerified ? 1 : 0;
+      return 0;
+    }
+    return normalizeTextForSearch(getMoneyTransfersDisplayValueForColumn(row, colKey));
+  }
+
+  function sortMoneyTransfersForView(withIndexRows, sortKey, sortDir) {
+    if (!sortKey) return withIndexRows || [];
+
+    const dir = sortDir === 'desc' ? -1 : 1;
+    const colType = MONEY_TRANSFERS_COL_TYPES[sortKey] || 'text';
+    const sorted = [...(withIndexRows || [])];
+
+    sorted.sort((a, b) => {
+      const av = getMoneyTransfersSortValueForColumn(a.row, sortKey, colType);
+      const bv = getMoneyTransfersSortValueForColumn(b.row, sortKey, colType);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'boolean') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+
+    return sorted;
+  }
+
+  function updateMoneyTransfersSortIndicators() {
+    if (!moneyTransfersTbody) return;
+    const table = moneyTransfersTbody.closest('table');
+    if (!table) return;
+
+    const sortKey = moneyTransfersViewState.sortKey;
+    const sortDir = moneyTransfersViewState.sortDir === 'desc' ? 'desc' : 'asc';
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) {
+        aria = sortDir === 'desc' ? 'descending' : 'ascending';
+      }
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initMoneyTransfersColumnSorting() {
+    if (!moneyTransfersTbody) return;
+    const table = moneyTransfersTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (moneyTransfersViewState.sortKey === colKey) {
+        moneyTransfersViewState.sortDir = moneyTransfersViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        moneyTransfersViewState.sortKey = colKey;
+        moneyTransfersViewState.sortDir = 'asc';
+      }
+      applyMoneyTransfersView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateMoneyTransfersSortIndicators();
   }
 
   function renderMoneyTransfersRows(withIndexRows) {
@@ -15122,15 +15316,17 @@
     if (totalCountEl) totalCountEl.textContent = String((all || []).length);
     const withIndex = (all || []).map((row, index) => ({ row, index }));
     const filtered = filterMoneyTransfersForView(withIndex, moneyTransfersViewState.globalFilter);
+    const sorted = sortMoneyTransfersForView(filtered, moneyTransfersViewState.sortKey, moneyTransfersViewState.sortDir);
 
-    if (normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '' && all.length > 0 && filtered.length === 0) {
+    if (normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
       moneyTransfersEmptyState.textContent = 'No money transfers match your search.';
     } else {
       moneyTransfersEmptyState.textContent = moneyTransfersViewState.defaultEmptyText;
     }
 
-    moneyTransfersEmptyState.hidden = filtered.length > 0;
-    renderMoneyTransfersRows(filtered);
+    moneyTransfersEmptyState.hidden = sorted.length > 0;
+    renderMoneyTransfersRows(sorted);
+    updateMoneyTransfersSortIndicators();
   }
 
   function initMoneyTransfersListPage() {
@@ -15164,6 +15360,7 @@
     const subheadEl = document.querySelector('[data-money-transfers-subhead]');
     if (subheadEl) subheadEl.textContent = `Money transfer tracking for ${year}.`;
     applyAppTabTitle();
+    initMoneyTransfersColumnSorting();
 
     const globalInput = document.getElementById('moneyTransfersGlobalSearch');
     if (globalInput) {
@@ -15442,6 +15639,8 @@
 
   const mtBuilderViewState = {
     globalFilter: '',
+    sortKey: null,
+    sortDir: 'asc',
     defaultEmptyText: null,
     year: null,
     mtDate: '',
@@ -15449,6 +15648,21 @@
     draftNo: '',
     selectedLedgerIds: [],
     canWrite: false,
+  };
+
+  const MT_BUILDER_COL_TYPES = {
+    date: 'date',
+    budgetNumber: 'text',
+    source: 'text',
+    creditorDebtor: 'text',
+    euro: 'number',
+    usd: 'number',
+    details: 'text',
+  };
+
+  const mtEntrySelectViewState = {
+    sortKey: null,
+    sortDir: 'asc',
   };
 
   function ensureMtBuilderDefaultEmptyText() {
@@ -15478,6 +15692,136 @@
     if (!needle) return rows || [];
     const cols = ['date', 'budgetNumber', 'source', 'creditorDebtor', 'euro', 'usd', 'details'];
     return (rows || []).filter((r) => cols.some((k) => normalizeTextForSearch(getMtBuilderDisplayValueForColumn(r, k)).includes(needle)));
+  }
+
+  function getMtBuilderSortValueForColumn(row, colKey, colType) {
+    if (!row) return null;
+    if (colType === 'number') {
+      const raw = colKey === 'euro' ? row.euro : colKey === 'usd' ? row.usd : null;
+      const num = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+      return Number.isFinite(num) ? num : null;
+    }
+    if (colType === 'date') {
+      const raw = String(row.date || '').trim();
+      return raw || null;
+    }
+    return normalizeTextForSearch(getMtBuilderDisplayValueForColumn(row, colKey));
+  }
+
+  function sortMtRowsForView(rows, sortKey, sortDir) {
+    if (!sortKey) return rows || [];
+
+    const dir = sortDir === 'desc' ? -1 : 1;
+    const colType = MT_BUILDER_COL_TYPES[sortKey] || 'text';
+    const withIndex = (rows || []).map((row, index) => ({ row, index }));
+
+    withIndex.sort((a, b) => {
+      const av = getMtBuilderSortValueForColumn(a.row, sortKey, colType);
+      const bv = getMtBuilderSortValueForColumn(b.row, sortKey, colType);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'number') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+
+    return withIndex.map((x) => x.row);
+  }
+
+  function updateMtSortIndicators(table, sortKey, sortDir) {
+    if (!table) return;
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    const dir = sortDir === 'desc' ? 'desc' : 'asc';
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) aria = dir === 'desc' ? 'descending' : 'ascending';
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initMtBuilderColumnSorting() {
+    if (!mtBuilderTbody) return;
+    const table = mtBuilderTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (mtBuilderViewState.sortKey === colKey) mtBuilderViewState.sortDir = mtBuilderViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      else {
+        mtBuilderViewState.sortKey = colKey;
+        mtBuilderViewState.sortDir = 'asc';
+      }
+      applyMtBuilderView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateMtSortIndicators(table, mtBuilderViewState.sortKey, mtBuilderViewState.sortDir);
+  }
+
+  function initMtEntrySelectColumnSorting() {
+    const table = document.getElementById('mtEntrySelectTable');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (mtEntrySelectViewState.sortKey === colKey) mtEntrySelectViewState.sortDir = mtEntrySelectViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      else {
+        mtEntrySelectViewState.sortKey = colKey;
+        mtEntrySelectViewState.sortDir = 'asc';
+      }
+
+      const y = Number.isInteger(Number(mtBuilderViewState.year)) ? Number(mtBuilderViewState.year) : getActiveBudgetYear();
+      const rows = getMtBuilderEligibleRows(y, {
+        excludeTransferId: mtBuilderViewState.id,
+        includeLedgerIds: mtBuilderViewState.selectedLedgerIds,
+      });
+      const sorted = sortMtRowsForView(rows, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+      renderMtEntrySelectRows(sorted, y, mtBuilderViewState.selectedLedgerIds);
+      updateMtSortIndicators(table, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateMtSortIndicators(table, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
   }
 
   function renderMtBuilderRows(rows, year) {
@@ -15594,9 +15938,11 @@
       includeLedgerIds: mtBuilderViewState.selectedLedgerIds,
     });
 
-    renderMtEntrySelectRows(rows, y, mtBuilderViewState.selectedLedgerIds);
+    const sorted = sortMtRowsForView(rows, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+    renderMtEntrySelectRows(sorted, y, mtBuilderViewState.selectedLedgerIds);
     mtEntrySelectModal.classList.add('is-open');
     mtEntrySelectModal.setAttribute('aria-hidden', 'false');
+    updateMtSortIndicators(document.getElementById('mtEntrySelectTable'), mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
   }
 
   function closeMtEntrySelectModal() {
@@ -15613,16 +15959,18 @@
     const all = getMtBuilderRowsFromSelectedIds(year, mtBuilderViewState.selectedLedgerIds);
 
     const filtered = filterMtBuilderRows(all, mtBuilderViewState.globalFilter);
+    const sorted = sortMtRowsForView(filtered, mtBuilderViewState.sortKey, mtBuilderViewState.sortDir);
 
-    if (normalizeTextForSearch(mtBuilderViewState.globalFilter) !== '' && all.length > 0 && filtered.length === 0) {
+    if (normalizeTextForSearch(mtBuilderViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
       mtBuilderEmptyState.textContent = 'No entries match your search.';
     } else {
       mtBuilderEmptyState.textContent = mtBuilderViewState.defaultEmptyText;
     }
 
-    mtBuilderEmptyState.hidden = filtered.length > 0;
-    renderMtBuilderRows(filtered, year);
-    updateMtBuilderTotals(filtered);
+    mtBuilderEmptyState.hidden = sorted.length > 0;
+    renderMtBuilderRows(sorted, year);
+    updateMtBuilderTotals(sorted);
+    updateMtSortIndicators(mtBuilderTbody.closest('table'), mtBuilderViewState.sortKey, mtBuilderViewState.sortDir);
   }
 
   function updateMtBuilderTotals(rows) {
@@ -15645,6 +15993,8 @@
 
   function initMoneyTransferBuilderPage() {
     if (!mtBuilderTbody || !mtBuilderEmptyState) return;
+    initMtBuilderColumnSorting();
+    initMtEntrySelectColumnSorting();
     const user = getCurrentUser();
     mtBuilderViewState.canWrite = Boolean(user && canWrite(user, 'ledger'));
 
@@ -18315,7 +18665,7 @@
 
     const currentUser = getCurrentUser();
     const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income') : false;
+    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income_bankeur') : false;
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseEurViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
@@ -18414,7 +18764,7 @@
       wiseEurNewLink.addEventListener('click', (e) => {
         e.preventDefault();
         if (wiseEurNewLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         openWiseEurModal(null, year);
         if (wiseEurMenuPanel && wiseEurMenuBtn) {
           wiseEurMenuPanel.setAttribute('hidden', '');
@@ -18925,7 +19275,7 @@
       wiseEurImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
         if (wiseEurImportCsvLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         input.value = '';
         input.click();
       });
@@ -19999,7 +20349,7 @@
 
     const currentUser = getCurrentUser();
     const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income') : false;
+    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income_bankeur') : false;
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseUsdViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
@@ -20098,7 +20448,7 @@
       wiseUsdNewLink.addEventListener('click', (e) => {
         e.preventDefault();
         if (wiseUsdNewLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         openWiseUsdModal(null, year);
         if (wiseUsdMenuPanel && wiseUsdMenuBtn) {
           wiseUsdMenuPanel.setAttribute('hidden', '');
@@ -20609,7 +20959,7 @@
       wiseUsdImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
         if (wiseUsdImportCsvLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         input.value = '';
         input.click();
       });
@@ -26457,6 +26807,8 @@
   if (mtBuilderTbody) {
     initMoneyTransferBuilderPage();
   }
+
+  await initSharedTableEnhancements();
 
   // ---- Itemize page logic ----
 

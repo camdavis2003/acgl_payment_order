@@ -152,6 +152,12 @@
   async function initSharedTableEnhancements() {
     if (window.__acglSharedTableEnhancementsBound) return;
 
+    // Itemize tables must not show Columns/drag-reorder controls.
+    if (getBasename(window.location.pathname) === 'itemize.html') {
+      window.__acglSharedTableEnhancementsBound = true;
+      return;
+    }
+
     const enhancer = await loadSharedTableEnhancer();
     if (!enhancer || typeof enhancer.initAllTables !== 'function') return;
 
@@ -1762,6 +1768,63 @@
 
   function canOrdersViewEdit(user) {
     return canWrite(user, 'orders');
+  }
+
+  // Returns the role/position of a user, looking up from the stored users list when needed
+  // (e.g. in WP shared mode the user object may only carry username + permissions).
+  function getUserRole(user) {
+    if (!user) return '';
+    if (typeof user.position === 'string' && user.position.trim()) return user.position.trim();
+    if (typeof user.role === 'string' && user.role.trim()) return user.role.trim();
+    const full = getUserByUsername(user.username);
+    if (full && typeof full.position === 'string' && full.position.trim()) return full.position.trim();
+    return String(full && full.role ? full.role : '').trim();
+  }
+
+  // Returns true if the given user is allowed to change the "With" field for the
+  // specified current 'With' stage of the payment order approval workflow.
+  function canChangeWithField(currentUser, currentWith) {
+    if (!currentUser) return false;
+    if (isHardcodedAdminUsername(currentUser.username)) return true;
+    const role = getUserRole(currentUser);
+    const w = normalizeWith(currentWith);
+    if (w === 'Requestor') {
+      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary';
+    }
+    if (w === 'Grand Secretary') {
+      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary';
+    }
+    if (w === 'Grand Master') {
+      return role === 'Grand Secretary' || role === 'Grand Master';
+    }
+    if (w === 'Grand Treasurer') {
+      return role === 'Grand Secretary' || role === 'Grand Master' ||
+             role === 'Grand Treasurer' || role === 'Assist. Grand Treasurer';
+    }
+    return false;
+  }
+
+  // Returns true if the given user is allowed to change the "Status" field for the
+  // specified current 'With' stage of the payment order approval workflow.
+  function canChangeStatusField(currentUser, currentWith) {
+    if (!currentUser) return false;
+    if (isHardcodedAdminUsername(currentUser.username)) return true;
+    const role = getUserRole(currentUser);
+    const w = normalizeWith(currentWith);
+    if (w === 'Requestor') {
+      return false;
+    }
+    if (w === 'Grand Secretary') {
+      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary';
+    }
+    if (w === 'Grand Master') {
+      return role === 'Grand Secretary' || role === 'Grand Master';
+    }
+    if (w === 'Grand Treasurer') {
+      return role === 'Grand Secretary' || role === 'Grand Master' ||
+             role === 'Grand Treasurer' || role === 'Assist. Grand Treasurer';
+    }
+    return false;
   }
 
   function canSettingsEdit(user) {
@@ -5060,6 +5123,14 @@
     return match || 'Grand Secretary';
   }
 
+  function getAllowedOrderStatusesForWith(withValue) {
+    const withLabel = normalizeWith(withValue);
+    if (withLabel === 'Grand Treasurer') {
+      return ORDER_STATUSES.filter((s) => s !== 'Approved');
+    }
+    return [...ORDER_STATUSES];
+  }
+
   function normalizeOrderSource(sourceValue) {
     const s = String(sourceValue || '').trim();
     if (!s) return '';
@@ -6678,8 +6749,9 @@
       drawMarker(f.x, f.y, String(f.marker || f.key));
     }
 
-    const sealBytes = gl && gl.grandLodgeSealDataUrl ? dataUrlToUint8Array(gl.grandLodgeSealDataUrl) : null;
-    const sigBytes = gl && gl.grandSecretarySignatureDataUrl ? dataUrlToUint8Array(gl.grandSecretarySignatureDataUrl) : null;
+    const gsCredsAllowed = order ? shouldApplyGsCredentials(order) : false;
+    const sealBytes = gsCredsAllowed && gl && gl.grandLodgeSealDataUrl ? dataUrlToUint8Array(gl.grandLodgeSealDataUrl) : null;
+    const sigBytes = gsCredsAllowed && gl && gl.grandSecretarySignatureDataUrl ? dataUrlToUint8Array(gl.grandSecretarySignatureDataUrl) : null;
 
     if (sealBytes) {
       stage = 'embed_seal';
@@ -8014,6 +8086,41 @@
       if (withLabel === 'Grand Master' && statusLabel === 'Approved') return true;
     }
     return false;
+  }
+
+  // Returns true if the Grand Secretary has approved this payment order at least once.
+  function hasPaymentOrderGrandSecretaryApproval(order) {
+    const timeline = ensureOrderTimeline(order);
+    for (const evt of Array.isArray(timeline) ? timeline : []) {
+      if (!evt || typeof evt !== 'object') continue;
+      const actorWithRaw = String(evt.actorWith || '').trim();
+      const actorStatusRaw = String(evt.actorStatus || '').trim();
+      const actorWith = actorWithRaw ? normalizeWith(actorWithRaw) : '';
+      const actorStatus = actorStatusRaw ? normalizeOrderStatus(actorStatusRaw) : '';
+      if (actorWith === 'Grand Secretary' && actorStatus === 'Approved') return true;
+      // Legacy entries (before actorWith tracking): check direct with/status fields.
+      const withRaw = String(evt.with || '').trim();
+      const statusRaw = String(evt.status || '').trim();
+      const withLabel = withRaw ? normalizeWith(withRaw) : '';
+      const statusLabel = statusRaw ? normalizeOrderStatus(statusRaw) : '';
+      if (withLabel === 'Grand Secretary' && statusLabel === 'Approved') return true;
+    }
+    return false;
+  }
+
+  // Returns true if the Grand Lodge Seal and Grand Secretary Signature should be
+  // embedded in the payment order PDF for the given order.
+  // Rules:
+  //   - Only applied after the GS has approved the order.
+  //   - Once approved, the credentials remain even as the order moves to GM/GT.
+  //   - If the order is sent back to Grand Secretary with status Review, the
+  //     credentials are removed until the GS approves again.
+  function shouldApplyGsCredentials(order) {
+    if (!hasPaymentOrderGrandSecretaryApproval(order)) return false;
+    const currentWith = normalizeWith(getOrderWithLabel(order));
+    const currentStatus = normalizeOrderStatus(getOrderStatusLabel(order));
+    if (currentWith === 'Grand Secretary' && currentStatus === 'Review') return false;
+    return true;
   }
 
   async function wpPublicSubmitPaymentOrder(year, values, items) {
@@ -9438,12 +9545,14 @@
     }
 
     const currentStatus = getOrderStatusLabel(orderForView);
-    const statusOptions = ORDER_STATUSES.map((s) => {
-      const selected = s === currentStatus ? ' selected' : '';
+    const currentWith = getOrderWithLabel(orderForView);
+    const allowedStatusesForCurrentWith = getAllowedOrderStatusesForWith(currentWith);
+    const selectedStatus = allowedStatusesForCurrentWith.includes(currentStatus) ? currentStatus : 'Review';
+    const statusOptions = allowedStatusesForCurrentWith.map((s) => {
+      const selected = s === selectedStatus ? ' selected' : '';
       return `<option value="${escapeHtml(s)}"${selected}>${escapeHtml(s)}</option>`;
     }).join('');
 
-    const currentWith = getOrderWithLabel(orderForView);
     const withPlaceholderSelected = !String(currentWith || '').trim() ? ' selected' : '';
     const withOptions = [
       `<option value=""${withPlaceholderSelected}>— Select —</option>`,
@@ -9642,7 +9751,7 @@
     const statusSelect = modalBody.querySelector('#modalStatusSelect');
     if (statusSelect) {
       statusSelect.addEventListener('change', () => {
-        const nextStatus = normalizeOrderStatus(statusSelect.value);
+      let nextStatus = normalizeOrderStatus(statusSelect.value);
 
         // Capture what the current "With" selected BEFORE workflow auto-changes.
         const wsEarly = modalBody.querySelector('#modalWithSelect');
@@ -9731,6 +9840,23 @@
         withSelect.value = nextWith;
         modal.setAttribute('data-pending-with', nextWith);
 
+        if (statusSelect) {
+          const allowedStatuses = getAllowedOrderStatusesForWith(nextWith || currentWith);
+          const currentStatusValue = normalizeOrderStatus(statusSelect.value);
+          const selectedStatus = allowedStatuses.includes(currentStatusValue) ? currentStatusValue : 'Review';
+          const currentOptions = new Set(Array.from(statusSelect.options).map((opt) => String(opt.value || '')));
+          const needsRebuild =
+            statusSelect.options.length !== allowedStatuses.length ||
+            allowedStatuses.some((s) => !currentOptions.has(s));
+          if (needsRebuild) {
+            statusSelect.innerHTML = allowedStatuses
+              .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)
+              .join('');
+          }
+          statusSelect.value = selectedStatus;
+          modal.setAttribute('data-pending-status', selectedStatus);
+        }
+
         updateCommentsRequirement();
 
         if (!statusSelect) {
@@ -9787,13 +9913,18 @@
     }
 
     // Access rules:
-    // - Orders Write-or-higher can update With + Status + Source from this View modal.
+    // - Orders Write-or-higher can update Source from this View modal.
+    // - Approval workflow: With and Status are only editable by roles authorized
+    //   for the current 'With' stage (or the internal admin).
     const currentUser = getCurrentUser();
     const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
     const canViewWrite = currentUser ? canOrdersViewEdit(currentUser) : false;
 
-    if (statusSelect) statusSelect.disabled = !canViewWrite;
-    if (withSelect) withSelect.disabled = !canViewWrite;
+    const withEditable = Boolean(currentUser && canChangeWithField(currentUser, currentWith));
+    const statusEditable = Boolean(currentUser && canChangeStatusField(currentUser, currentWith));
+
+    if (statusSelect) statusSelect.disabled = !statusEditable;
+    if (withSelect) withSelect.disabled = !withEditable;
     if (sourceSelect) sourceSelect.disabled = !canViewWrite;
 
     if (editOrderBtn) {
@@ -10566,7 +10697,7 @@
       }
 
       if (action === 'delete') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireWriteAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
         const ok = window.confirm('Delete this reconciliation entry?');
         if (!ok) return;
         deleteReconciliationOrderById(id);
@@ -10574,7 +10705,7 @@
       }
 
       if (action === 'edit') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireWriteAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
         const order = getReconciliationOrderById(id, year);
         if (!order) return;
         beginEditingOrder(order);
@@ -10583,7 +10714,7 @@
       }
 
       if (action === 'reconcile') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireWriteAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
         handleReconcileAction(id);
       }
     });
@@ -26536,6 +26667,20 @@
         const requestedWith = rawWith ? normalizeWith(rawWith) : '';
         const requestedStatus = normalizeOrderStatus(statusSelect.value);
 
+        // Role-based approval workflow permission guard (defence-in-depth; UI selects are
+        // also disabled for unauthorized users, but we validate here on save as well).
+        const currentUserForSave = getCurrentUser();
+        const withChanging = Boolean(requestedWith && requestedWith !== prevWith);
+        const statusChanging = requestedStatus !== prevStatus;
+        if (withChanging && !canChangeWithField(currentUserForSave, prevWith)) {
+          window.alert('You do not have permission to change the "With" field for the current workflow stage.');
+          return;
+        }
+        if (statusChanging && !canChangeStatusField(currentUserForSave, prevWith)) {
+          window.alert('You do not have permission to change the "Status" field for the current workflow stage.');
+          return;
+        }
+
         // IMPORTANT: capture what the user selected BEFORE any workflow auto-changes.
         // The modal stores these as attributes when the user changes Status/With.
         const actorWithPreWorkflow = modal ? normalizeWith(modal.getAttribute('data-pending-actor-with') || '') : '';
@@ -26552,6 +26697,7 @@
 
         let nextWith = requestedWith;
         let nextStatus = requestedStatus;
+        const becameApproved = prevStatus !== 'Approved' && nextStatus === 'Approved';
 
         // If the user selects the placeholder (blank), keep the previous value
         // except for Returned where the selection is mandatory.
@@ -26565,12 +26711,12 @@
         } else if (nextStatus === 'Paid') {
           nextWith = 'Archives';
         } else {
-          if (nextWith === 'Grand Secretary' && nextStatus === 'Approved') {
+          if (nextWith === 'Grand Secretary' && becameApproved) {
             nextWith = 'Grand Master';
             nextStatus = 'Review';
-          } else if (nextWith === 'Grand Secretary' && nextStatus !== 'Review') {
+          } else if (nextWith === 'Grand Secretary' && nextStatus !== 'Review' && nextStatus !== 'Approved') {
             nextStatus = 'Review';
-          } else if (nextWith === 'Grand Master' && nextStatus === 'Approved') {
+          } else if (nextWith === 'Grand Master' && becameApproved) {
             nextWith = 'Grand Treasurer';
             nextStatus = 'Review';
           }

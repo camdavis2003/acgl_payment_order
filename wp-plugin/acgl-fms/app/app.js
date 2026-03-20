@@ -1770,15 +1770,31 @@
     return canWrite(user, 'orders');
   }
 
+  function normalizeRoleLabel(roleValue) {
+    const raw = String(roleValue || '').trim();
+    const s = raw.toLowerCase();
+    if (!s) return '';
+    if (s === 'grand secretary') return 'Grand Secretary';
+    if (s === 'assist. grand secretary' || s === 'assist grand secretary' ||
+        s === 'assistant grand secretary' || s === 'asst. grand secretary' ||
+        s === 'asst grand secretary') return 'Assist. Grand Secretary';
+    if (s === 'grand master') return 'Grand Master';
+    if (s === 'grand treasurer') return 'Grand Treasurer';
+    if (s === 'assist. grand treasurer' || s === 'assist grand treasurer' ||
+        s === 'assistant grand treasurer' || s === 'asst. grand treasurer' ||
+        s === 'asst grand treasurer') return 'Assist. Grand Treasurer';
+    return raw;
+  }
+
   // Returns the role/position of a user, looking up from the stored users list when needed
   // (e.g. in WP shared mode the user object may only carry username + permissions).
   function getUserRole(user) {
     if (!user) return '';
-    if (typeof user.position === 'string' && user.position.trim()) return user.position.trim();
-    if (typeof user.role === 'string' && user.role.trim()) return user.role.trim();
+    if (typeof user.position === 'string' && user.position.trim()) return normalizeRoleLabel(user.position);
+    if (typeof user.role === 'string' && user.role.trim()) return normalizeRoleLabel(user.role);
     const full = getUserByUsername(user.username);
-    if (full && typeof full.position === 'string' && full.position.trim()) return full.position.trim();
-    return String(full && full.role ? full.role : '').trim();
+    if (full && typeof full.position === 'string' && full.position.trim()) return normalizeRoleLabel(full.position);
+    return normalizeRoleLabel(String(full && full.role ? full.role : '').trim());
   }
 
   // Returns true if the given user is allowed to change the "With" field for the
@@ -1812,10 +1828,10 @@
     const role = getUserRole(currentUser);
     const w = normalizeWith(currentWith);
     if (w === 'Requestor') {
-      return false;
+      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary' || role === 'Grand Master';
     }
     if (w === 'Grand Secretary') {
-      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary';
+      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary' || role === 'Grand Master';
     }
     if (w === 'Grand Master') {
       return role === 'Grand Secretary' || role === 'Grand Master';
@@ -3370,6 +3386,20 @@
         }
       });
     }
+  }
+
+  function buildBudgetNumberOptionsHtml(selectedValue, year) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const selectedCode = extractOutCodeFromBudgetNumberText(selectedValue);
+    const outAccounts = readOutAccountsFromBudgetYear(y);
+    const options = ['<option value="">— Select —</option>'];
+    for (const item of outAccounts) {
+      if (!item || !item.outCode) continue;
+      const selected = item.outCode === selectedCode ? ' selected' : '';
+      const label = item.desc ? `${item.outCode} - ${item.desc}` : item.outCode;
+      options.push(`<option value="${escapeHtml(item.outCode)}"${selected}>${escapeHtml(label)}</option>`);
+    }
+    return options.join('');
   }
 
   // ---- Budget impact from Approved payment orders ----
@@ -9562,6 +9592,22 @@
       }),
     ].join('');
 
+    const currentUser = getCurrentUser();
+    const canEditBudgetNumberInView = Boolean(currentUser && hasModuleAccessLevel(currentUser, 'orders', 'full'));
+    const budgetNumberOptions = canEditBudgetNumberInView
+      ? buildBudgetNumberOptionsHtml(orderForView.budgetNumber, getActiveBudgetYear())
+      : '';
+    const budgetRowHtml = canEditBudgetNumberInView
+      ? `
+        <dt class="kv__center kv__gapTop">Budget Nr.</dt>
+        <dd class="kv__gapTop">
+          <select id="modalBudgetNumberSelect" aria-label="Budget Number">
+            ${budgetNumberOptions}
+          </select>
+        </dd>
+      `
+      : '';
+
     const currentSourceRaw = String(orderForView.source || '').trim();
     const hasSource = currentSourceRaw !== '';
     let currentSource = normalizeOrderSource(currentSourceRaw);
@@ -9608,6 +9654,7 @@
             ${statusOptions}
           </select>
         </dd>
+        ${budgetRowHtml}
         ${sourceRowHtml}
         <dt class="kv__gapTop">Address</dt><dd class="kv__pre kv__gapTop">${escapeHtml(orderForView.address)}</dd>
         <dt>${orderForView.bankDetailsMode === 'US' ? 'Account' : 'IBAN'}</dt><dd>${escapeHtml(orderForView.iban)}</dd>
@@ -9916,7 +9963,6 @@
     // - Orders Write-or-higher can update Source from this View modal.
     // - Approval workflow: With and Status are only editable by roles authorized
     //   for the current 'With' stage (or the internal admin).
-    const currentUser = getCurrentUser();
     const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
     const canViewWrite = currentUser ? canOrdersViewEdit(currentUser) : false;
 
@@ -9926,6 +9972,8 @@
     if (statusSelect) statusSelect.disabled = !statusEditable;
     if (withSelect) withSelect.disabled = !withEditable;
     if (sourceSelect) sourceSelect.disabled = !canViewWrite;
+    const budgetNumberSelect = modalBody.querySelector('#modalBudgetNumberSelect');
+    if (budgetNumberSelect) budgetNumberSelect.disabled = !canEditBudgetNumberInView;
 
     if (editOrderBtn) {
       editOrderBtn.disabled = !canEditOrders;
@@ -26100,12 +26148,14 @@
     }
 
     // Budget Nr. behavior:
-    // - Only roles with Write-or-higher Payment Orders access may change it.
-    // - In edit mode, we still display the existing value (read-only) for clarity.
-    const canEditBudgetNumber = Boolean(currentUser && canWrite(currentUser, 'orders'));
+    // - Only users with Full Payment Orders access may change it.
+    // - If not Full access, hide the Budget Nr. field in this form.
+    const canEditBudgetNumber = Boolean(currentUser && hasModuleAccessLevel(currentUser, 'orders', 'full'));
     const budgetNumberEl = form.elements.namedItem('budgetNumber');
     if (budgetNumberEl) {
       budgetNumberEl.disabled = !canEditBudgetNumber;
+      const budgetFieldWrap = budgetNumberEl.closest('.field');
+      if (budgetFieldWrap) budgetFieldWrap.hidden = !canEditBudgetNumber;
     }
 
     if (isRequestForm && forceNew) {
@@ -26155,8 +26205,7 @@
         'bic',
         'specialInstructions',
         ...(draft.bankDetailsMode ? ['bankDetailsMode'] : []),
-        // Always show the existing Budget Nr. during edits, even if read-only.
-        ...(editId || canEditBudgetNumber ? ['budgetNumber'] : []),
+        ...(canEditBudgetNumber ? ['budgetNumber'] : []),
         'purpose',
       ];
 
@@ -26652,6 +26701,7 @@
 
       const withSelect = modalBody ? modalBody.querySelector('#modalWithSelect') : null;
       const statusSelect = modalBody ? modalBody.querySelector('#modalStatusSelect') : null;
+      const budgetNumberSelect = modalBody ? modalBody.querySelector('#modalBudgetNumberSelect') : null;
       const sourceSelect = modalBody ? modalBody.querySelector('#modalSourceSelect') : null;
       const commentsEl = modalBody ? modalBody.querySelector('#modalComments') : null;
       const commentsErrEl = modalBody ? modalBody.querySelector('#error-modalComments') : null;
@@ -26662,10 +26712,14 @@
 
         const prevWith = getOrderWithLabel(latest);
         const prevStatus = normalizeOrderStatus(getOrderStatusLabel(latest));
+        const prevBudgetNumber = extractOutCodeFromBudgetNumberText(latest.budgetNumber);
 
         const rawWith = String(withSelect.value || '').trim();
         const requestedWith = rawWith ? normalizeWith(rawWith) : '';
         const requestedStatus = normalizeOrderStatus(statusSelect.value);
+        const requestedBudgetNumber = budgetNumberSelect
+          ? extractOutCodeFromBudgetNumberText(budgetNumberSelect.value)
+          : prevBudgetNumber;
 
         // Role-based approval workflow permission guard (defence-in-depth; UI selects are
         // also disabled for unauthorized users, but we validate here on save as well).
@@ -26747,11 +26801,12 @@
 
         const prevSource = normalizeOrderSource(latest.source);
         const nextSource = sourceSelect ? (normalizeOrderSource(sourceSelect.value) || prevSource) : prevSource;
+        const nextBudgetNumber = requestedBudgetNumber || prevBudgetNumber;
 
         // Guardrail: cannot change Status to Approved/Paid unless Budget Nr. is set.
         const changingToImpact = (nextStatus === 'Approved' || nextStatus === 'Paid') && nextStatus !== getOrderStatusLabel(latest);
         if (changingToImpact) {
-          const outCode = extractOutCodeFromBudgetNumberText(latest.budgetNumber);
+          const outCode = extractOutCodeFromBudgetNumberText(nextBudgetNumber || latest.budgetNumber);
           if (!/^\d{4}$/.test(outCode)) {
             window.alert('Budget Nr. is required before setting Status to Approved or Paid. Edit the order and set Budget Nr. first.');
             statusSelect.value = prevStatus;
@@ -26763,6 +26818,7 @@
         const changed =
           nextWith !== getOrderWithLabel(latest) ||
           nextStatus !== getOrderStatusLabel(latest) ||
+          nextBudgetNumber !== prevBudgetNumber ||
           nextSource !== prevSource ||
           Boolean(comment);
         if (changed) {
@@ -26771,6 +26827,7 @@
             ...latest,
             with: nextWith,
             status: nextStatus,
+            budgetNumber: nextBudgetNumber,
             source: nextSource || latest.source,
             updatedAt: nowIso,
           };

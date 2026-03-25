@@ -16,6 +16,7 @@ const PLUGIN_APP_DIR = path.join(ROOT, 'wp-plugin', 'acgl-fms', 'app');
 const FILES = [
   'index.html',
   'about.html',
+  'help.html',
   'user_guide.html',
   'archive.html',
   'menu.html',

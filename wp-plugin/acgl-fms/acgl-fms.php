@@ -31,6 +31,7 @@ define('ACGL_FMS_FULLPAGE_SLUG', 'acgl-fms');
 define('ACGL_FMS_OPTION_FULLPAGE_SLUG', 'acgl_fms_fullpage_slug_v1');
 
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/db.php';
+require_once ACGL_FMS_PLUGIN_DIR . 'includes/user_roles.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/auth.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/admin_settings.php';
 require_once ACGL_FMS_PLUGIN_DIR . 'includes/rest.php';
@@ -185,20 +186,7 @@ register_activation_hook(__FILE__, function () {
         $existing_users = acgl_fms_kv_get_raw('payment_order_users_v1');
         if (!is_string($existing_users) || trim($existing_users) === '') {
             $now = gmdate('c');
-            $salt = 'acgl_fms_admin_v1';
-            // Match the app's legacy reversible format used for the hard-coded admin.
-            $pwHash = 'pw:' . base64_encode($salt . ':' . 'acgl1962ADM');
-            $admin = [
-                'id' => 'user_admin_pass_v1',
-                'createdAt' => $now,
-                'updatedAt' => $now,
-                'username' => 'admin.pass',
-                'email' => '',
-                'salt' => $salt,
-                'passwordHash' => $pwHash,
-                'passwordPlain' => '',
-                'permissions' => [ 'budget' => 'write', 'income' => 'write', 'orders' => 'write', 'ledger' => 'write', 'settings' => 'write' ],
-            ];
+            $admin = acgl_fms_user_roles_bootstrap_admin_user($now);
             acgl_fms_kv_set_raw('payment_order_users_v1', wp_json_encode([ $admin ]));
         }
     } catch (Throwable $e) {

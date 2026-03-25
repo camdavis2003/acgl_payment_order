@@ -112,62 +112,15 @@ function acgl_fms_verify_token($token) {
 }
 
 function acgl_fms_normalize_perm_level($value) {
-    if ($value === true) return 'full';
-    if ($value === false || $value === null) return 'none';
-    $v = strtolower(trim((string) $value));
-    if ($v === 'full' || $v === 'fullaccess' || $v === 'admin') return 'full';
-    if ($v === 'delete' || $v === 'remove') return 'delete';
-    if ($v === 'create' || $v === 'add') return 'create';
-    if ($v === 'write' || $v === 'edit') return 'write';
-    if ($v === 'partial' || $v === 'limited' || $v === 'some') return 'partial';
-    if ($v === 'read' || $v === 'readonly' || $v === 'read-only') return 'read';
-    return 'none';
+    return acgl_fms_user_roles_normalize_perm_level($value);
 }
 
 function acgl_fms_level_allows_write($level) {
-    $lvl = strtolower(trim((string) $level));
-    return in_array($lvl, ['partial', 'write', 'create', 'delete', 'full'], true);
+    return acgl_fms_user_roles_level_allows_write($level);
 }
 
 function acgl_fms_normalize_permissions($perms) {
-    $p = is_array($perms) ? $perms : [];
-
-    $pick = function ($key, $fallbackParent = null) use ($p) {
-        if (array_key_exists($key, $p)) {
-            return acgl_fms_normalize_perm_level($p[$key]);
-        }
-        if ($fallbackParent !== null && array_key_exists($fallbackParent, $p)) {
-            return acgl_fms_normalize_perm_level($p[$fallbackParent]);
-        }
-        return 'none';
-    };
-
-    return [
-        'budget' => $pick('budget'),
-        'budget_dashboard' => $pick('budget_dashboard', 'budget'),
-
-        'income' => $pick('income'),
-        'income_bankeur' => $pick('income_bankeur', 'income'),
-
-        'orders' => $pick('orders'),
-        'orders_itemize' => $pick('orders_itemize', 'orders'),
-        'orders_reconciliation' => $pick('orders_reconciliation', 'orders'),
-
-        'ledger' => $pick('ledger'),
-        'ledger_wiseeur' => $pick('ledger_wiseeur', 'ledger'),
-        'ledger_wiseusd' => $pick('ledger_wiseusd', 'ledger'),
-        'ledger_money_transfers' => $pick('ledger_money_transfers', 'ledger'),
-        'archive' => $pick('archive', 'settings'),
-
-        'settings' => $pick('settings'),
-        'settings_roles' => $pick('settings_roles', 'settings'),
-        'settings_backlog' => $pick('settings_backlog', 'settings'),
-        'settings_numbering' => $pick('settings_numbering', 'settings'),
-        'settings_grandlodge' => $pick('settings_grandlodge', 'settings'),
-        'settings_email_notifications' => $pick('settings_email_notifications', 'settings'),
-        'settings_backup' => $pick('settings_backup', 'settings'),
-        'settings_audit' => $pick('settings_audit', 'settings'),
-    ];
+    return acgl_fms_user_roles_normalize_permissions($perms);
 }
 
 function acgl_fms_key_to_module($key) {
@@ -197,6 +150,8 @@ function acgl_fms_key_to_module($key) {
 
 function acgl_fms_token_allows_key($tokenPayload, $key, $isWrite) {
     if (!is_array($tokenPayload)) return false;
+
+    if (function_exists('acgl_fms_payload_is_admin') && acgl_fms_payload_is_admin($tokenPayload)) return true;
 
     $username = strtolower(trim((string) ($tokenPayload['u'] ?? '')));
     if ($username === '') return false;
@@ -323,7 +278,7 @@ function acgl_fms_ensure_default_admin_pass_user_exists() {
             }
         }
 
-        $adminU = 'admin.pass';
+        $adminU = acgl_fms_user_roles_bootstrap_admin_username();
         $foundIdx = -1;
         foreach ($users as $idx => $row) {
             $ru = strtolower(trim((string) ($row['username'] ?? '')));
@@ -332,44 +287,14 @@ function acgl_fms_ensure_default_admin_pass_user_exists() {
                 break;
             }
         }
-
         $now = gmdate('c');
-        $salt = 'acgl_fms_admin_v1';
-        $pwHash = 'pw:' . base64_encode($salt . ':' . 'acgl1962ADM');
-        $adminPerms = [
-            'budget' => 'full',
-            'income' => 'full',
-            'orders' => 'full',
-            'ledger' => 'full',
-            'settings' => 'full',
-        ];
-        $admin = [
-            'id' => 'user_admin_pass_v1',
-            'createdAt' => $now,
-            'updatedAt' => $now,
-            'username' => $adminU,
-            'email' => '',
-            'salt' => $salt,
-            'passwordHash' => $pwHash,
-            'passwordPlain' => '',
-            'permissions' => $adminPerms,
-        ];
+        $admin = acgl_fms_user_roles_bootstrap_admin_user($now);
 
         if ($foundIdx === -1) {
             $users[] = $admin;
         } else {
             $current = is_array($users[$foundIdx]) ? $users[$foundIdx] : [];
-            $users[$foundIdx] = array_merge($current, [
-                'id' => (string) ($current['id'] ?? 'user_admin_pass_v1'),
-                'createdAt' => (string) ($current['createdAt'] ?? $now),
-                'updatedAt' => $now,
-                'username' => $adminU,
-                'email' => (string) ($current['email'] ?? ''),
-                'salt' => $salt,
-                'passwordHash' => $pwHash,
-                'passwordPlain' => '',
-                'permissions' => $adminPerms,
-            ]);
+            $users[$foundIdx] = acgl_fms_user_roles_bootstrap_admin_user($now, $current);
         }
 
         acgl_fms_kv_set_raw('payment_order_users_v1', wp_json_encode($users));
@@ -385,6 +310,27 @@ function acgl_fms_find_user_by_username($users, $username) {
         if ($ru !== '' && $ru === $u) return $row;
     }
     return null;
+}
+
+function acgl_fms_payload_is_admin($tokenPayload) {
+    if (!is_array($tokenPayload)) return false;
+
+    $username = strtolower(trim((string) ($tokenPayload['u'] ?? '')));
+    if ($username === '') return false;
+
+    if ($username === strtolower(trim((string) acgl_fms_user_roles_bootstrap_admin_username()))) {
+        return true;
+    }
+
+    $users = acgl_fms_load_users_from_kv();
+    $user = acgl_fms_find_user_by_username($users, $username);
+    if (is_array($user)) {
+        $roleRaw = strtolower(trim((string) ($user['position'] ?? ($user['role'] ?? ''))));
+        if (acgl_fms_user_roles_is_admin_role_value($roleRaw)) return true;
+    }
+
+    $perms = acgl_fms_normalize_permissions($tokenPayload['p'] ?? []);
+    return ($perms['settings'] ?? 'none') === 'full';
 }
 
 function acgl_fms_authorize_kv($request, $keyOrNull, $isWrite) {

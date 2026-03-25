@@ -41,6 +41,10 @@ function acgl_fms_authorize_settings_notifications($isWrite) {
     $payload = acgl_fms_verify_token($token);
     if (!$payload) return false;
 
+    if (function_exists('acgl_fms_payload_is_admin') && acgl_fms_payload_is_admin($payload)) {
+        return true;
+    }
+
     $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
     $lvl = $perms['settings_email_notifications'] ?? 'none';
     if ($lvl === 'none') return false;
@@ -883,8 +887,10 @@ function acgl_fms_register_rest_routes() {
 
             $perms = acgl_fms_normalize_permissions($user['permissions'] ?? []);
             $roleRaw = strtolower(trim((string) ($user['position'] ?? ($user['role'] ?? ''))));
-            $isAdminRole = in_array($roleRaw, ['admin', 'administrator', 'site administrator', 'super admin'], true);
-            if ($isAdminRole) {
+            $isAdminRole = acgl_fms_user_roles_is_admin_role_value($roleRaw);
+            $isBootstrapAdmin = ($username === strtolower(trim((string) acgl_fms_user_roles_bootstrap_admin_username())));
+            $hasFullSettingsAccess = (($perms['settings'] ?? 'none') === 'full');
+            if ($isAdminRole || $isBootstrapAdmin || $hasFullSettingsAccess) {
                 $perms = acgl_fms_normalize_permissions([
                     'budget' => 'full',
                     'income' => 'full',

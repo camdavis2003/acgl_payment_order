@@ -1466,12 +1466,12 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .incomeRow--missingBudget .btn--x {
   background: transparent;
-  color: var(--caution);
+  color: var(--primary-text) !important;
 }
 
 .incomeRow--missingBudget .btn--x:hover {
   background: transparent;
-  color: var(--caution);
+  color: var(--primary-text) !important;
 }
 
 .incomeRow--missingBudget .btn--editIcon {
@@ -1519,12 +1519,19 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .ordersRow--missingRequired .btn--x {
   background: transparent;
-  color: var(--caution);
+  color: var(--primary-text) !important;
 }
 
 .ordersRow--missingRequired .btn--x:hover {
   background: transparent;
-  color: var(--caution);
+  color: var(--primary-text) !important;
+}
+
+tr.incomeRow--missingBudget .btn--x,
+tr.incomeRow--missingBudget .btn--x:hover,
+tr.ordersRow--missingRequired .btn--x,
+tr.ordersRow--missingRequired .btn--x:hover {
+  color: #ffffff !important;
 }
 
 .ordersRow--missingRequired .btn--editIcon {
@@ -3909,8 +3916,8 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
 }
 
 .btn--x {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -3924,7 +3931,7 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
 }
 
 html[data-theme="dark"] .btn--x {
-  color: var(--danger-text);
+  color: var(--primary-text);
 }
 
 .btn--x:hover {
@@ -3934,7 +3941,7 @@ html[data-theme="dark"] .btn--x {
 }
 
 html[data-theme="dark"] .btn--x:hover {
-  color: var(--danger-text);
+  color: var(--primary-text);
 }
 
 .btn--x:focus-visible {
@@ -3944,9 +3951,10 @@ html[data-theme="dark"] .btn--x:hover {
 
 .btn--x svg {
   display: block;
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  transform: scaleX(1.08);
 }
 
 .btn--editIcon svg {

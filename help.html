@@ -1,0 +1,1375 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      try {
+        var __t = localStorage.getItem("payment_order_theme");
+        if (__t === "dark" || __t === "light") {
+          document.documentElement.setAttribute("data-theme", __t);
+        }
+      } catch (e) {}
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Help - ACGL FMS</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      .help-wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 28px 20px 80px;
+      }
+
+      .help-search {
+        position: sticky;
+        top: 8px;
+        z-index: 6;
+        background: color-mix(in srgb, var(--focus) 7%, var(--card));
+        border: 1px solid color-mix(in srgb, var(--focus) 45%, var(--border));
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 16px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+      }
+
+      .help-search__title {
+        margin: 0 0 8px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--focus);
+      }
+
+      .help-search__row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+      }
+
+      .help-search input {
+        width: 100%;
+        border: 1px solid color-mix(in srgb, var(--focus) 35%, var(--border));
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        padding: 10px 12px;
+        font-size: 0.96rem;
+        font-weight: 500;
+      }
+
+      .help-search input:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 1px;
+      }
+
+      .help-search button {
+        border: 1px solid var(--focus);
+        border-radius: 8px;
+        background: var(--focus);
+        color: var(--primary-text);
+        padding: 10px 14px;
+        min-width: 88px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .help-search button:hover {
+        filter: brightness(0.95);
+      }
+
+      .help-search__meta {
+        margin-top: 8px;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+
+      .help-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 12px;
+        margin: 14px 0 24px;
+      }
+
+      .help-chip {
+        grid-column: span 3;
+        text-decoration: none;
+        background: var(--surface);
+        color: var(--focus);
+        border: 1px solid var(--focus);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 0.87rem;
+        font-weight: 600;
+        line-height: 1.35;
+      }
+
+      .help-chip:hover {
+        background: var(--focus);
+        color: var(--primary-text);
+      }
+
+      .help-section {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px;
+        margin-bottom: 14px;
+        scroll-margin-top: 132px;
+      }
+
+      .help-section__header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .help-section h2 {
+        margin: 0;
+        font-size: 1.08rem;
+      }
+
+      .help-section__guideLink {
+        flex: 0 0 auto;
+        text-decoration: none;
+        border: 1px solid var(--focus);
+        color: var(--focus);
+        background: var(--surface);
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+
+      .help-section__guideLink:hover {
+        background: var(--focus);
+        color: var(--primary-text);
+      }
+
+      .help-section h3 {
+        margin: 14px 0 6px;
+        font-size: 0.96rem;
+      }
+
+      .help-section p,
+      .help-section li {
+        line-height: 1.58;
+      }
+
+      .help-section ul,
+      .help-section ol {
+        margin: 8px 0 10px;
+        padding-left: 20px;
+      }
+
+      .help-note {
+        border-left: 3px solid var(--focus);
+        background: color-mix(in srgb, var(--focus) 12%, transparent);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin: 8px 0;
+        font-size: 0.9rem;
+      }
+
+      .help-mark {
+        background: #fef08a;
+        color: #111827;
+        border-radius: 2px;
+        padding: 0 2px;
+      }
+
+      .help-mark--active {
+        background: #f59e0b;
+        color: #111827;
+        box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.28);
+      }
+
+      html[data-theme="dark"] .help-mark {
+        background: #facc15;
+        color: #111827;
+      }
+
+      html[data-theme="dark"] .help-mark--active {
+        background: #fbbf24;
+        color: #111827;
+        box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.24);
+      }
+
+      .help-empty {
+        display: none;
+        background: var(--card);
+        border: 1px dashed var(--border);
+        border-radius: 10px;
+        padding: 14px;
+        color: var(--muted);
+        margin-top: 8px;
+      }
+
+      .back-to-top {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 2100;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--focus);
+        background: var(--focus);
+        color: var(--primary-text);
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 600;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+      }
+
+      .back-to-top:hover {
+        filter: brightness(0.95);
+      }
+
+      @media (max-width: 900px) {
+        .help-chip {
+          grid-column: span 4;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .help-section__header {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .help-section__guideLink {
+          width: fit-content;
+        }
+
+        .help-chip {
+          grid-column: span 6;
+        }
+
+        .help-search__row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body id="top">
+    <div class="appShell appShell--navClosed" data-app-shell>
+      <aside class="appNav" id="appNav">
+        <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
+      </aside>
+
+      <div class="appMain">
+        <header class="site-header">
+          <div class="container container--wide">
+            <div class="header-top">
+              <div class="header-left">
+                <button
+                  type="button"
+                  class="navIconBtn"
+                  id="navToggle"
+                  aria-label="Open navigation"
+                  aria-controls="appNav"
+                  aria-expanded="false"
+                >
+                  <span class="navIconBtn__lines" aria-hidden="true"></span>
+                </button>
+                <div class="headerTitleBlock">
+                  <h1>Help Center</h1>
+                  <p class="subhead">
+                    Search the full ACGL FMS help knowledge base by keyword,
+                    page, action, or workflow.
+                  </p>
+                </div>
+              </div>
+              <div class="header-actions">
+                <div class="headerThemeBlock">
+                  <img
+                    class="headerThemeBlock__seal"
+                    src="https://acgl.online/wp-content/uploads/logos_grand_lodge/ACGL-Logo-Main.png"
+                    alt="ACGL"
+                    loading="lazy"
+                  />
+                  <label class="switch" for="themeToggle">
+                    <input
+                      type="checkbox"
+                      id="themeToggle"
+                      class="switch__input"
+                      role="switch"
+                      aria-label="Dark mode"
+                    />
+                    <span class="switch__track" aria-hidden="true"></span>
+                    <span class="switch__text">Dark mode</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main>
+          <div class="help-wrap">
+            <section class="help-search" aria-label="Global help search">
+              <p class="help-search__title">Global Search</p>
+              <div class="help-search__row">
+                <input
+                  id="helpGlobalSearch"
+                  type="search"
+                  autocomplete="off"
+                  placeholder="Search help... examples: approve payment order, add budget year, restore backup"
+                />
+                <button id="helpSearchClear" type="button">Clear</button>
+              </div>
+              <div id="helpSearchMeta" class="help-search__meta">
+                Showing all sections.
+              </div>
+            </section>
+
+            <nav class="help-grid" aria-label="Jump to help section">
+              <a class="help-chip" href="#help-get-started">Getting Started</a>
+              <a class="help-chip" href="#help-permissions"
+                >Permissions and Visibility</a
+              >
+              <a class="help-chip" href="#help-auth">Sign In and Sessions</a>
+              <a class="help-chip" href="#help-payment-orders"
+                >Payment Orders</a
+              >
+              <a class="help-chip" href="#help-itemize"
+                >Itemize Payment Order</a
+              >
+              <a class="help-chip" href="#help-statuses"
+                >PO Status and Routing</a
+              >
+              <a class="help-chip" href="#help-reconciliation"
+                >Reconciliation</a
+              >
+              <a class="help-chip" href="#help-budget">Budget and Dashboard</a>
+              <a class="help-chip" href="#help-ledger"
+                >Ledger and Income Pages</a
+              >
+              <a class="help-chip" href="#help-money-transfers"
+                >Money Transfers</a
+              >
+              <a class="help-chip" href="#help-archive"
+                >Archive and Historical Data</a
+              >
+              <a class="help-chip" href="#help-settings">Admin Settings</a>
+              <a class="help-chip" href="#help-notifications"
+                >Notifications and Alerts</a
+              >
+              <a class="help-chip" href="#help-backup">Backup and Restore</a>
+              <a class="help-chip" href="#help-troubleshooting"
+                >Troubleshooting</a
+              >
+            </nav>
+
+            <div id="helpNoResults" class="help-empty">
+              No matching help section was found. Try broader keywords such as
+              payment, budget, ledger, archive, backup, role, or notification.
+            </div>
+
+            <section
+              id="help-get-started"
+              class="help-section"
+              data-search="overview layout navigation dark mode left sidebar pages permissions user guide"
+            >
+              <div class="help-section__header">
+                <h2>Getting Started and Navigation</h2>
+                <a class="help-section__guideLink" href="user_guide.html#overview"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                ACGL FMS is a year-based financial workflow system for Payment
+                Orders, Budget, Ledger, Income, Money Transfers, Archive, and
+                administration. Nearly every page uses the same shell: a left
+                navigation tree, a top header, and a main work area.
+              </p>
+              <h3>How to move around the app</h3>
+              <ol>
+                <li>
+                  Click the top-left menu icon to open the left navigation.
+                </li>
+                <li>
+                  Expand year-based branches (Budget, Payment Orders, Ledger).
+                </li>
+                <li>Select the exact year and sub-page you need.</li>
+              </ol>
+              <h3>What each area is for</h3>
+              <ul>
+                <li>
+                  <strong>Payment Order Request:</strong> create a new Payment
+                  Order.
+                </li>
+                <li>
+                  <strong>Payment Orders:</strong> review, edit, track, filter,
+                  approve, and delete existing orders for a year.
+                </li>
+                <li>
+                  <strong>Budget:</strong> manage account lines, anticipated
+                  amounts, and balances.
+                </li>
+                <li>
+                  <strong>Ledger:</strong> see income and Payment Order activity
+                  together for a year.
+                </li>
+                <li>
+                  <strong>Money Transfers:</strong> group eligible income rows
+                  into formal transfer records.
+                </li>
+                <li>
+                  <strong>Archive:</strong> open historical years without
+                  changing the active year.
+                </li>
+                <li>
+                  <strong>Admin Settings:</strong> manage users, numbering,
+                  notifications, backups, and audit information.
+                </li>
+              </ul>
+              <h3>How year-based pages work</h3>
+              <p>
+                Most financial pages are scoped by year. That means the same
+                module can look different depending on the year you opened.
+                Before editing records, confirm you are working in the correct
+                year branch.
+              </p>
+              <h3>Dark mode</h3>
+              <p>
+                Use the dark mode switch in the header to change the visual
+                theme. The preference is stored in local browser storage and is
+                reused when you reopen the app.
+              </p>
+              <div class="help-note">
+                If you do not see a module, your account likely does not have
+                that module permission.
+              </div>
+              <p>
+                For complete policy and process detail, open
+                <a href="user_guide.html">User Guide</a>.
+              </p>
+            </section>
+
+            <section
+              id="help-permissions"
+              class="help-section"
+              data-search="permissions visibility hidden modules read write create delete full role user account access archive settings budget payment orders ledger"
+            >
+              <div class="help-section__header">
+                <h2>Permissions and Page Visibility</h2>
+                <a class="help-section__guideLink" href="user_guide.html#roles"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                The left navigation only shows modules your account is allowed
+                to access. If a page is missing, the most common reason is that
+                your user account does not have the required permission level.
+              </p>
+              <h3>Typical access levels</h3>
+              <ul>
+                <li><strong>Read:</strong> you can view records only.</li>
+                <li>
+                  <strong>Write:</strong> you can update existing records.
+                </li>
+                <li>
+                  <strong>Create:</strong> you can create new records in that
+                  module.
+                </li>
+                <li>
+                  <strong>Delete:</strong> you can remove records where allowed.
+                </li>
+                <li>
+                  <strong>Full:</strong> you have unrestricted access for that
+                  module.
+                </li>
+              </ul>
+              <h3>Common visibility questions</h3>
+              <ul>
+                <li>
+                  <strong>Why can I not see Archive?</strong> Your account does
+                  not currently include archive access.
+                </li>
+                <li>
+                  <strong>Why can I open a page but not edit?</strong> You
+                  likely have read-only access.
+                </li>
+                <li>
+                  <strong>Why can I not add a new row?</strong> The module may
+                  allow viewing but not creation.
+                </li>
+                <li>
+                  <strong>Why can another user see more menu items?</strong>
+                  Their account has broader permissions configured in Admin
+                  Settings.
+                </li>
+              </ul>
+              <div class="help-note">
+                Help and User Guide follow the same visibility pattern. If the
+                User Guide is available to you, Help should be available too.
+              </div>
+            </section>
+
+            <section
+              id="help-auth"
+              class="help-section"
+              data-search="sign in login lock out password username session timeout audit log"
+            >
+              <div class="help-section__header">
+                <h2>Sign In, Session, and Access</h2>
+                <a class="help-section__guideLink" href="user_guide.html#signing-in"
+                  >Open in User Guide</a
+                >
+              </div>
+              <h3>How to sign in</h3>
+              <ol>
+                <li>Click <strong>Sign in</strong> in the top-right area.</li>
+                <li>Enter username and password.</li>
+                <li>Submit and wait for the session to start.</li>
+              </ol>
+              <h3>What happens after sign-in</h3>
+              <ul>
+                <li>
+                  The application loads your page permissions and updates the
+                  navigation tree.
+                </li>
+                <li>
+                  The app remembers the current browser session until timeout,
+                  logout, or session expiration.
+                </li>
+                <li>
+                  In shared WordPress mode, authentication is validated against
+                  the backend and audit events can be recorded.
+                </li>
+              </ul>
+              <h3>If sign-in fails</h3>
+              <ul>
+                <li>Re-check username spelling and case.</li>
+                <li>Re-check password and keyboard layout.</li>
+                <li>
+                  Multiple failed attempts can trigger a temporary lock-out
+                  timer.
+                </li>
+              </ul>
+              <h3>Session questions</h3>
+              <ul>
+                <li>
+                  <strong>Why was I signed out?</strong> The session may have
+                  expired after inactivity.
+                </li>
+                <li>
+                  <strong>Why did my menu change after signing in?</strong> The
+                  menu is rebuilt from your user permissions.
+                </li>
+                <li>
+                  <strong>Where can admins review access events?</strong> In
+                  Admin Settings under Audit Log.
+                </li>
+              </ul>
+              <p>
+                Sign-in success/failure and lock-out events are recorded in
+                Audit Log under Admin Settings.
+              </p>
+            </section>
+
+            <section
+              id="help-payment-orders"
+              class="help-section"
+              data-search="new payment order request form submit pdf payable purpose source budget nr iban bic with"
+            >
+              <div class="help-section__header">
+                <h2>Payment Orders: Create, Edit, and Track</h2>
+                <a class="help-section__guideLink" href="user_guide.html#payment-orders"
+                  >Open in User Guide</a
+                >
+              </div>
+              <h3>Create a new Payment Order</h3>
+              <ol>
+                <li>Open Payment Order Request.</li>
+                <li>
+                  Complete required fields: Date, Amount (EUR and/or USD),
+                  Budget Nr., Payable To, Purpose, Source.
+                </li>
+                <li>
+                  Optionally complete IBAN/BIC and routing via the With field.
+                </li>
+                <li>Download PDF and submit.</li>
+              </ol>
+              <h3>What the main fields mean</h3>
+              <ul>
+                <li><strong>Date:</strong> the request date for the PO.</li>
+                <li>
+                  <strong>EUR / USD:</strong> the requested amount in one or
+                  both currencies.
+                </li>
+                <li>
+                  <strong>Budget Nr.:</strong> the budget account code that the
+                  expense belongs to.
+                </li>
+                <li>
+                  <strong>Payable To:</strong> the person or entity to be paid.
+                </li>
+                <li>
+                  <strong>Purpose:</strong> a short description of what is being
+                  paid.
+                </li>
+                <li>
+                  <strong>Source:</strong> where the funding is expected to come
+                  from.
+                </li>
+                <li>
+                  <strong>With:</strong> who currently holds or routes the PO
+                  during review.
+                </li>
+              </ul>
+              <h3>Before you submit</h3>
+              <ul>
+                <li>Verify all required fields are complete.</li>
+                <li>Confirm the Budget Nr. is the correct account.</li>
+                <li>
+                  If banking data is required, confirm IBAN and BIC validation
+                  passes.
+                </li>
+                <li>
+                  Generate the PDF if your process requires saving the formal
+                  document before submission.
+                </li>
+              </ul>
+              <h3>Find and update existing orders</h3>
+              <ul>
+                <li>Go to Payment Orders and choose year.</li>
+                <li>Use global table search and status filter.</li>
+                <li>Use row actions to view PDF, edit, or delete.</li>
+              </ul>
+              <h3>What to do if a row is highlighted</h3>
+              <ul>
+                <li>
+                  <strong>Dark highlighted row:</strong> required information is
+                  missing. Open edit and complete the missing data.
+                </li>
+                <li>
+                  <strong>Yellow highlighted row:</strong> the PO is in Approved
+                  or GT-review state and usually needs treasurer attention.
+                </li>
+              </ul>
+              <h3>Common questions</h3>
+              <ul>
+                <li>
+                  <strong>Can I change the PO number?</strong> No. It is
+                  normally generated by the configured numbering rules.
+                </li>
+                <li>
+                  <strong>Why can I not delete a PO?</strong> Your account may
+                  not include delete access.
+                </li>
+                <li>
+                  <strong
+                    >Why is my PO not appearing in the year I expected?</strong
+                  >
+                  Confirm the record date and the selected year page.
+                </li>
+              </ul>
+              <div class="help-note">
+                Yellow rows indicate Approved or GT-Review work that usually
+                needs immediate treasurer follow-through.
+              </div>
+            </section>
+
+            <section
+              id="help-itemize"
+              class="help-section"
+              data-search="itemize payment order add item mileage totals euro usd save items receipts oanda"
+            >
+              <div class="help-section__header">
+                <h2>Itemize Payment Order</h2>
+                <a class="help-section__guideLink" href="user_guide.html#itemize"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                Use Itemize when one PO contains multiple expenses (for example,
+                hotel, transport, meals).
+              </p>
+              <ol>
+                <li>Click EUR or USD amount field on the request form.</li>
+                <li>Add line items and optional mileage items.</li>
+                <li>Confirm running totals.</li>
+                <li>Save items to return totals to the request form.</li>
+              </ol>
+              <h3>When to use itemization</h3>
+              <ul>
+                <li>One trip includes several receipts.</li>
+                <li>
+                  A single reimbursement spans several budget-relevant expense
+                  types.
+                </li>
+                <li>
+                  You need a transparent breakdown for later review or audit.
+                </li>
+              </ul>
+              <h3>Best practice</h3>
+              <ul>
+                <li>Use clear item titles.</li>
+                <li>Check both per-item amounts and total amount.</li>
+                <li>
+                  Save items before leaving the itemize page so totals return to
+                  the form.
+                </li>
+              </ul>
+              <p>
+                For currency conversion support, keep required source evidence
+                (OANDA conversion output or relevant bank statement).
+              </p>
+            </section>
+
+            <section
+              id="help-statuses"
+              class="help-section"
+              data-search="status submitted review returned rejected approved paid with requestor grand secretary grand master grand treasurer archives"
+            >
+              <div class="help-section__header">
+                <h2>Payment Order Status and Routing</h2>
+                <a class="help-section__guideLink" href="user_guide.html#po-lifecycle"
+                  >Open in User Guide</a
+                >
+              </div>
+              <h3>Status meanings</h3>
+              <ul>
+                <li><strong>Submitted:</strong> awaiting review.</li>
+                <li>
+                  <strong>Review:</strong> GS and/or GM review in progress.
+                </li>
+                <li><strong>Returned:</strong> sent back for corrections.</li>
+                <li><strong>Rejected:</strong> declined; not processed.</li>
+                <li><strong>Approved:</strong> authorized for payment.</li>
+                <li><strong>Paid:</strong> completed and closed.</li>
+              </ul>
+              <h3>How status affects workflow</h3>
+              <ul>
+                <li>Submitted items are waiting for initial review.</li>
+                <li>
+                  Review means GS or GM is actively evaluating the request.
+                </li>
+                <li>
+                  Returned means the requestor must correct or complete the
+                  record and then resubmit if required by the process.
+                </li>
+                <li>
+                  Approved usually means the budget impact has been recognized
+                  and the record is ready for treasurer follow-through.
+                </li>
+                <li>
+                  Paid means execution is complete and the item is closed.
+                </li>
+              </ul>
+              <h3>With field options</h3>
+              <p>
+                The With field tracks current custodian: Requestor, Grand
+                Secretary, Grand Master, Grand Treasurer, or Archives.
+              </p>
+              <h3>Common questions</h3>
+              <ul>
+                <li>
+                  <strong>Why was my PO returned?</strong> It may be missing
+                  documentation, contain an incorrect budget number, or need
+                  corrections to payee/purpose details.
+                </li>
+                <li>
+                  <strong>When does the budget update?</strong> Approved POs can
+                  affect the budget automatically.
+                </li>
+                <li>
+                  <strong>Why is the row yellow?</strong> The record is Approved
+                  or GT-review and requires action.
+                </li>
+              </ul>
+            </section>
+
+            <section
+              id="help-reconciliation"
+              class="help-section"
+              data-search="reconciliation imported records reconcile pending entries payment orders year"
+            >
+              <div class="help-section__header">
+                <h2>Reconciliation</h2>
+                <a class="help-section__guideLink" href="user_guide.html#reconciliation"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                Reconciliation is for entries that must be validated before
+                moving into the main Payment Orders table.
+              </p>
+              <ol>
+                <li>Open Payment Orders -> Year -> Reconciliation.</li>
+                <li>Verify entry details.</li>
+                <li>Click Reconcile to move entry into main list.</li>
+              </ol>
+              <h3>When reconciliation is used</h3>
+              <ul>
+                <li>Imported or migrated records.</li>
+                <li>
+                  Administrative corrections entered outside the request form.
+                </li>
+                <li>
+                  Entries that must be confirmed before joining the main list.
+                </li>
+              </ul>
+              <h3>Before reconciling</h3>
+              <ul>
+                <li>Check payee, purpose, amount, source, and year.</li>
+                <li>Confirm the entry should live in that year's PO list.</li>
+                <li>
+                  Make sure any required supporting information is already
+                  present.
+                </li>
+              </ul>
+            </section>
+
+            <section
+              id="help-budget"
+              class="help-section"
+              data-search="budget year anticipated approved receipts expenditures balance checksum active budget dashboard charts"
+            >
+              <div class="help-section__header">
+                <h2>Budget and Dashboard</h2>
+                <a class="help-section__guideLink" href="user_guide.html#budget"
+                  >Open in User Guide</a
+                >
+              </div>
+              <h3>Budget table basics</h3>
+              <ul>
+                <li>Code and Description identify each account line.</li>
+                <li>Anticipated is planned amount.</li>
+                <li>Approved is auto-calculated from approved POs.</li>
+                <li>Receipts and Expenditures track actual movement.</li>
+                <li>Balance is computed based on account rules.</li>
+              </ul>
+              <h3>Common actions</h3>
+              <ul>
+                <li>Save Budget to persist manual edits.</li>
+                <li>Set Active Budget to make that year primary in nav.</li>
+                <li>Use checksums to verify data integrity.</li>
+              </ul>
+              <h3>How to work safely in Budget</h3>
+              <ol>
+                <li>Confirm the selected year first.</li>
+                <li>Update only the intended account lines.</li>
+                <li>Save changes explicitly.</li>
+                <li>
+                  Re-check balances and checksum rows after edits if those
+                  controls are relevant to your workflow.
+                </li>
+              </ol>
+              <h3>How Budget relates to Payment Orders</h3>
+              <p>
+                Payment Orders and Budget are connected. Approved Payment Orders
+                can update budget totals automatically, so incorrect budget
+                numbers on POs lead to incorrect budget reporting.
+              </p>
+              <h3>Dashboard</h3>
+              <p>
+                Dashboard shows Expenditures versus Balance charts with search
+                by account code or description.
+              </p>
+              <p>
+                Use Dashboard when you want a quick visual review. Use the full
+                Budget page when you need account-level editing and detailed
+                table work.
+              </p>
+            </section>
+
+            <section
+              id="help-ledger"
+              class="help-section"
+              data-search="ledger bankeur wiseeur wiseusd income add entry totals missing budget nr highlight pale yellow mt number"
+            >
+              <div class="help-section__header">
+                <h2>Ledger and Income Pages</h2>
+                <a class="help-section__guideLink" href="user_guide.html#ledger"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                Ledger combines income entries and PO activity into a single
+                year-based view, with subtotal visibility and state
+                highlighting.
+              </p>
+              <h3>What Ledger is best for</h3>
+              <ul>
+                <li>Reviewing income and outflow together in one place.</li>
+                <li>Checking whether a PO has moved into paid workflow.</li>
+                <li>Reviewing MT assignments and pending highlighted items.</li>
+              </ul>
+              <h3>BankEUR</h3>
+              <ul>
+                <li>Add entries with date, description, amount, Budget Nr.</li>
+                <li>Rows missing Budget Nr. are highlighted for follow-up.</li>
+              </ul>
+              <p>
+                Missing-budget income rows should be corrected promptly because
+                they affect reporting and may delay Money Transfer work.
+              </p>
+              <h3>wiseEUR and wiseUSD</h3>
+              <ul>
+                <li>Import from seed-compatible CSV format.</li>
+                <li>
+                  Review incoming, outgoing, and net totals in footer rows.
+                </li>
+              </ul>
+              <h3>Common questions</h3>
+              <ul>
+                <li>
+                  <strong>Why is a Ledger row yellow?</strong> It is typically
+                  an Approved or GT-review PO.
+                </li>
+                <li>
+                  <strong>Why is an income row pale yellow?</strong> It may be
+                  eligible for a Money Transfer but not yet assigned.
+                </li>
+                <li>
+                  <strong>Why is a BankEUR row dark/highlighted?</strong> It is
+                  missing a Budget Nr.
+                </li>
+              </ul>
+            </section>
+
+            <section
+              id="help-money-transfers"
+              class="help-section"
+              data-search="money transfer mt number gs verified gt verified unassigned positive income select entries comments save"
+            >
+              <div class="help-section__header">
+                <h2>Money Transfers</h2>
+                <a class="help-section__guideLink" href="user_guide.html#money-transfers"
+                  >Open in User Guide</a
+                >
+              </div>
+              <h3>Create a transfer</h3>
+              <ol>
+                <li>Open Money Transfers -> Year -> New M.T.</li>
+                <li>Set MT date.</li>
+                <li>Select eligible unassigned positive BankEUR rows.</li>
+                <li>Add comments and save.</li>
+              </ol>
+              <h3>How selection works</h3>
+              <p>
+                Money Transfers should be built from eligible, unassigned,
+                positive BankEUR income rows. The linkage is explicit, meaning
+                the user chooses the rows to assign rather than relying on a
+                date-range guess.
+              </p>
+              <h3>Verification flow</h3>
+              <p>
+                Transfer records proceed through GS verification and GT
+                verification. Notifications can be sent at each stage when
+                configured.
+              </p>
+              <h3>Common questions</h3>
+              <ul>
+                <li>
+                  <strong
+                    >Why is an income row not available for selection?</strong
+                  >
+                  It may already be assigned or may not be eligible.
+                </li>
+                <li>
+                  <strong>Where do I see the MT number later?</strong> It
+                  appears on linked records in relevant views such as Ledger.
+                </li>
+              </ul>
+            </section>
+
+            <section
+              id="help-archive"
+              class="help-section"
+              data-search="archive historical years budget payment orders ledger money transfers old data"
+            >
+              <div class="help-section__header">
+                <h2>Archive and Historical Years</h2>
+                <a class="help-section__guideLink" href="user_guide.html#archive"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                Archive provides historical year links grouped by module so you
+                can browse prior data without changing active-year
+                configuration.
+              </p>
+              <h3>When to use Archive</h3>
+              <ul>
+                <li>Review prior year Payment Orders.</li>
+                <li>Inspect old budget tables and ledger data.</li>
+                <li>Check historical Money Transfers and related records.</li>
+              </ul>
+              <p>
+                If Archive is not visible in navigation, your account does not
+                currently include archive access.
+              </p>
+            </section>
+
+            <section
+              id="help-settings"
+              class="help-section"
+              data-search="admin settings user roles numbering gl information email notifications backup audit log backlog permission keys"
+            >
+              <div class="help-section__header">
+                <h2>Admin Settings</h2>
+                <a class="help-section__guideLink" href="user_guide.html#settings"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                Admin Settings controls users, numbering, branding assets, email
+                templates, backups, and audit visibility.
+              </p>
+              <h3>Key areas</h3>
+              <ul>
+                <li>User Roles: create/update account permissions.</li>
+                <li>PO and MT Numbering: sequence settings.</li>
+                <li>GL Information: logo and signature for PDFs.</li>
+                <li>Email Notifications: recipients and templates.</li>
+                <li>Audit Log: read-only security and action events.</li>
+                <li>Backlog: lightweight internal task tracking.</li>
+              </ul>
+              <h3>When to use each area</h3>
+              <ul>
+                <li>
+                  <strong>User Roles:</strong> when a user needs access added,
+                  removed, or corrected.
+                </li>
+                <li>
+                  <strong>PO and MT Numbering:</strong> when numbering rules or
+                  counters need to change.
+                </li>
+                <li>
+                  <strong>GL Information:</strong> when PDF branding assets are
+                  outdated.
+                </li>
+                <li>
+                  <strong>Email Notifications:</strong> when recipients or
+                  templates must be updated.
+                </li>
+                <li>
+                  <strong>Backup:</strong> before major admin changes or at
+                  regular checkpoints.
+                </li>
+              </ul>
+            </section>
+
+            <section
+              id="help-notifications"
+              class="help-section"
+              data-search="notifications email alerts recipients templates payment order new backlog money transfer gs review gm review gt processing"
+            >
+              <div class="help-section__header">
+                <h2>Notifications and Alerts</h2>
+                <a class="help-section__guideLink" href="user_guide.html#notifications"
+                  >Open in User Guide</a
+                >
+              </div>
+              <p>
+                The app can send email notifications for key workflow events
+                when notification settings are configured in shared WordPress
+                mode.
+              </p>
+              <h3>Typical events</h3>
+              <ul>
+                <li>New Payment Order submitted.</li>
+                <li>Grand Secretary review needed.</li>
+                <li>Grand Master review needed.</li>
+                <li>Grand Treasurer processing needed.</li>
+                <li>Money Transfer GS or GT verification steps.</li>
+                <li>
+                  Budget updates or backlog item creation where configured.
+                </li>
+              </ul>
+              <h3>What admins usually manage</h3>
+              <ul>
+                <li>Recipient addresses.</li>
+                <li>Subject and body templates.</li>
+                <li>Which events are enabled.</li>
+              </ul>
+              <div class="help-note">
+                If an expected email does not arrive, first confirm the event is
+                enabled and the configured recipients are correct.
+              </div>
+            </section>
+
+            <section
+              id="help-backup"
+              class="help-section"
+              data-search="backup restore download wordpress backup cloud backup google drive oauth snapshot json"
+            >
+              <div class="help-section__header">
+                <h2>Backup and Restore</h2>
+                <a class="help-section__guideLink" href="user_guide.html#backup"
+                  >Open in User Guide</a
+                >
+              </div>
+              <h3>WordPress backup</h3>
+              <ol>
+                <li>Select budget year.</li>
+                <li>Create backup snapshot.</li>
+                <li>Download or restore from backup card.</li>
+              </ol>
+              <h3>Cloud backup (Google Drive)</h3>
+              <ol>
+                <li>Configure OAuth client in plugin settings.</li>
+                <li>Authorize Google account.</li>
+                <li>Create cloud backup and restore when needed.</li>
+              </ol>
+              <h3>When to take a backup</h3>
+              <ul>
+                <li>Before major admin changes.</li>
+                <li>Before restoring older data.</li>
+                <li>Before testing structure or numbering changes.</li>
+                <li>As part of routine operational housekeeping.</li>
+              </ul>
+              <h3>Restore caution</h3>
+              <p>
+                Restoring data can replace current records depending on the
+                backup workflow being used. Confirm the selected backup and year
+                before continuing.
+              </p>
+              <p>
+                Keep at least one downloaded JSON backup outside WordPress for
+                disaster recovery.
+              </p>
+            </section>
+
+            <section
+              id="help-troubleshooting"
+              class="help-section"
+              data-search="troubleshooting missing page cannot edit cannot save no search results row highlight dark yellow archive hidden sign in failed backup restore help search"
+            >
+              <h2>Troubleshooting and Common Problems</h2>
+              <h3>I cannot see a page in the menu</h3>
+              <ul>
+                <li>Confirm you are signed in.</li>
+                <li>Confirm your account includes that module permission.</li>
+                <li>
+                  If another user can see it and you cannot, ask an admin to
+                  review your permissions.
+                </li>
+              </ul>
+              <h3>I can see a page but cannot change anything</h3>
+              <ul>
+                <li>You may only have read access.</li>
+                <li>
+                  The specific action may require create, delete, or full
+                  access.
+                </li>
+              </ul>
+              <h3>A Payment Order row is highlighted dark</h3>
+              <p>
+                The record likely has missing required data. Open edit and check
+                core fields such as amount, budget number, payee, source, and
+                purpose.
+              </p>
+              <h3>A row is highlighted yellow</h3>
+              <p>
+                The record is in an approval/treasurer-related state and usually
+                needs follow-up rather than correction.
+              </p>
+              <h3>Help search is not finding what I typed</h3>
+              <ul>
+                <li>Try shorter keywords.</li>
+                <li>
+                  Search by module name such as payment, budget, ledger,
+                  archive, backup, or transfer.
+                </li>
+                <li>
+                  Search by action such as approve, reconcile, restore, create,
+                  delete, or sign in.
+                </li>
+              </ul>
+              <h3>I still need more context</h3>
+              <p>
+                Open the User Guide for the full reference version, especially
+                if you need background policy, role definitions, or detailed
+                process descriptions.
+              </p>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <a class="back-to-top" href="#top" aria-label="Back to top">Back to top</a>
+
+    <script>
+      (function () {
+        function escapeRegExp(value) {
+          return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        }
+
+        function clearHighlights(node) {
+          if (!node) return;
+          var marks = node.querySelectorAll("mark.help-mark");
+          marks.forEach(function (mark) {
+            var parent = mark.parentNode;
+            if (!parent) return;
+            parent.replaceChild(
+              document.createTextNode(mark.textContent || ""),
+              mark,
+            );
+            parent.normalize();
+          });
+        }
+
+        function setActiveMark(marks, index) {
+          if (!marks || !marks.length) return;
+          marks.forEach(function (mark) {
+            mark.classList.remove("help-mark--active");
+          });
+
+          var normalizedIndex =
+            ((index % marks.length) + marks.length) % marks.length;
+          var activeMark = marks[normalizedIndex];
+          activeMark.classList.add("help-mark--active");
+          activeMark.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+            inline: "nearest",
+          });
+        }
+
+        function highlightTerms(node, terms) {
+          if (!node || !terms.length) return;
+          var walker = document.createTreeWalker(
+            node,
+            NodeFilter.SHOW_TEXT,
+            null,
+          );
+          var textNodes = [];
+          while (walker.nextNode()) {
+            var current = walker.currentNode;
+            if (!current || !current.nodeValue) continue;
+            var parent = current.parentElement;
+            if (!parent) continue;
+            if (
+              parent.closest(
+                "a, button, input, textarea, select, script, style",
+              )
+            )
+              continue;
+            textNodes.push(current);
+          }
+
+          textNodes.forEach(function (textNode) {
+            var text = textNode.nodeValue;
+            var replaced = text;
+            var changed = false;
+            terms.forEach(function (term) {
+              var rx = new RegExp("(" + escapeRegExp(term) + ")", "ig");
+              if (rx.test(replaced)) {
+                replaced = replaced.replace(
+                  rx,
+                  '<mark class="help-mark">$1</mark>',
+                );
+                changed = true;
+              }
+            });
+            if (!changed) return;
+
+            var span = document.createElement("span");
+            span.innerHTML = replaced;
+            textNode.parentNode.replaceChild(span, textNode);
+          });
+        }
+
+        function initHelpSearch() {
+          var input = document.getElementById("helpGlobalSearch");
+          var clearButton = document.getElementById("helpSearchClear");
+          var meta = document.getElementById("helpSearchMeta");
+          var empty = document.getElementById("helpNoResults");
+          var sections = Array.prototype.slice.call(
+            document.querySelectorAll(".help-section"),
+          );
+          var matchedMarks = [];
+          var activeMarkIndex = -1;
+          if (!input || !clearButton || !meta || !empty || !sections.length)
+            return;
+
+          function apply() {
+            var raw = String(input.value || "").trim();
+            var query = raw.toLowerCase();
+            var terms = query.split(/\s+/).filter(Boolean);
+            var visibleCount = 0;
+
+            matchedMarks = [];
+            activeMarkIndex = -1;
+
+            sections.forEach(function (section) {
+              clearHighlights(section);
+              var haystack = (
+                (section.getAttribute("data-search") || "") +
+                " " +
+                (section.textContent || "")
+              ).toLowerCase();
+
+              var isMatch =
+                !terms.length ||
+                terms.every(function (term) {
+                  return haystack.indexOf(term) !== -1;
+                });
+
+              section.style.display = isMatch ? "" : "none";
+              if (isMatch) {
+                visibleCount += 1;
+                if (terms.length) {
+                  highlightTerms(section, terms);
+                  matchedMarks = matchedMarks.concat(
+                    Array.prototype.slice.call(
+                      section.querySelectorAll("mark.help-mark"),
+                    ),
+                  );
+                }
+              }
+            });
+
+            if (matchedMarks.length) {
+              activeMarkIndex = 0;
+              setActiveMark(matchedMarks, activeMarkIndex);
+            }
+
+            empty.style.display = visibleCount ? "none" : "block";
+            if (!terms.length) {
+              meta.textContent = "Showing all sections.";
+            } else {
+              meta.textContent =
+                "Showing " +
+                visibleCount +
+                " matching section" +
+                (visibleCount === 1 ? "" : "s") +
+                ' for "' +
+                raw +
+                '". Press Enter to jump to the next match.';
+            }
+          }
+
+          input.addEventListener("input", apply);
+          input.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter") return;
+            if (!matchedMarks.length) return;
+            event.preventDefault();
+            activeMarkIndex = (activeMarkIndex + 1) % matchedMarks.length;
+            setActiveMark(matchedMarks, activeMarkIndex);
+          });
+          clearButton.addEventListener("click", function () {
+            input.value = "";
+            apply();
+            input.focus();
+          });
+
+          apply();
+        }
+
+        document.addEventListener("DOMContentLoaded", initHelpSearch);
+      })();
+    </script>
+    <script src="app.js" defer></script>
+  </body>
+</html>

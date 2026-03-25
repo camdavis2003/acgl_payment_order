@@ -2,12 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <script>try{var __t=localStorage.getItem('payment_order_theme');if(__t==='dark'||__t==='light')document.documentElement.setAttribute('data-theme',__t);}catch(e){}</script>
+    <script>
+      try {
+        var __t = localStorage.getItem("payment_order_theme");
+        if (__t === "dark" || __t === "light")
+          document.documentElement.setAttribute("data-theme", __t);
+      } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>User Guide – ACGL FMS</title>
     <link rel="stylesheet" href="styles.css" />
     <style>
       /* ── Guide-specific overrides ── */
+      html {
+        scroll-padding-top: 208px;
+      }
+
       .ug-wrap {
         max-width: 900px;
         margin: 0 auto;
@@ -17,50 +27,89 @@
       .ug-toc {
         background: var(--card);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 20px 28px;
-        margin-bottom: 40px;
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 28px;
       }
 
       .ug-toc h2 {
-        margin-top: 0;
-        font-size: 1rem;
+        margin: 0 0 8px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: var(--focus);
         text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--muted);
+        letter-spacing: 0.04em;
       }
 
       .ug-toc ol {
         margin: 0;
-        padding-left: 20px;
+        padding: 0;
+        list-style: none;
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 4px 32px;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 12px;
       }
 
       .ug-toc li {
-        margin: 2px 0;
+        margin: 0;
+        grid-column: span 3;
       }
 
       .ug-toc a {
+        display: block;
+        background: var(--surface);
         color: var(--focus);
+        border: 1px solid var(--focus);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 0.87rem;
+        font-weight: 600;
+        line-height: 1.35;
         text-decoration: none;
       }
 
       .ug-toc a:hover {
-        text-decoration: underline;
+        background: var(--focus);
+        color: var(--primary-text);
       }
 
       .ug-section {
         margin-bottom: 48px;
-        scroll-margin-top: 16px;
+        scroll-margin-top: 208px;
+      }
+
+      .ug-section__header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
       }
 
       .ug-section h2 {
         font-size: 1.35rem;
         border-bottom: 2px solid var(--border);
         padding-bottom: 6px;
-        margin-bottom: 16px;
+        margin: 0;
+      }
+
+      .ug-section__helpLink {
+        flex: 0 0 auto;
+        text-decoration: none;
+        border: 1px solid var(--focus);
+        color: var(--focus);
+        background: var(--surface);
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+
+      .ug-section__helpLink:hover {
+        background: var(--focus);
+        color: var(--primary-text);
       }
 
       .ug-section h3 {
@@ -89,6 +138,124 @@
         margin: 0 0 12px;
         padding-left: 22px;
         line-height: 1.7;
+      }
+
+      .ug-search {
+        position: sticky;
+        top: 8px;
+        z-index: 6;
+        background: color-mix(in srgb, var(--focus) 7%, var(--card));
+        border: 1px solid color-mix(in srgb, var(--focus) 45%, var(--border));
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 16px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+      }
+
+      .ug-search__title {
+        margin: 0 0 8px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--focus);
+      }
+
+      .ug-search__row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+      }
+
+      .ug-search input {
+        width: 100%;
+        border: 1px solid color-mix(in srgb, var(--focus) 35%, var(--border));
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        padding: 10px 12px;
+        font-size: 0.96rem;
+        font-weight: 500;
+      }
+
+      .ug-search input:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 1px;
+      }
+
+      .ug-search button {
+        border: 1px solid var(--focus);
+        border-radius: 8px;
+        background: var(--focus);
+        color: var(--primary-text);
+        padding: 10px 14px;
+        min-width: 88px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .ug-search button:hover {
+        filter: brightness(0.95);
+      }
+
+      .ug-search__meta {
+        margin-top: 8px;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+
+      .ug-mark {
+        background: #fef08a;
+        color: #111827;
+        border-radius: 2px;
+        padding: 0 2px;
+      }
+
+      .ug-mark--active {
+        background: #f59e0b;
+        color: #111827;
+        box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.28);
+      }
+
+      html[data-theme="dark"] .ug-mark {
+        background: #facc15;
+        color: #111827;
+      }
+
+      html[data-theme="dark"] .ug-mark--active {
+        background: #fbbf24;
+        color: #111827;
+        box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.24);
+      }
+
+      .ug-empty {
+        display: none;
+        background: var(--card);
+        border: 1px dashed var(--border);
+        border-radius: 10px;
+        padding: 14px;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+
+      .back-to-top {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 2100;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--focus);
+        background: var(--focus);
+        color: var(--primary-text);
+        text-decoration: none;
+        font-size: 0.85rem;
+        font-weight: 600;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+      }
+
+      .back-to-top:hover {
+        filter: brightness(0.95);
       }
 
       /* ── Process flow diagram ── */
@@ -313,10 +480,30 @@
         color: #f9fafb;
       }
 
+      @media (max-width: 900px) {
+        .ug-toc li {
+          grid-column: span 4;
+        }
+      }
+
       @media (max-width: 640px) {
-        .ug-toc ol {
+        .ug-section__header {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .ug-section__helpLink {
+          width: fit-content;
+        }
+
+        .ug-toc li {
+          grid-column: span 6;
+        }
+
+        .ug-search__row {
           grid-template-columns: 1fr;
         }
+
         .flow {
           flex-direction: column;
         }
@@ -327,7 +514,7 @@
       }
     </style>
   </head>
-  <body>
+  <body id="top">
     <div class="appShell appShell--navClosed" data-app-shell>
       <aside class="appNav" id="appNav">
         <nav class="appNavTree" data-nav-tree aria-label="Primary"></nav>
@@ -383,6 +570,27 @@
 
         <main>
           <div class="ug-wrap">
+            <section class="ug-search" aria-label="Global guide search">
+              <p class="ug-search__title">Global Search</p>
+              <div class="ug-search__row">
+                <input
+                  id="ugGlobalSearch"
+                  type="search"
+                  autocomplete="off"
+                  placeholder="Search guide... examples: payment order, budget, backup, archive"
+                />
+                <button id="ugSearchClear" type="button">Clear</button>
+              </div>
+              <div id="ugSearchMeta" class="ug-search__meta">
+                Showing all sections.
+              </div>
+            </section>
+
+            <div id="ugNoResults" class="ug-empty">
+              No matching section was found. Try broader keywords such as
+              payment, budget, ledger, archive, backup, or permissions.
+            </div>
+
             <!-- ── TABLE OF CONTENTS ── -->
             <nav class="ug-toc" aria-label="Table of contents">
               <h2>Contents</h2>
@@ -414,7 +622,14 @@
             <!-- 1. OVERVIEW                               -->
             <!-- ══════════════════════════════════════════ -->
             <section id="overview" class="ug-section">
-              <h2>1. Application Overview</h2>
+              <div class="ug-section__header">
+                <h2>1. Application Overview</h2>
+                <a
+                  class="ug-section__helpLink"
+                  href="help.html#help-get-started"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 The <strong>ACGL Financial Management System (FMS)</strong> is a
                 browser-based financial workflow application for the Ancient,
@@ -500,7 +715,12 @@
             <!-- 3. SIGNING IN                             -->
             <!-- ══════════════════════════════════════════ -->
             <section id="signing-in" class="ug-section">
-              <h2>3. Signing In</h2>
+              <div class="ug-section__header">
+                <h2>3. Signing In</h2>
+                <a class="ug-section__helpLink" href="help.html#help-auth"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 Click the <strong>Sign in</strong> button in the header. Enter
                 your username and password, then click <em>Sign In</em>.
@@ -533,7 +753,14 @@
             <!-- 4. USER ROLES & PERMISSIONS               -->
             <!-- ══════════════════════════════════════════ -->
             <section id="roles" class="ug-section">
-              <h2>4. User Roles &amp; Permissions</h2>
+              <div class="ug-section__header">
+                <h2>4. User Roles &amp; Permissions</h2>
+                <a
+                  class="ug-section__helpLink"
+                  href="help.html#help-permissions"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 Permissions are assigned per-module to each user by an
                 administrator in <strong>Admin Settings → User Roles</strong>.
@@ -739,7 +966,14 @@
             <!-- 5. PAYMENT ORDERS                         -->
             <!-- ══════════════════════════════════════════ -->
             <section id="payment-orders" class="ug-section">
-              <h2>5. Payment Orders</h2>
+              <div class="ug-section__header">
+                <h2>5. Payment Orders</h2>
+                <a
+                  class="ug-section__helpLink"
+                  href="help.html#help-payment-orders"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 Payment Orders (POs) are the core financial document of the FMS.
                 A PO represents a request for reimbursement or expenditure
@@ -812,7 +1046,12 @@
             <!-- 6. ITEMIZING A PAYMENT ORDER              -->
             <!-- ══════════════════════════════════════════ -->
             <section id="itemize" class="ug-section">
-              <h2>6. Itemizing a Payment Order</h2>
+              <div class="ug-section__header">
+                <h2>6. Itemizing a Payment Order</h2>
+                <a class="ug-section__helpLink" href="help.html#help-itemize"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 When a payment order covers multiple expense categories (e.g.
                 flights, hotel, meals), click the <strong>Euro</strong> or
@@ -849,7 +1088,12 @@
             <!-- 7. PAYMENT ORDER LIFECYCLE                -->
             <!-- ══════════════════════════════════════════ -->
             <section id="po-lifecycle" class="ug-section">
-              <h2>7. Payment Order Lifecycle</h2>
+              <div class="ug-section__header">
+                <h2>7. Payment Order Lifecycle</h2>
+                <a class="ug-section__helpLink" href="help.html#help-statuses"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 Every Payment Order moves through a defined set of statuses. An
                 authorised user updates the status in the Payment Orders list
@@ -984,7 +1228,14 @@
             <!-- 8. RECONCILIATION                         -->
             <!-- ══════════════════════════════════════════ -->
             <section id="reconciliation" class="ug-section">
-              <h2>8. Reconciliation</h2>
+              <div class="ug-section__header">
+                <h2>8. Reconciliation</h2>
+                <a
+                  class="ug-section__helpLink"
+                  href="help.html#help-reconciliation"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 The Reconciliation page (<strong
                   >Payment Orders → [Year] → Reconciliation</strong
@@ -1010,7 +1261,12 @@
             <!-- 9. BUDGET                                 -->
             <!-- ══════════════════════════════════════════ -->
             <section id="budget" class="ug-section">
-              <h2>9. Budget</h2>
+              <div class="ug-section__header">
+                <h2>9. Budget</h2>
+                <a class="ug-section__helpLink" href="help.html#help-budget"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 The Budget page (<strong>Budget → [Year]</strong>) presents the
                 annual budget table with IN (income/receipts) and OUT
@@ -1106,7 +1362,12 @@
             <!-- 11. LEDGER                                -->
             <!-- ══════════════════════════════════════════ -->
             <section id="ledger" class="ug-section">
-              <h2>11. Ledger</h2>
+              <div class="ug-section__header">
+                <h2>11. Ledger</h2>
+                <a class="ug-section__helpLink" href="help.html#help-ledger"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 The Ledger (<strong>Ledger → [Year]</strong>) is a consolidated
                 view that combines all income entries (BankEUR) and
@@ -1210,7 +1471,14 @@
             <!-- 14. MONEY TRANSFERS                       -->
             <!-- ══════════════════════════════════════════ -->
             <section id="money-transfers" class="ug-section">
-              <h2>14. Money Transfers</h2>
+              <div class="ug-section__header">
+                <h2>14. Money Transfers</h2>
+                <a
+                  class="ug-section__helpLink"
+                  href="help.html#help-money-transfers"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 Money Transfers (MTs) record the transfer of funds from one
                 account to another (e.g. wiseEUR to Commerzbank). Each MT groups
@@ -1275,7 +1543,12 @@
             <!-- 15. ARCHIVE                               -->
             <!-- ══════════════════════════════════════════ -->
             <section id="archive" class="ug-section">
-              <h2>15. Archive</h2>
+              <div class="ug-section__header">
+                <h2>15. Archive</h2>
+                <a class="ug-section__helpLink" href="help.html#help-archive"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 The Archive page (<strong>Archive</strong> in the sidebar)
                 provides links to historical years' data, grouped by functional
@@ -1477,7 +1750,14 @@
             <!-- 17. EMAIL NOTIFICATIONS                   -->
             <!-- ══════════════════════════════════════════ -->
             <section id="notifications" class="ug-section">
-              <h2>17. Email Notifications</h2>
+              <div class="ug-section__header">
+                <h2>17. Email Notifications</h2>
+                <a
+                  class="ug-section__helpLink"
+                  href="help.html#help-notifications"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 The FMS can send automatic email notifications when key events
                 occur. Notifications are only active in
@@ -1598,7 +1878,12 @@
             <!-- 18. ADMIN SETTINGS                        -->
             <!-- ══════════════════════════════════════════ -->
             <section id="settings" class="ug-section">
-              <h2>18. Admin Settings</h2>
+              <div class="ug-section__header">
+                <h2>18. Admin Settings</h2>
+                <a class="ug-section__helpLink" href="help.html#help-settings"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 Accessed via <strong>Admin Settings</strong> in the sidebar
                 (requires the <em>settings</em> permission). The Settings page
@@ -1657,7 +1942,12 @@
             <!-- 19. BACKUP & RESTORE                      -->
             <!-- ══════════════════════════════════════════ -->
             <section id="backup" class="ug-section">
-              <h2>19. Backup &amp; Restore</h2>
+              <div class="ug-section__header">
+                <h2>19. Backup &amp; Restore</h2>
+                <a class="ug-section__helpLink" href="help.html#help-backup"
+                  >Open in Help Center</a
+                >
+              </div>
               <p>
                 The FMS supports three backup mechanisms, all accessible from
                 <strong>Admin Settings → Backup</strong>.
@@ -1747,6 +2037,242 @@
       <!-- /.appMain -->
     </div>
     <!-- /.appShell -->
+
+    <a class="back-to-top" href="#top" aria-label="Back to top">Back to top</a>
+
+    <script>
+      (function () {
+        function escapeRegExp(value) {
+          return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        }
+
+        function clearHighlights(node) {
+          if (!node) return;
+          var marks = node.querySelectorAll("mark.ug-mark");
+          marks.forEach(function (mark) {
+            var parent = mark.parentNode;
+            if (!parent) return;
+            parent.replaceChild(
+              document.createTextNode(mark.textContent || ""),
+              mark,
+            );
+            parent.normalize();
+          });
+        }
+
+        function setActiveMark(marks, index) {
+          if (!marks || !marks.length) return;
+          marks.forEach(function (mark) {
+            mark.classList.remove("ug-mark--active");
+          });
+
+          var normalizedIndex =
+            ((index % marks.length) + marks.length) % marks.length;
+          var activeMark = marks[normalizedIndex];
+          activeMark.classList.add("ug-mark--active");
+          activeMark.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+            inline: "nearest",
+          });
+        }
+
+        function highlightTerms(node, terms) {
+          if (!node || !terms.length) return;
+          var walker = document.createTreeWalker(
+            node,
+            NodeFilter.SHOW_TEXT,
+            null,
+          );
+          var textNodes = [];
+          while (walker.nextNode()) {
+            var current = walker.currentNode;
+            if (!current || !current.nodeValue) continue;
+            var parent = current.parentElement;
+            if (!parent) continue;
+            if (
+              parent.closest(
+                "a, button, input, textarea, select, script, style",
+              )
+            )
+              continue;
+            textNodes.push(current);
+          }
+
+          textNodes.forEach(function (textNode) {
+            var text = textNode.nodeValue;
+            var replaced = text;
+            var changed = false;
+            terms.forEach(function (term) {
+              var rx = new RegExp("(" + escapeRegExp(term) + ")", "ig");
+              if (rx.test(replaced)) {
+                replaced = replaced.replace(
+                  rx,
+                  '<mark class="ug-mark">$1</mark>',
+                );
+                changed = true;
+              }
+            });
+            if (!changed) return;
+
+            var span = document.createElement("span");
+            span.innerHTML = replaced;
+            textNode.parentNode.replaceChild(span, textNode);
+          });
+        }
+
+        function initUserGuideTocScroll() {
+          // Measure combined sticky obstacle once at page load.
+          var header = document.querySelector(".site-header");
+          var stickySearch = document.querySelector(".ug-search");
+          var headerHeight = header ? header.getBoundingClientRect().height : 0;
+          var stickySearchHeight = stickySearch
+            ? stickySearch.getBoundingClientRect().height
+            : 0;
+          var stickySearchCssTop = stickySearch
+            ? parseFloat(getComputedStyle(stickySearch).top) || 0
+            : 0;
+          var obstacleBottom =
+            Math.max(headerHeight, stickySearchCssTop + stickySearchHeight) +
+            16;
+
+          // Apply scroll-margin-top to every section heading so the browser's
+          // native scrollIntoView always lands in the right place.
+          Array.prototype.forEach.call(
+            document.querySelectorAll(".ug-section h2"),
+            function (h2) {
+              h2.style.scrollMarginTop = obstacleBottom + "px";
+            },
+          );
+
+          function scrollToHeading(hash, behavior) {
+            if (!hash || hash.charAt(0) !== "#") return;
+            var section = document.querySelector(hash);
+            if (!section) return;
+            var heading = section.querySelector("h2") || section;
+            heading.scrollIntoView({
+              behavior: behavior || "smooth",
+              block: "start",
+            });
+          }
+
+          var tocLinks = Array.prototype.slice.call(
+            document.querySelectorAll('.ug-toc a[href^="#"]'),
+          );
+          if (!tocLinks.length) return;
+
+          tocLinks.forEach(function (link) {
+            link.addEventListener("click", function (event) {
+              var hash = link.getAttribute("href") || "";
+              if (!hash || hash.charAt(0) !== "#") return;
+              var section = document.querySelector(hash);
+              if (!section) return;
+              event.preventDefault();
+              history.replaceState(null, "", hash);
+              scrollToHeading(hash, "smooth");
+            });
+          });
+
+          if (window.location.hash) {
+            window.requestAnimationFrame(function () {
+              scrollToHeading(window.location.hash, "auto");
+            });
+          }
+        }
+
+        function initUserGuideSearch() {
+          var input = document.getElementById("ugGlobalSearch");
+          var clearButton = document.getElementById("ugSearchClear");
+          var meta = document.getElementById("ugSearchMeta");
+          var empty = document.getElementById("ugNoResults");
+          var sections = Array.prototype.slice.call(
+            document.querySelectorAll(".ug-section"),
+          );
+          var matchedMarks = [];
+          var activeMarkIndex = -1;
+          if (!input || !clearButton || !meta || !empty || !sections.length)
+            return;
+
+          function apply() {
+            var raw = String(input.value || "").trim();
+            var query = raw.toLowerCase();
+            var terms = query.split(/\s+/).filter(Boolean);
+            var visibleCount = 0;
+
+            matchedMarks = [];
+            activeMarkIndex = -1;
+
+            sections.forEach(function (section) {
+              clearHighlights(section);
+              var haystack = (
+                (section.getAttribute("data-search") || "") +
+                " " +
+                (section.textContent || "")
+              ).toLowerCase();
+
+              var isMatch =
+                !terms.length ||
+                terms.every(function (term) {
+                  return haystack.indexOf(term) !== -1;
+                });
+
+              section.style.display = isMatch ? "" : "none";
+              if (isMatch) {
+                visibleCount += 1;
+                if (terms.length) {
+                  highlightTerms(section, terms);
+                  matchedMarks = matchedMarks.concat(
+                    Array.prototype.slice.call(
+                      section.querySelectorAll("mark.ug-mark"),
+                    ),
+                  );
+                }
+              }
+            });
+
+            if (matchedMarks.length) {
+              activeMarkIndex = 0;
+              setActiveMark(matchedMarks, activeMarkIndex);
+            }
+
+            empty.style.display = visibleCount ? "none" : "block";
+            if (!terms.length) {
+              meta.textContent = "Showing all sections.";
+            } else {
+              meta.textContent =
+                "Showing " +
+                visibleCount +
+                " matching section" +
+                (visibleCount === 1 ? "" : "s") +
+                ' for "' +
+                raw +
+                '". Press Enter to jump to the next match.';
+            }
+          }
+
+          input.addEventListener("input", apply);
+          input.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter") return;
+            if (!matchedMarks.length) return;
+            event.preventDefault();
+            activeMarkIndex = (activeMarkIndex + 1) % matchedMarks.length;
+            setActiveMark(matchedMarks, activeMarkIndex);
+          });
+          clearButton.addEventListener("click", function () {
+            input.value = "";
+            apply();
+            input.focus();
+          });
+
+          apply();
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+          initUserGuideSearch();
+          initUserGuideTocScroll();
+        });
+      })();
+    </script>
 
     <script src="app.js" defer></script>
   </body>

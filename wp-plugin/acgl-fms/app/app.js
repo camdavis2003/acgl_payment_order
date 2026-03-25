@@ -302,7 +302,8 @@
 
       const base = getBasename(u.pathname);
       const qs = u.searchParams.toString();
-      return qs ? `${base}?${qs}` : base;
+      const hash = u.hash || '';
+      return qs ? `${base}?${qs}${hash}` : `${base}${hash}`;
     } catch {
       return href;
     }
@@ -1590,6 +1591,14 @@
     delete: 4,
     full: 5,
   };
+  const ACCESS_LEVEL_CAPABILITIES = {
+    none: { read: false, write: false, create: false, delete: false, full: false },
+    read: { read: true, write: false, create: false, delete: false, full: false },
+    write: { read: true, write: true, create: false, delete: false, full: false },
+    create: { read: true, write: true, create: true, delete: false, full: false },
+    delete: { read: true, write: true, create: true, delete: true, full: false },
+    full: { read: true, write: true, create: true, delete: true, full: true },
+  };
 
   const STRICT_EXPLICIT_PERMISSION_KEYS = new Set([
     'income_bankeur',
@@ -1646,7 +1655,8 @@
     const p = getEffectivePermissions(user);
     const current = String((p && p[permKey]) || 'none').toLowerCase();
     const needed = isValidAccessLevel(minLevel) ? String(minLevel).toLowerCase() : 'read';
-    return (ACCESS_LEVEL_RANK[current] || 0) >= (ACCESS_LEVEL_RANK[needed] || 0);
+    const capabilities = ACCESS_LEVEL_CAPABILITIES[current] || ACCESS_LEVEL_CAPABILITIES.none;
+    return Boolean(capabilities[needed]);
   }
 
   function getEffectivePermissions(user) {
@@ -1683,7 +1693,7 @@
     if (base === 'wise_eur.html') return 'ledger_wiseeur';
     if (base === 'wise_usd.html') return 'ledger_wiseusd';
     if (base === 'menu.html') return 'orders';
-    if (base === 'reconciliation.html') return 'orders';
+    if (base === 'reconciliation.html') return 'orders_reconciliation';
     if (base === 'grand_secretary_ledger.html') return 'ledger';
     if (base === 'money_transfers.html') return 'ledger_money_transfers';
     if (base === 'money_transfer.html') return 'ledger_money_transfers';
@@ -1790,7 +1800,7 @@
   }
 
   function canIncomeEdit(user) {
-    return canWrite(user, 'income_bankeur');
+    return canWriteOrCreate(user, 'income_bankeur');
   }
 
   function canOrdersViewEdit(user) {
@@ -1949,6 +1959,31 @@
 
   function requireDeleteAccess(permKey, message) {
     return requireWriteAccess(permKey, message, 'delete');
+  }
+
+  function canWriteOrCreate(user, permKey) {
+    if (!permKey) return true;
+    return canWrite(user, permKey) || canCreate(user, permKey);
+  }
+
+  function requireWriteOrCreateAccess(permKey, message) {
+    const user = getCurrentUser();
+    if (!user) {
+      window.alert('Please sign in.');
+      return false;
+    }
+    if (!canWriteOrCreate(user, permKey)) {
+      window.alert(message || 'Read only access.');
+      return false;
+    }
+    return true;
+  }
+
+  function alertDisabledAction(el, fallback = 'Read only access.') {
+    const msg = String(
+      (el && (el.getAttribute('data-tooltip') || el.getAttribute('title'))) || fallback
+    ).trim();
+    window.alert(msg || fallback);
   }
 
   function requireOrdersViewEditAccess(message) {
@@ -2494,6 +2529,7 @@
       { key: 'archive', label: 'Archive', href: 'archive.html' },
       { key: 'settings', label: 'Admin Settings', href: 'settings.html' },
       { key: null, label: 'User Guide', href: 'user_guide.html' },
+      { key: null, label: 'Help Center', href: 'help.html' },
       { key: null, label: 'About', href: 'about.html' },
       { key: null, label: 'Log out', href: 'index.html?logout=1' },
     ]);
@@ -8510,17 +8546,17 @@
     const year = getActiveBudgetYear();
 
     const currentUser = getCurrentUser();
-    const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
-    const canDeleteOrders = currentUser ? canWrite(currentUser, 'orders') : false;
+    const canEditOrders = currentUser ? canWriteOrCreate(currentUser, 'orders') : false;
+    const canDeleteOrders = currentUser ? canDelete(currentUser, 'orders') : false;
     const canViewItems = currentUser ? canOrdersItemizeRead(currentUser) : false;
-    const editDisabledAttr = canEditOrders ? '' : ' disabled';
+    const editDisabledAttr = '';
     const editAriaDisabled = canEditOrders ? 'false' : 'true';
-    const editTooltipAttr = canEditOrders ? '' : ' data-tooltip="Requires Write access for Payment Orders."';
-    const deleteDisabledAttr = canDeleteOrders ? '' : ' disabled';
+    const editTooltipAttr = canEditOrders ? '' : ' data-tooltip="Edit and create access required for Payment Orders."';
+    const deleteDisabledAttr = '';
     const deleteAriaDisabled = canDeleteOrders ? 'false' : 'true';
-    const deleteTooltipAttr = canDeleteOrders ? '' : ' data-tooltip="Requires Write access for Payment Orders."';
+    const deleteTooltipAttr = canDeleteOrders ? '' : ' data-tooltip="Requires Delete access for Payment Orders."';
 
-    const itemsDisabledAttr = canViewItems ? '' : ' disabled';
+    const itemsDisabledAttr = '';
     const itemsAriaDisabled = canViewItems ? 'false' : 'true';
     const itemsTooltipAttr = canViewItems ? '' : ' data-tooltip="Requires Payment Orders access."';
 
@@ -8559,9 +8595,9 @@
             <td>${escapeHtml(statusLabel)}</td>
             <td class="actions">
               <button type="button" class="btn btn--viewGrey btn--viewIcon" data-action="view" title="View" aria-label="View">${VIEW_EYE_ICON_SVG}</button>
-              <button type="button" class="btn btn--editIcon" data-action="edit" title="${canEditOrders ? 'Edit' : 'Requires Write access for Payment Orders.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--editIcon" data-action="edit" title="${canEditOrders ? 'Edit' : 'Read-only access for Payment Orders.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
               <button type="button" class="btn btn--itemsIcon" data-action="items" title="${canViewItems ? 'Items' : 'Requires Payment Orders access.'}" aria-label="Items" aria-disabled="${itemsAriaDisabled}"${itemsDisabledAttr}${itemsTooltipAttr}>${ITEMS_LIST_ICON_SVG}</button>
-              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete request" title="${canDeleteOrders ? 'Delete' : 'Requires Write access for Payment Orders.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete request" title="${canDeleteOrders ? 'Delete' : 'Requires Delete access for Payment Orders.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -9987,7 +10023,7 @@
     // - Orders Write-or-higher can update Source from this View modal.
     // - Approval workflow: With and Status are only editable by roles authorized
     //   for the current 'With' stage (or the internal admin).
-    const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
+    const canEditOrders = currentUser ? canWriteOrCreate(currentUser, 'orders') : false;
     const canViewWrite = currentUser ? canOrdersViewEdit(currentUser) : false;
 
     const withEditable = Boolean(currentUser && canChangeWithField(currentUser, currentWith));
@@ -10000,8 +10036,8 @@
     if (budgetNumberSelect) budgetNumberSelect.disabled = !canEditBudgetNumberInView;
 
     if (editOrderBtn) {
-      editOrderBtn.disabled = !canEditOrders;
-      if (!canEditOrders) editOrderBtn.setAttribute('data-tooltip', 'Requires Write access for Payment Orders.');
+      editOrderBtn.setAttribute('aria-disabled', canEditOrders ? 'false' : 'true');
+      if (!canEditOrders) editOrderBtn.setAttribute('data-tooltip', 'Read-only access for Payment Orders.');
       else editOrderBtn.removeAttribute('data-tooltip');
     }
     if (saveOrderBtn) {
@@ -10097,7 +10133,7 @@
     if (!tbody) return;
     const year = getActiveBudgetYear();
     const currentUser = getCurrentUser();
-    const canOpenReconciliation = Boolean(currentUser);
+    const canOpenReconciliation = Boolean(currentUser && hasPermission(currentUser, 'orders_reconciliation'));
 
     // Ensure the year is present in the URL for consistent nav highlighting.
     const fromUrl = getBudgetYearFromUrl();
@@ -10420,6 +10456,16 @@
     if (!reconcileTbody || !reconcileEmptyState) return;
     reconcileTbody.innerHTML = '';
 
+    const currentUser = getCurrentUser();
+    const canEditReconciliation = currentUser ? canWriteOrCreate(currentUser, 'orders_reconciliation') : false;
+    const canDeleteReconciliation = currentUser ? canDelete(currentUser, 'orders_reconciliation') : false;
+    const editDisabledAttr = '';
+    const editAriaDisabled = canEditReconciliation ? 'false' : 'true';
+    const editTooltipAttr = canEditReconciliation ? '' : ' data-tooltip="Edit and create access required for Reconciliation."';
+    const deleteDisabledAttr = '';
+    const deleteAriaDisabled = canDeleteReconciliation ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteReconciliation ? '' : ' data-tooltip="Requires Delete access for Reconciliation."';
+
     if (!orders || orders.length === 0) {
       reconcileEmptyState.hidden = false;
       return;
@@ -10446,9 +10492,9 @@
             <td>${escapeHtml(getOrderWithLabel(o))}</td>
             <td>${escapeHtml(getOrderStatusLabel(o))}</td>
             <td class="actions">
-              <button type="button" class="btn btn--editIcon" data-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--editIcon" data-action="edit" aria-label="Edit" title="${canEditReconciliation ? 'Edit' : 'Read-only access for Reconciliation.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
               <button type="button" class="btn btn--reconcileIcon" data-action="reconcile" aria-label="Reconcile" title="Reconcile">${RECONCILE_PUZZLE_ICON_SVG}</button>
-              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete request" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete request" title="${canDeleteReconciliation ? 'Delete' : 'Requires Delete access for Reconciliation.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -10759,7 +10805,7 @@
       }
 
       if (action === 'delete') {
-        if (!requireWriteAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
+        if (!requireDeleteAccess('orders_reconciliation', 'Delete access is required for Reconciliation.')) return;
         const ok = window.confirm('Delete this reconciliation entry?');
         if (!ok) return;
         deleteReconciliationOrderById(id);
@@ -10767,7 +10813,7 @@
       }
 
       if (action === 'edit') {
-        if (!requireWriteAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
+        if (!requireWriteOrCreateAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
         const order = getReconciliationOrderById(id, year);
         if (!order) return;
         beginEditingOrder(order);
@@ -10776,7 +10822,7 @@
       }
 
       if (action === 'reconcile') {
-        if (!requireWriteAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
+        if (!requireWriteOrCreateAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
         handleReconcileAction(id);
       }
     });
@@ -11565,10 +11611,10 @@
             <div class="backlog__desc">${escapeHtml(it.description)}</div>
             <div class="backlog__actions">
               ${attachmentBtn}
-              <button type="button" class="btn btn--viewGrey" data-backlog-action="comment" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Comment</button>
-              <button type="button" class="btn btn--editIcon" data-backlog-action="edit" aria-label="Edit" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn" data-backlog-action="complete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>${escapeHtml(completeText)}</button>
-              <button type="button" class="btn btn--danger" data-backlog-action="delete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Delete</button>
+              <button type="button" class="btn btn--viewGrey" data-backlog-action="comment" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}>Comment</button>
+              <button type="button" class="btn btn--editIcon" data-backlog-action="edit" aria-label="Edit" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn" data-backlog-action="complete" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}>${escapeHtml(completeText)}</button>
+              <button type="button" class="btn btn--danger" data-backlog-action="delete" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}>Delete</button>
             </div>
             ${comments ? `<div class="backlog__comments" aria-label="Comments">${comments}</div>` : ''}
           </div>
@@ -11669,7 +11715,10 @@
         if (!id || !action) return;
 
         const isViewAction = action === 'attachment';
-        if (!isViewAction && !canEdit) return;
+        if (!isViewAction && !canEdit) {
+          window.alert('Read only access.');
+          return;
+        }
 
         const items = loadBacklogItems();
         const idx = items.findIndex((x) => x && typeof x === 'object' && String(x.id || '') === String(id));
@@ -11892,7 +11941,7 @@
 
           if (IS_WP_SHARED_MODE) {
             if (!getCurrentUser()) throw new Error('not_authorized');
-            if (!requireWriteAccess('settings_backlog', 'Backlog is view only for your account.')) throw new Error('not_authorized');
+            if (!requireWriteOrCreateAccess('settings_backlog', 'Backlog is view only for your account.')) throw new Error('not_authorized');
             return wpUploadBacklogAttachment(itemId, selectedFile);
           }
 
@@ -12857,7 +12906,7 @@
     };
 
     const canEditRoles = hasStrictExplicitSettingsAccess('settings_roles', 'write');
-    const canEditBacklog = hasExplicitSettingsAccess('settings_backlog', 'write');
+    const canEditBacklog = hasExplicitSettingsAccess('settings_backlog', 'write') || hasExplicitSettingsAccess('settings_backlog', 'create');
     const canViewAudit = hasExplicitSettingsAccess('settings_audit', 'read');
     const canViewRolesCard = hasStrictExplicitSettingsAccess('settings_roles', 'read');
 
@@ -15454,9 +15503,13 @@
     if (!moneyTransfersTbody) return;
     const canVerify = Boolean(moneyTransfersViewState.canVerify);
     const canWrite = Boolean(moneyTransfersViewState.canWrite);
-    const writeDisabledAttr = canWrite ? '' : ' disabled';
+    const canDeleteRows = Boolean(moneyTransfersViewState.canDelete);
+    const writeDisabledAttr = '';
     const writeAriaDisabled = canWrite ? 'false' : 'true';
     const writeTooltipAttr = canWrite ? '' : ' data-tooltip="Read only access."';
+    const deleteDisabledAttr = '';
+    const deleteAriaDisabled = canDeleteRows ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteRows ? '' : ' data-tooltip="Requires Delete access for Money Transfers."';
 
     const html = (withIndexRows || [])
       .map(({ row, index }) => {
@@ -15487,7 +15540,7 @@
             <td class="actions">
               <button type="button" class="btn btn--viewGrey btn--viewIcon" data-mt-action="view" data-mt-id="${mtId}" title="View" aria-label="View">${VIEW_EYE_ICON_SVG}</button>
               <button type="button" class="btn btn--editIcon" data-mt-action="edit" data-mt-id="${mtId}" title="${canWrite ? 'Edit' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn btn--x" data-mt-action="delete" data-mt-id="${mtId}" aria-label="Delete money transfer" title="${canWrite ? 'Delete' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+              <button type="button" class="btn btn--x" data-mt-action="delete" data-mt-id="${mtId}" aria-label="Delete money transfer" title="${canDeleteRows ? 'Delete' : 'Requires Delete access for Money Transfers.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -15525,8 +15578,9 @@
 
     const year = getActiveBudgetYear();
     const user = getCurrentUser();
-    moneyTransfersViewState.canVerify = Boolean(user && canWrite(user, 'ledger'));
-    moneyTransfersViewState.canWrite = Boolean(user && canWrite(user, 'ledger'));
+    moneyTransfersViewState.canVerify = Boolean(user && canWrite(user, 'ledger_money_transfers'));
+    moneyTransfersViewState.canWrite = Boolean(user && canWriteOrCreate(user, 'ledger_money_transfers'));
+    moneyTransfersViewState.canDelete = Boolean(user && canDelete(user, 'ledger_money_transfers'));
 
     // Ensure the year is present in the URL for consistent nav highlighting.
     const fromUrl = getBudgetYearFromUrl();
@@ -15597,7 +15651,7 @@
           return;
         }
 
-        if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) {
+        if (!requireWriteAccess('ledger_money_transfers', 'Money Transfers are read only for your account.')) {
           input.checked = !input.checked;
           return;
         }
@@ -15650,8 +15704,11 @@
           return;
         }
 
-        if (!moneyTransfersViewState.canWrite) return;
-        if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
+        if (action === 'delete') {
+          if (!requireDeleteAccess('ledger_money_transfers', 'Delete access is required for Money Transfers.')) return;
+        } else if (!requireWriteAccess('ledger_money_transfers', 'Money Transfers are read only for your account.')) {
+          return;
+        }
 
         if (action === 'delete') {
           const ok = window.confirm('Delete this money transfer?');
@@ -15683,7 +15740,7 @@
       if (!newMtBtn.dataset.bound) {
         newMtBtn.dataset.bound = '1';
         newMtBtn.addEventListener('click', () => {
-          if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
+          if (!requireCreateAccess('ledger_money_transfers', 'Create access is required for Money Transfers.')) return;
           openMoneyTransferRangeModal({ year, mode: 'new' });
         });
       }
@@ -16360,7 +16417,7 @@
       if (!isViewOnly && !saveBtn.dataset.bound) {
         saveBtn.dataset.bound = '1';
         saveBtn.addEventListener('click', async () => {
-          if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
+          if (!requireWriteOrCreateAccess('ledger', 'Money Transfers are read only for your account.')) return;
 
           const mtDate = String(mtBuilderViewState.mtDate || '').trim();
           const selectedLedgerIds = Array.from(new Set((mtBuilderViewState.selectedLedgerIds || []).map((v) => String(v || '').trim()).filter(Boolean)));
@@ -16470,7 +16527,7 @@
         editBtn.dataset.bound = '1';
         editBtn.addEventListener('click', () => {
           if (!canWriteOrCreateLedger) return;
-          if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
+          if (!requireWriteOrCreateAccess('ledger', 'Money Transfers are read only for your account.')) return;
 
           if (!existing) return;
           const editParams = new URLSearchParams();
@@ -16492,7 +16549,7 @@
       if (!isViewOnly && !mtBuilderSelectItemsBtn.dataset.bound) {
         mtBuilderSelectItemsBtn.dataset.bound = '1';
         mtBuilderSelectItemsBtn.addEventListener('click', () => {
-          if (!requireWriteAccess('ledger', 'Money Transfers are read only for your account.')) return;
+          if (!requireWriteOrCreateAccess('ledger', 'Money Transfers are read only for your account.')) return;
           openMtEntrySelectModal({
             year: resolvedYear,
             excludeTransferId: existing ? normalizeMoneyTransferId(existing.id) : '',
@@ -16679,6 +16736,16 @@
   function renderIncomeRows(entries, year) {
     if (!incomeTbody) return;
 
+    const currentUser = getCurrentUser();
+    const canEditIncome = Boolean(currentUser && canWriteOrCreate(currentUser, 'income_bankeur'));
+    const canDeleteIncome = Boolean(currentUser && canDelete(currentUser, 'income_bankeur'));
+    const editDisabledAttr = '';
+    const editAriaDisabled = canEditIncome ? 'false' : 'true';
+    const editTooltipAttr = canEditIncome ? '' : ' data-tooltip="Edit and create access required for Income."';
+    const deleteDisabledAttr = '';
+    const deleteAriaDisabled = canDeleteIncome ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteIncome ? '' : ' data-tooltip="Requires Delete access for Income."';
+
     const ordersBySourceEntryId = new Map();
     const ordersByPoCanon = new Map();
     const orderIds = new Set();
@@ -16784,8 +16851,8 @@
             <td class="num">${euro}</td>
             <td>${desc}</td>
             <td class="actions">
-              <button type="button" class="btn btn--editIcon" data-income-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn btn--x" data-income-action="delete" aria-label="Delete entry" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L6 5a.5.5 0 0 1 .471-.53zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 0 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg></button>
+              <button type="button" class="btn btn--editIcon" data-income-action="edit" aria-label="Edit" title="${canEditIncome ? 'Edit' : 'Read-only access for Income.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-income-action="delete" aria-label="Delete entry" title="${canDeleteIncome ? 'Delete' : 'Requires Delete access for Income.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L6 5a.5.5 0 0 1 .471-.53zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 0 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -17071,7 +17138,7 @@
     const year = getActiveBudgetYear();
 
     const currentUser = getCurrentUser();
-    const hasIncomeFullAccess = Boolean(currentUser && hasModuleAccessLevel(currentUser, 'income_bankeur', 'write'));
+    const hasIncomeCreateAccess = Boolean(currentUser && canCreate(currentUser, 'income_bankeur'));
 
     const incomeNewLink = document.getElementById('incomeNewLink');
     const incomeExportCsvLink = document.getElementById('incomeExportCsvLink');
@@ -17116,18 +17183,18 @@
     initIncomeColumnSorting();
 
     // Partial access for Income = full access except New Income and Import CSV.
-    setLinkDisabled(incomeNewLink, !hasIncomeFullAccess);
-    if (incomeNewLink && !hasIncomeFullAccess) {
+    setLinkDisabled(incomeNewLink, !hasIncomeCreateAccess);
+    if (incomeNewLink && !hasIncomeCreateAccess) {
       incomeNewLink.setAttribute(
         'data-tooltip',
-        'Requires Full access for Income. Partial access can edit existing income entries, but cannot create New Income entries.'
+        'Requires Create access for Income. Write access can edit existing entries, but cannot create new ones.'
       );
     }
-    setLinkDisabled(incomeImportCsvLink, !hasIncomeFullAccess);
-    if (incomeImportCsvLink && !hasIncomeFullAccess) {
+    setLinkDisabled(incomeImportCsvLink, !hasIncomeCreateAccess);
+    if (incomeImportCsvLink && !hasIncomeCreateAccess) {
       incomeImportCsvLink.setAttribute(
         'data-tooltip',
-        'Requires Full access for Income. Partial access can edit existing income entries, but cannot Import CSV.'
+        'Requires Create access for Income. Write access can edit existing entries, but cannot import new ones.'
       );
     }
 
@@ -17165,8 +17232,11 @@
     if (incomeNewLink) {
       incomeNewLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (incomeNewLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
+        if (incomeNewLink.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(incomeNewLink);
+          return;
+        }
+        if (!requireCreateAccess('income_bankeur', 'Create access is required for Income.')) return;
         openIncomeModal(null, year);
         if (incomeMenuPanel && incomeMenuBtn) {
           incomeMenuPanel.setAttribute('hidden', '');
@@ -17177,7 +17247,7 @@
 
     if (incomeClearAllBtn) {
       incomeClearAllBtn.addEventListener('click', () => {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+        if (!requireDeleteAccess('income_bankeur', 'Delete access is required for Income.')) return;
         const all = loadIncome(year);
         if (all.length === 0) return;
         const ok = window.confirm('Clear all income entries? This cannot be undone.');
@@ -17570,8 +17640,11 @@
 
       incomeImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (incomeImportCsvLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
+        if (incomeImportCsvLink.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(incomeImportCsvLink);
+          return;
+        }
+        if (!requireCreateAccess('income_bankeur', 'Create access is required for Income.')) return;
         input.value = '';
         input.click();
       });
@@ -17687,7 +17760,7 @@
       const action = btn.getAttribute('data-income-action');
 
       if (action === 'delete') {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+        if (!requireDeleteAccess('income_bankeur', 'Delete access is required for Income.')) return;
         const ok = window.confirm('Delete this income entry?');
         if (!ok) return;
 
@@ -18944,7 +19017,10 @@
     if (wiseEurNewLink) {
       wiseEurNewLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (wiseEurNewLink.getAttribute('aria-disabled') === 'true') return;
+        if (wiseEurNewLink.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(wiseEurNewLink);
+          return;
+        }
         if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         openWiseEurModal(null, year);
         if (wiseEurMenuPanel && wiseEurMenuBtn) {
@@ -19455,7 +19531,10 @@
 
       wiseEurImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (wiseEurImportCsvLink.getAttribute('aria-disabled') === 'true') return;
+        if (wiseEurImportCsvLink.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(wiseEurImportCsvLink);
+          return;
+        }
         if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         input.value = '';
         input.click();
@@ -19572,7 +19651,7 @@
       const action = btn.getAttribute('data-wise-eur-action');
 
       if (action === 'delete') {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+        if (!requireDeleteAccess('income_wise_eur', 'Delete access is required for wiseEUR.')) return;
         const ok = window.confirm('Delete this wiseEUR entry?');
         if (!ok) return;
         deleteWiseEurEntryById(id, year);
@@ -20628,7 +20707,10 @@
     if (wiseUsdNewLink) {
       wiseUsdNewLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (wiseUsdNewLink.getAttribute('aria-disabled') === 'true') return;
+        if (wiseUsdNewLink.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(wiseUsdNewLink);
+          return;
+        }
         if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         openWiseUsdModal(null, year);
         if (wiseUsdMenuPanel && wiseUsdMenuBtn) {
@@ -21139,7 +21221,10 @@
 
       wiseUsdImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
-        if (wiseUsdImportCsvLink.getAttribute('aria-disabled') === 'true') return;
+        if (wiseUsdImportCsvLink.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(wiseUsdImportCsvLink);
+          return;
+        }
         if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         input.value = '';
         input.click();
@@ -21256,7 +21341,7 @@
       const action = btn.getAttribute('data-wise-usd-action');
 
       if (action === 'delete') {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+        if (!requireDeleteAccess('income_wise_usd', 'Delete access is required for wiseUSD.')) return;
         const ok = window.confirm('Delete this wiseUSD entry?');
         if (!ok) return;
         deleteWiseUsdEntryById(id, year);
@@ -26921,7 +27006,7 @@
         beginEditingOrder(order);
         window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
       } else if (action === 'delete') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        if (!requireDeleteAccess('orders', 'Delete access is required for Payment Orders.')) return;
         const ok = window.confirm('Delete this request?');
         if (!ok) return;
         deleteOrderById(id);

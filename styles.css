@@ -1466,12 +1466,12 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .incomeRow--missingBudget .btn--x {
   background: transparent;
-  color: var(--primary-text);
+  color: var(--caution);
 }
 
 .incomeRow--missingBudget .btn--x:hover {
   background: transparent;
-  color: var(--primary-text);
+  color: var(--caution);
 }
 
 .incomeRow--missingBudget .btn--editIcon {
@@ -1519,12 +1519,12 @@ input:focus, textarea:focus, select:focus, button:focus {
 
 .ordersRow--missingRequired .btn--x {
   background: transparent;
-  color: var(--primary-text);
+  color: var(--caution);
 }
 
 .ordersRow--missingRequired .btn--x:hover {
   background: transparent;
-  color: var(--primary-text);
+  color: var(--caution);
 }
 
 .ordersRow--missingRequired .btn--editIcon {
@@ -1711,7 +1711,13 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
 .actionLink[aria-disabled="true"] {
   opacity: 0.6;
   cursor: not-allowed;
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+/* Permission-gated buttons: visually disabled but still clickable so they can show an alert */
+.btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Budget dropdown: keep items visually disabled, but allow hover so tooltips can show. */
@@ -3912,23 +3918,23 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
   border-radius: 999px;
   border: none;
   background: transparent;
-  color: var(--danger);
+  color: var(--danger-text);
   line-height: 1;
   vertical-align: middle;
 }
 
 html[data-theme="dark"] .btn--x {
-  color: var(--primary-text);
+  color: var(--danger-text);
 }
 
 .btn--x:hover {
   background: transparent;
-  color: var(--danger);
+  color: var(--danger-text);
   filter: none;
 }
 
 html[data-theme="dark"] .btn--x:hover {
-  color: var(--primary-text);
+  color: var(--danger-text);
 }
 
 .btn--x:focus-visible {
@@ -3938,9 +3944,9 @@ html[data-theme="dark"] .btn--x:hover {
 
 .btn--x svg {
   display: block;
-  width: 22px;
-  height: 20px;
-  flex: 0 0 22px;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
 }
 
 .btn--editIcon svg {

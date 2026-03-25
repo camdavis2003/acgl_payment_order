@@ -47,6 +47,11 @@
   const APP_TAB_TITLE = 'ACGL - FMS';
   const APP_VERSION = '1.0.0';
   const TABLE_ENHANCER_FILE = 'table-enhancements.js';
+  const VIEW_EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true" focusable="false"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const ITEMS_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true" focusable="false"><circle cx="4.5" cy="6" r="1.3"/><line x1="8" y1="6" x2="21" y2="6"/><circle cx="4.5" cy="12" r="1.3"/><line x1="8" y1="12" x2="21" y2="12"/><circle cx="4.5" cy="18" r="1.3"/><line x1="8" y1="18" x2="21" y2="18"/></svg>';
+  const DOWNLOAD_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true" focusable="false"><path d="M12 3v11"/><polyline points="8 10 12 14 16 10"/><rect x="4" y="17" width="16" height="4" rx="1.5"/></svg>';
+  const RESTORE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true" focusable="false"><path d="M17 10a7 7 0 1 0-2.05 4.95"/><polyline points="17 5 17 10 12 10"/><rect x="4" y="13" width="16" height="4" rx="1.5"/><circle cx="7" cy="15" r="0.9"/><line x1="10" y1="15" x2="17" y2="15"/><rect x="4" y="18" width="16" height="4" rx="1.5"/><circle cx="7" cy="20" r="0.9"/><line x1="10" y1="20" x2="17" y2="20"/></svg>';
+  const RECONCILE_PUZZLE_ICON_SVG = '<svg class="reconcileActionIconSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10.5l3.1-3.1a2.8 2.8 0 0 1 3.9 0l.7.7-2 2a2.2 2.2 0 0 0 3.1 3.1l2.8-2.8 2.5 2.5"/><path d="M21 10.5l-3.1-3.1a2.8 2.8 0 0 0-3.9 0l-.7.7"/><path d="M9.5 14.8 11 16.3a1.4 1.4 0 1 0 2-2l-1.7-1.7"/><path d="M11.9 16.7 13 17.8a1.3 1.3 0 1 0 1.8-1.8l-1.1-1.1"/><path d="M14.1 17.7 15 18.6a1.1 1.1 0 1 0 1.6-1.6l-.9-.9"/><path d="M2 12.6l2.3 2.3a1.2 1.2 0 1 0 1.7-1.7l-.9-.9"/></svg>';
 
   function applyAppTabTitle() {
     setBrowserTabTitle(APP_TAB_TITLE);
@@ -1613,8 +1618,24 @@
     return PERMISSION_DEFS.some((def) => def && def.key === permKey && def.parent);
   }
 
+  function isAdminRoleValue(roleValue) {
+    const r = String(roleValue || '').trim().toLowerCase();
+    if (!r) return false;
+    return r === 'admin' || r === 'administrator' || r === 'site administrator' || r === 'super admin';
+  }
+
+  function isAdminLikeUser(user) {
+    if (!user) return false;
+    if (isHardcodedAdminUsername(user.username)) return true;
+    if (isAdminRoleValue(user.position) || isAdminRoleValue(user.role)) return true;
+    const full = getUserByUsername(user.username);
+    if (full && (isAdminRoleValue(full.position) || isAdminRoleValue(full.role))) return true;
+    return false;
+  }
+
   function hasModuleAccessLevel(user, permKey, minLevel) {
     if (!permKey) return true;
+    if (isAdminLikeUser(user)) return true;
     if (STRICT_EXPLICIT_PERMISSION_KEYS.has(permKey)) {
       const rawPerms = user && user.permissions && typeof user.permissions === 'object'
         ? user.permissions
@@ -1729,6 +1750,12 @@
 
   function hasPermission(user, permKey) {
     if (!permKey) return true;
+    // Existing order itemization is reachable from Payment Orders.
+    // Accept either explicit itemize permission or general orders access.
+    if (permKey === 'orders_itemize') {
+      return hasModuleAccessLevel(user, 'orders_itemize', 'read')
+        || hasModuleAccessLevel(user, 'orders', 'read');
+    }
     return hasModuleAccessLevel(user, permKey, 'read');
   }
 
@@ -1768,6 +1795,14 @@
 
   function canOrdersViewEdit(user) {
     return canWrite(user, 'orders');
+  }
+
+  function canOrdersItemizeRead(user) {
+    return hasModuleAccessLevel(user, 'orders_itemize', 'read') || hasModuleAccessLevel(user, 'orders', 'read');
+  }
+
+  function canOrdersItemizeWrite(user) {
+    return hasModuleAccessLevel(user, 'orders_itemize', 'write') || hasModuleAccessLevel(user, 'orders', 'write');
   }
 
   function normalizeRoleLabel(roleValue) {
@@ -6916,11 +6951,11 @@
             <td>${safeName}</td>
             <td class="num">${escapeHtml(formatBytes(a.size))}</td>
             <td class="actions">
-              <button type="button" class="btn btn--ghost" data-attachment-action="view">View</button>
+              <button type="button" class="btn btn--viewGrey btn--viewIcon" data-attachment-action="view" title="View" aria-label="View">${VIEW_EYE_ICON_SVG}</button>
               <button type="button" class="btn btn--ghost" data-attachment-action="download">Download</button>
               <button type="button" class="btn btn--danger" data-attachment-action="delete">Remove</button>
             </td>
-          </tr>
+              <button type="button" class="btn btn--editIcon" data-notifications-open-edit="${escapeHtml(instanceId)}" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
         `.trim();
       })
       .join('');
@@ -6945,7 +6980,7 @@
               <div class="muted">${safeSize}</div>
             </div>
             <div class="modalAttActions">
-              <button type="button" class="btn btn--ghost" data-modal-attachment-action="view">View</button>
+              <button type="button" class="btn btn--viewGrey btn--viewIcon" data-modal-attachment-action="view" title="View" aria-label="View">${VIEW_EYE_ICON_SVG}</button>
               <button type="button" class="btn btn--ghost" data-modal-attachment-action="download">Download</button>
             </div>
           </div>
@@ -8477,7 +8512,7 @@
     const currentUser = getCurrentUser();
     const canEditOrders = currentUser ? canWrite(currentUser, 'orders') : false;
     const canDeleteOrders = currentUser ? canWrite(currentUser, 'orders') : false;
-    const canViewItems = currentUser ? canOrdersViewEdit(currentUser) : false;
+    const canViewItems = currentUser ? canOrdersItemizeRead(currentUser) : false;
     const editDisabledAttr = canEditOrders ? '' : ' disabled';
     const editAriaDisabled = canEditOrders ? 'false' : 'true';
     const editTooltipAttr = canEditOrders ? '' : ' data-tooltip="Requires Write access for Payment Orders."';
@@ -8512,18 +8547,6 @@
         const rowClass = rowClasses.length ? ` class="${rowClasses.join(' ')}"` : '';
         return `
           <tr${rowClass} data-id="${escapeHtml(o.id)}">
-            <td class="col-delete">
-              <button
-                type="button"
-                class="btn btn--x"
-                data-action="delete"
-                aria-label="Delete request"
-                title="${canDeleteOrders ? 'Delete' : 'Requires Write access for Payment Orders.'}"
-                aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}
-              >
-                X
-              </button>
-            </td>
             <td><a href="#" class="poNoDownloadLink" data-action="downloadPdf" title="Download PDF">${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo))}</a></td>
             <td>${escapeHtml(formatDate(o.date))}</td>
             <td>${escapeHtml(String(o.source || '').trim())}</td>
@@ -8535,9 +8558,10 @@
             <td>${escapeHtml(getOrderWithLabel(o))}</td>
             <td>${escapeHtml(statusLabel)}</td>
             <td class="actions">
-              <button type="button" class="btn btn--ghost btn--items" data-action="items" title="${canViewItems ? 'Items' : 'Requires Payment Orders access.'}" aria-disabled="${itemsAriaDisabled}"${itemsDisabledAttr}${itemsTooltipAttr}>Items</button>
-              <button type="button" class="btn btn--editBlue" data-action="edit" title="${canEditOrders ? 'Edit' : 'Requires Write access for Payment Orders.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}>Edit</button>
-              <button type="button" class="btn btn--viewGrey" data-action="view">View</button>
+              <button type="button" class="btn btn--viewGrey btn--viewIcon" data-action="view" title="View" aria-label="View">${VIEW_EYE_ICON_SVG}</button>
+              <button type="button" class="btn btn--editIcon" data-action="edit" title="${canEditOrders ? 'Edit' : 'Requires Write access for Payment Orders.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--itemsIcon" data-action="items" title="${canViewItems ? 'Items' : 'Requires Payment Orders access.'}" aria-label="Items" aria-disabled="${itemsAriaDisabled}"${itemsDisabledAttr}${itemsTooltipAttr}>${ITEMS_LIST_ICON_SVG}</button>
+              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete request" title="${canDeleteOrders ? 'Delete' : 'Requires Write access for Payment Orders.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -10411,17 +10435,6 @@
         const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
         return `
           <tr${rowClass} data-id="${escapeHtml(o.id)}">
-            <td class="col-delete">
-              <button
-                type="button"
-                class="btn btn--x"
-                data-action="delete"
-                aria-label="Delete request"
-                title="Delete"
-              >
-                X
-              </button>
-            </td>
             <td><a href="#" class="poNoDownloadLink" data-action="downloadPdf" title="Download PDF">${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo) || '—')}</a></td>
             <td>${escapeHtml(formatDate(o.date))}</td>
             <td>${escapeHtml(String(o.source || '').trim())}</td>
@@ -10433,8 +10446,9 @@
             <td>${escapeHtml(getOrderWithLabel(o))}</td>
             <td>${escapeHtml(getOrderStatusLabel(o))}</td>
             <td class="actions">
-              <button type="button" class="btn btn--ghost" data-action="edit">Edit</button>
-              <button type="button" class="btn btn--editBlue" data-action="reconcile">Reconcile</button>
+              <button type="button" class="btn btn--editIcon" data-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--reconcileIcon" data-action="reconcile" aria-label="Reconcile" title="Reconcile">${RECONCILE_PUZZLE_ICON_SVG}</button>
+              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete request" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -10946,8 +10960,8 @@
 
           if (!isEditing) {
             return `
-              <button type="button" class="btn btn--primary" data-action="edit" ${editDisabled}${protectTitle}>Edit</button>
-              <button type="button" class="btn btn--danger" data-action="delete" ${deleteDisabled}${protectTitle}>Delete</button>
+              <button type="button" class="btn btn--editIcon" data-action="edit" aria-label="Edit" ${editDisabled}${protectTitle}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete user" ${deleteDisabled}${protectTitle}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             `.trim();
           }
 
@@ -11552,7 +11566,7 @@
             <div class="backlog__actions">
               ${attachmentBtn}
               <button type="button" class="btn btn--viewGrey" data-backlog-action="comment" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Comment</button>
-              <button type="button" class="btn btn--editBlue" data-backlog-action="edit" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Edit</button>
+              <button type="button" class="btn btn--editIcon" data-backlog-action="edit" aria-label="Edit" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
               <button type="button" class="btn" data-backlog-action="complete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>${escapeHtml(completeText)}</button>
               <button type="button" class="btn btn--danger" data-backlog-action="delete" ${actionsDisabled ? 'disabled data-tooltip="Read only access."' : ''}>Delete</button>
             </div>
@@ -15459,9 +15473,6 @@
 
         return `
           <tr data-mt-index="${escapeHtml(String(index))}">
-            <td class="actions">
-              <button type="button" class="btn btn--x" data-mt-action="delete" data-mt-id="${mtId}" aria-label="Delete money transfer" title="${canWrite ? 'Delete' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>X</button>
-            </td>
             <td>${mtNo}</td>
             <td>${mtDate}</td>
             <td class="num">
@@ -15474,8 +15485,9 @@
             <td>${gtName}</td>
             <td>${comments}</td>
             <td class="actions">
-              <button type="button" class="btn btn--ghost" data-mt-action="view" data-mt-id="${mtId}" title="View">View</button>
-              <button type="button" class="btn btn--editBlue" data-mt-action="edit" data-mt-id="${mtId}" title="${canWrite ? 'Edit' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}>Edit</button>
+              <button type="button" class="btn btn--viewGrey btn--viewIcon" data-mt-action="view" data-mt-id="${mtId}" title="View" aria-label="View">${VIEW_EYE_ICON_SVG}</button>
+              <button type="button" class="btn btn--editIcon" data-mt-action="edit" data-mt-id="${mtId}" title="${canWrite ? 'Edit' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-mt-action="delete" data-mt-id="${mtId}" aria-label="Delete money transfer" title="${canWrite ? 'Delete' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -16766,24 +16778,14 @@
 
         return `
           <tr${rowClass} data-income-id="${id}">
-            <td class="col-delete">
-              <button
-                type="button"
-                class="btn btn--x"
-                data-income-action="delete"
-                aria-label="Delete entry"
-                title="Delete"
-              >
-                X
-              </button>
-            </td>
             <td>${date}</td>
             <td>${remitter}</td>
             <td>${budget}</td>
             <td class="num">${euro}</td>
             <td>${desc}</td>
             <td class="actions">
-              <button type="button" class="btn btn--editBlue" data-income-action="edit">Edit</button>
+              <button type="button" class="btn btn--editIcon" data-income-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-income-action="delete" aria-label="Delete entry" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L6 5a.5.5 0 0 1 .471-.53zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 0 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -17569,7 +17571,7 @@
       incomeImportCsvLink.addEventListener('click', (e) => {
         e.preventDefault();
         if (incomeImportCsvLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('income', 'Income is read only for your account.')) return;
+        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
         input.value = '';
         input.click();
       });
@@ -18195,8 +18197,8 @@
             <td class="num">${checksum}</td>
             <td>${bankStatements}</td>
             <td class="actions">
-              <button type="button" class="btn btn--editBlue" data-wise-eur-action="edit">Edit</button>
-              <button type="button" class="btn btn--x" data-wise-eur-action="delete" aria-label="Delete entry" title="Delete">X</button>
+              <button type="button" class="btn btn--editIcon" data-wise-eur-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-wise-eur-action="delete" aria-label="Delete entry" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -20080,8 +20082,8 @@
             <td class="num">${checksum}</td>
             <td>${bankStatements}</td>
             <td class="actions">
-              <button type="button" class="btn btn--editBlue" data-wise-usd-action="edit">Edit</button>
-              <button type="button" class="btn btn--x" data-wise-usd-action="delete" aria-label="Delete entry" title="Delete">X</button>
+              <button type="button" class="btn btn--editIcon" data-wise-usd-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-wise-usd-action="delete" aria-label="Delete entry" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -24131,7 +24133,7 @@
           delBtn.className = 'archive__yearDelete';
           delBtn.setAttribute('aria-label', `Delete budget year ${yearLabel}`);
           delBtn.setAttribute('title', `Delete all data for budget year ${yearLabel}`);
-          delBtn.textContent = 'x';
+          delBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zM3.042 3.5h9.916l-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92zm3.458 1.5a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 1 0v-6a.5.5 0 0 0-.5-.5m3 0a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 1 0v-6a.5.5 0 0 0-.5-.5"/></svg>';
 
           delBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -24643,8 +24645,10 @@
 
         const dl = document.createElement('button');
         dl.type = 'button';
-        dl.className = 'btn btn--ghost';
-        dl.textContent = 'Download';
+        dl.className = 'btn btn--downloadIcon';
+        dl.title = 'Download';
+        dl.setAttribute('aria-label', 'Download backup');
+        dl.innerHTML = DOWNLOAD_ICON_SVG;
         dl.addEventListener('click', async () => {
           if (!getWpToken()) {
             window.alert('Please sign in.');
@@ -24669,8 +24673,10 @@
 
         const rs = document.createElement('button');
         rs.type = 'button';
-        rs.className = 'btn btn--danger';
-        rs.textContent = 'Restore';
+        rs.className = 'btn btn--restoreIcon';
+        rs.title = 'Restore';
+        rs.setAttribute('aria-label', 'Restore backup');
+        rs.innerHTML = RESTORE_ICON_SVG;
         rs.addEventListener('click', async () => {
           if (!requireSettingsEditAccess('Backup access required to restore backups.', 'settings_backup')) return;
           if (!getWpToken()) {
@@ -24765,8 +24771,10 @@
 
           const dl = document.createElement('button');
           dl.type = 'button';
-          dl.className = 'btn btn--ghost';
-          dl.textContent = 'Download';
+          dl.className = 'btn btn--downloadIcon';
+          dl.title = 'Download';
+          dl.setAttribute('aria-label', 'Download backup');
+          dl.innerHTML = DOWNLOAD_ICON_SVG;
           dl.addEventListener('click', () => {
             downloadBackupById(y, meta.id);
           });
@@ -24774,8 +24782,10 @@
 
           const rs = document.createElement('button');
           rs.type = 'button';
-          rs.className = 'btn btn--danger';
-          rs.textContent = 'Restore';
+          rs.className = 'btn btn--restoreIcon';
+          rs.title = 'Restore';
+          rs.setAttribute('aria-label', 'Restore backup');
+          rs.innerHTML = RESTORE_ICON_SVG;
           rs.addEventListener('click', () => {
             if (!requireSettingsEditAccess('Backup access required to restore backups.', 'settings_backup')) return;
             const ok = window.confirm(`Restore ${String(y)} from this backup? This will overwrite ${String(y)} data.`);
@@ -25744,7 +25754,7 @@
             <td>
               <button type="button" class="btn btn--viewGrey" data-notifications-inline-save="${escapeHtml(instanceId)}">Save</button>
               <button type="button" class="btn btn--ghost" data-notifications-inline-cancel="${escapeHtml(instanceId)}">Cancel</button>
-              <button type="button" class="btn btn--editBlue" data-notifications-open-edit="${escapeHtml(instanceId)}">Edit</button>
+              <button type="button" class="btn btn--editIcon" data-notifications-open-edit="${escapeHtml(instanceId)}" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
             </td>
           `
           : `
@@ -25752,8 +25762,8 @@
             <td>${escapeHtml(row.displayLabel)}</td>
             <td>${String(instance.enabled) === '1' ? 'Enabled' : 'Disabled'}</td>
             <td>
-              <button type="button" class="btn btn--editBlue" data-notifications-inline-edit="${escapeHtml(instanceId)}">Edit</button>
-              <button type="button" class="btn btn--danger" data-notifications-delete="${escapeHtml(instanceId)}">Delete</button>
+              <button type="button" class="btn btn--editIcon" data-notifications-inline-edit="${escapeHtml(instanceId)}" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-notifications-delete="${escapeHtml(instanceId)}" aria-label="Delete notification"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           `;
         notificationsListTbody.appendChild(tr);
@@ -26896,7 +26906,15 @@
       } else if (action === 'view') {
         openModalWithOrder(order);
       } else if (action === 'items') {
-        if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;
+        const u = getCurrentUser();
+        if (!u) {
+          window.alert('Please sign in.');
+          return;
+        }
+        if (!canOrdersItemizeRead(u)) {
+          window.alert('Itemize Payment Order is read only for your account.');
+          return;
+        }
         window.location.href = `itemize.html?orderId=${encodeURIComponent(id)}&year=${encodeURIComponent(String(year))}`;
       } else if (action === 'edit') {
         if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
@@ -27241,7 +27259,7 @@
               <td class="num">${escapeHtml(formatCurrency(it.usd, 'USD'))}</td>
               <td class="actions">
                 ${isMilage ? '<button type="button" class="btn btn--ghost" data-item-action="viewMilage">View Milage</button>' : ''}
-                ${readOnly ? '' : '<button type="button" class="btn btn--ghost" data-item-action="edit">Edit</button>'}
+                ${readOnly ? '' : '<button type="button" class="btn btn--editIcon" data-item-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>'}
                 ${readOnly ? '' : '<button type="button" class="btn btn--danger" data-item-action="delete">Delete</button>'}
               </td>
             </tr>
@@ -27296,8 +27314,8 @@
     const milageForm = document.getElementById('milageForm');
     const milageViewModal = document.getElementById('milageViewModal');
     const currentUser = getCurrentUser();
-    const canEditExistingOrderItems = Boolean(currentUser && canOrdersViewEdit(currentUser));
-    const canViewExistingOrderItems = Boolean(currentUser && canOrdersViewEdit(currentUser));
+    const canEditExistingOrderItems = Boolean(currentUser && canOrdersItemizeWrite(currentUser));
+    const canViewExistingOrderItems = Boolean(currentUser && canOrdersItemizeRead(currentUser));
     const isExistingOrderView = Boolean(!target.isDraft && target.orderId);
     const itemizeReadOnly = Boolean(isExistingOrderView && !canEditExistingOrderItems);
 
@@ -27339,7 +27357,18 @@
 
     function requireItemizeEditAccess(message) {
       // Existing order itemize requires WP sign-in and at least partial access.
-      if (isExistingOrderView) return requireOrdersViewEditAccess(message);
+      if (isExistingOrderView) {
+        const u = getCurrentUser();
+        if (!u) {
+          window.alert('Please sign in.');
+          return false;
+        }
+        if (!canOrdersItemizeWrite(u)) {
+          window.alert(message || 'Itemize Payment Order is read only for your account.');
+          return false;
+        }
+        return true;
+      }
 
       // Draft itemize is part of the public request flow:
       // - anonymous users may draft

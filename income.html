@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <script>try{var __t=localStorage.getItem('payment_order_theme');if(__t==='dark'||__t==='light')document.documentElement.setAttribute('data-theme',__t);}catch(e){}</script>
+    <script>
+      try {
+        var __t = localStorage.getItem("payment_order_theme");
+        if (__t === "dark" || __t === "light")
+          document.documentElement.setAttribute("data-theme", __t);
+      } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
     <link rel="stylesheet" href="styles.css" />
@@ -170,14 +176,11 @@
                 aria-describedby="income-help"
               >
                 <caption id="income-help" class="sr-only">
-                  Newest entries appear first. Use the leftmost column to delete
-                  an entry, and use the Actions column to view or edit details.
+                  Newest entries appear first. Use the Actions column to edit or
+                  delete an entry.
                 </caption>
                 <thead>
                   <tr>
-                    <th scope="col" class="col-delete">
-                      <span class="sr-only">Delete</span>
-                    </th>
                     <th
                       scope="col"
                       class="is-sortable"
@@ -231,7 +234,6 @@
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td class="col-delete"></td>
                     <td colspan="3" class="ordersTotalsRow__label">Total</td>
                     <td class="num" id="incomeTotalEuro"></td>
                     <td colspan="2"></td>

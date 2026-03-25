@@ -882,6 +882,19 @@ function acgl_fms_register_rest_routes() {
             acgl_fms_rate_limit_clear($username);
 
             $perms = acgl_fms_normalize_permissions($user['permissions'] ?? []);
+            $roleRaw = strtolower(trim((string) ($user['position'] ?? ($user['role'] ?? ''))));
+            $isAdminRole = in_array($roleRaw, ['admin', 'administrator', 'site administrator', 'super admin'], true);
+            if ($isAdminRole) {
+                $perms = acgl_fms_normalize_permissions([
+                    'budget' => 'full',
+                    'income' => 'full',
+                    'orders' => 'full',
+                    'ledger' => 'full',
+                    'ledger_money_transfers' => 'full',
+                    'archive' => 'full',
+                    'settings' => 'full',
+                ]);
+            }
             $token = acgl_fms_issue_token($username, $perms);
 
             return [

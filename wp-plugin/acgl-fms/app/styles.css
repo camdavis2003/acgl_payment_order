@@ -508,9 +508,19 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   opacity: 0.8;
 }
 
+.archive__yearDelete svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
 .archive__yearDelete:hover,
 .archive__yearDelete:focus-visible {
   opacity: 1;
+}
+
+html[data-theme="dark"] .archive__yearDelete {
+  color: var(--primary-text);
 }
 
 .budgetDash__section {
@@ -971,6 +981,7 @@ main.archive__grid > section.card .settingsCardHeader > h2 {
   border: 1px solid var(--border);
   position: relative;
   transition: background 150ms ease, border-color 150ms ease;
+  vertical-align: middle;
 }
 
 .switch__track::after {
@@ -1454,12 +1465,21 @@ input:focus, textarea:focus, select:focus, button:focus {
 }
 
 .incomeRow--missingBudget .btn--x {
+  background: transparent;
   color: var(--primary-text);
 }
 
 .incomeRow--missingBudget .btn--x:hover {
   background: transparent;
   color: var(--primary-text);
+}
+
+.incomeRow--missingBudget .btn--editIcon {
+  color: var(--primary-text);
+}
+
+.incomeRow--missingBudget .btn--editIcon:hover {
+  background: transparent;
 }
 
 .incomeRow--missingBudget .btn--editBlue {
@@ -1497,9 +1517,22 @@ input:focus, textarea:focus, select:focus, button:focus {
   border-color: var(--primary-text);
 }
 
+.ordersRow--missingRequired .btn--x {
+  background: transparent;
+  color: var(--primary-text);
+}
+
 .ordersRow--missingRequired .btn--x:hover {
   background: transparent;
   color: var(--primary-text);
+}
+
+.ordersRow--missingRequired .btn--editIcon {
+  color: var(--primary-text);
+}
+
+.ordersRow--missingRequired .btn--editIcon:hover {
+  background: transparent;
 }
 
 .ordersRow--missingRequired .btn--editBlue {
@@ -1514,8 +1547,13 @@ input:focus, textarea:focus, select:focus, button:focus {
 }
 
 .ordersRow--missingRequired .btn--viewGrey {
-  color: #000000;
-  border-color: #000000;
+  color: var(--primary-text);
+  border-color: var(--primary-text);
+}
+
+.ordersRow--missingRequired .btn--viewIcon,
+.ordersRow--missingRequired .btn--itemsIcon {
+  border-color: transparent;
 }
 
 /* Payment Orders: highlight Approved rows */
@@ -1528,6 +1566,13 @@ input:focus, textarea:focus, select:focus, button:focus {
 #ordersTable tr.ordersRow--approved a,
 #ordersTable tr.ordersRow--gtReview a {
   color: var(--primary-bg) !important;
+}
+
+#ordersTable tr.ordersRow--approved .btn--x,
+#ordersTable tr.ordersRow--gtReview .btn--x,
+#ordersTable tr.ordersRow--approved .btn--x:hover,
+#ordersTable tr.ordersRow--gtReview .btn--x:hover {
+  color: #991b1b !important;
 }
 
 html[data-theme="dark"] #ordersTable tr.ordersRow--approved td,
@@ -1993,7 +2038,6 @@ html[data-theme="dark"] .btn--primary:focus-visible {
   color: #ffffff;
 }
 
-/* Blue filled Edit button (Payment Orders list) */
 .btn--editBlue {
   background: var(--focus);
   border-color: var(--focus);
@@ -2002,6 +2046,86 @@ html[data-theme="dark"] .btn--primary:focus-visible {
 
 .btn--editBlue:hover {
   filter: brightness(0.95);
+}
+
+.btn--editIcon {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--focus);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.btn--editIcon:hover {
+  background: transparent;
+  color: var(--focus);
+}
+
+.btn--editIcon:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.btn--reconcileIcon {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--focus);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.btn--reconcileIcon:hover {
+  background: transparent;
+  filter: none;
+}
+
+.btn--reconcileIcon:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.reconcileActionIconSvg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.reconcileActionRing {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+}
+
+.reconcileActionPiece {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.reconcileActionPiece--solid {
+  fill: currentColor;
+}
+
+.reconcileActionPiece--cutout {
+  fill: var(--surface);
 }
 
 .btn--ghost {
@@ -2029,6 +2153,100 @@ html[data-theme="dark"] .btn--primary:focus-visible {
   filter: brightness(0.98);
 }
 
+.btn--viewIcon {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--focus);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.btn--viewIcon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.btn--viewIcon:hover {
+  background: transparent;
+  color: var(--focus);
+  filter: none;
+}
+
+.btn--downloadIcon,
+.btn--restoreIcon {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.btn--downloadIcon {
+  color: var(--focus);
+}
+
+.btn--restoreIcon {
+  color: var(--text);
+}
+
+.btn--downloadIcon svg,
+.btn--restoreIcon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.btn--downloadIcon:hover,
+.btn--restoreIcon:hover {
+  background: transparent;
+}
+
+.btn--itemsIcon {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--focus);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.btn--itemsIcon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.btn--itemsIcon:hover {
+  background: transparent;
+  color: var(--focus);
+}
+
 .btn--danger {
   border-color: var(--danger-border);
   color: var(--danger-text);
@@ -2044,6 +2262,56 @@ html[data-theme="dark"] .btn--primary:focus-visible {
 
 .btn--dangerSolid:hover {
   filter: brightness(0.95);
+}
+
+.btn--reconciliationIcon {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: #46484d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn--reconciliationIcon:hover {
+  background: transparent;
+}
+
+.btn--reconciliationIcon:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.reconciliationIconSvg {
+  width: 30px;
+  height: 30px;
+  display: block;
+}
+
+.reconOuter {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+}
+
+.reconQ {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.reconQ--dark {
+  fill: currentColor;
+}
+
+.reconQ--light {
+  fill: var(--surface);
 }
 
 .authGate {
@@ -2939,7 +3207,7 @@ body.isTableResizing {
   text-overflow: clip;
 }
 
-#incomeTable td:not(:nth-child(1)):not(:nth-child(6)):not(:nth-child(7)) {
+#incomeTable td:not(:nth-child(5)):not(:nth-child(6)) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2947,45 +3215,47 @@ body.isTableResizing {
 
 #incomeTable th:nth-child(1),
 #incomeTable td:nth-child(1) {
-  width: 44px;
+  width: 160px;
 }
 
 #incomeTable th:nth-child(2),
 #incomeTable td:nth-child(2) {
-  width: 170px;
+  width: 220px;
 }
 
 #incomeTable th:nth-child(3),
 #incomeTable td:nth-child(3) {
-  width: 230px;
+  width: 130px;
 }
 
 #incomeTable th:nth-child(4),
 #incomeTable td:nth-child(4) {
-  width: 175px;
+  width: 120px;
 }
 
 #incomeTable th:nth-child(5),
 #incomeTable td:nth-child(5) {
-  width: 150px;
+  width: auto;
 }
 
+#incomeTable th:nth-child(1),
+#incomeTable td:nth-child(1),
 #incomeTable th:nth-child(2),
 #incomeTable td:nth-child(2),
+#incomeTable th:nth-child(3),
+#incomeTable td:nth-child(3),
 #incomeTable th:nth-child(4),
-#incomeTable td:nth-child(4),
-#incomeTable th:nth-child(5),
-#incomeTable td:nth-child(5) {
+#incomeTable td:nth-child(4) {
   overflow: visible;
   text-overflow: clip;
 }
 
-#incomeTable thead th:nth-child(2),
-#incomeTable tbody td:nth-child(2),
+#incomeTable thead th:nth-child(1),
+#incomeTable tbody td:nth-child(1),
+#incomeTable thead th:nth-child(3),
+#incomeTable tbody td:nth-child(3),
 #incomeTable thead th:nth-child(4),
-#incomeTable tbody td:nth-child(4),
-#incomeTable thead th:nth-child(5),
-#incomeTable tbody td:nth-child(5) {
+#incomeTable tbody td:nth-child(4) {
   text-align: center;
 }
 
@@ -2999,14 +3269,21 @@ body.isTableResizing {
 
 #incomeTable th:nth-child(6),
 #incomeTable td:nth-child(6) {
-  white-space: normal;
-  word-break: break-word;
+  white-space: nowrap;
+  word-break: normal;
 }
 
-#incomeTable th:nth-child(7),
-#incomeTable td:nth-child(7),
+#incomeTable th:nth-child(6),
+#incomeTable td:nth-child(6),
 #incomeTable td.actions {
   width: 132px;
+  min-width: 132px;
+  text-align: right;
+}
+
+#incomeTable th.col-actions {
+  white-space: nowrap;
+  word-break: normal;
   text-align: right;
 }
 
@@ -3219,20 +3496,20 @@ input[type='checkbox'].cb {
 }
 
 /* Payment Orders + Reconciliation: left-align Purpose column */
-#ordersTable th:nth-child(9),
-#ordersTable td:nth-child(9),
-#reconcileOrdersTable th:nth-child(9),
-#reconcileOrdersTable td:nth-child(9) {
+#ordersTable th:nth-child(8),
+#ordersTable td:nth-child(8),
+#reconcileOrdersTable th:nth-child(8),
+#reconcileOrdersTable td:nth-child(8) {
   text-align: left;
 }
 
 /* Payment Orders: keep Date on one line */
-#ordersTable th:nth-child(3) {
+#ordersTable th:nth-child(2) {
   width: 128px;
 }
 
-#ordersTable th:nth-child(3),
-#ordersTable td:nth-child(3) {
+#ordersTable th:nth-child(2),
+#ordersTable td:nth-child(2) {
   white-space: nowrap;
 }
 
@@ -3344,38 +3621,55 @@ input[type='checkbox'].cb {
 
 /* Fixed distribution keeps columns inside the container width. */
 #moneyTransfersTable th:nth-child(1),
-#moneyTransfersTable td:nth-child(1) { width: 3%; }
+#moneyTransfersTable td:nth-child(1) { width: 10%; }
 #moneyTransfersTable th:nth-child(2),
-#moneyTransfersTable td:nth-child(2) { width: 10%; }
+#moneyTransfersTable td:nth-child(2) { width: 9%; }
 #moneyTransfersTable th:nth-child(3),
-#moneyTransfersTable td:nth-child(3) { width: 9%; }
+#moneyTransfersTable td:nth-child(3) { width: 7%; }
 #moneyTransfersTable th:nth-child(4),
-#moneyTransfersTable td:nth-child(4) { width: 7%; }
+#moneyTransfersTable td:nth-child(4) { width: 12%; }
 #moneyTransfersTable th:nth-child(5),
-#moneyTransfersTable td:nth-child(5) { width: 12%; }
+#moneyTransfersTable td:nth-child(5) { width: 7%; }
 #moneyTransfersTable th:nth-child(6),
-#moneyTransfersTable td:nth-child(6) { width: 7%; }
+#moneyTransfersTable td:nth-child(6) { width: 12%; }
 #moneyTransfersTable th:nth-child(7),
-#moneyTransfersTable td:nth-child(7) { width: 12%; }
-#moneyTransfersTable th:nth-child(8),
-#moneyTransfersTable td:nth-child(8) {
+#moneyTransfersTable td:nth-child(7) {
   width: 31%;
   text-align: left;
 }
-#moneyTransfersTable th:nth-child(9),
-#moneyTransfersTable td:nth-child(9) {
+#moneyTransfersTable th:nth-child(8),
+#moneyTransfersTable td:nth-child(8) {
   width: 9%;
   text-align: center;
 }
 
 #moneyTransfersTable td.actions {
   white-space: nowrap;
+  vertical-align: middle;
+}
+
+#moneyTransfersTable td:nth-child(8) {
+  vertical-align: middle;
+}
+
+#moneyTransfersTable td:nth-child(8) .btn--editIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 #moneyTransfersTable td.actions .btn {
   display: inline-flex;
   width: auto;
   min-width: 0;
+}
+
+#moneyTransfersTable td.actions .btn--editIcon {
+  width: 26px;
+  height: 26px;
 }
 
 #moneyTransfersTable td.actions .btn + .btn {
@@ -3399,18 +3693,18 @@ input[type='checkbox'].cb {
 
   #moneyTransfersTable th:nth-child(5),
   #moneyTransfersTable td:nth-child(5),
+  #moneyTransfersTable th:nth-child(6),
+  #moneyTransfersTable td:nth-child(6) {
+    width: 11%;
+  }
+
   #moneyTransfersTable th:nth-child(7),
   #moneyTransfersTable td:nth-child(7) {
-    width: 11%;
+    width: 32%;
   }
 
   #moneyTransfersTable th:nth-child(8),
   #moneyTransfersTable td:nth-child(8) {
-    width: 32%;
-  }
-
-  #moneyTransfersTable th:nth-child(9),
-  #moneyTransfersTable td:nth-child(9) {
     width: 10%;
   }
 }
@@ -3419,20 +3713,20 @@ input[type='checkbox'].cb {
   #moneyTransfersTable th,
   #moneyTransfersTable td { font-size: 0.83rem; }
 
-  #moneyTransfersTable th:nth-child(8),
-  #moneyTransfersTable td:nth-child(8) {
+  #moneyTransfersTable th:nth-child(7),
+  #moneyTransfersTable td:nth-child(7) {
     width: 34%;
   }
 
-  #moneyTransfersTable th:nth-child(9),
-  #moneyTransfersTable td:nth-child(9) {
+  #moneyTransfersTable th:nth-child(8),
+  #moneyTransfersTable td:nth-child(8) {
     width: 10%;
   }
 
-  #moneyTransfersTable th:nth-child(5),
-  #moneyTransfersTable td:nth-child(5),
-  #moneyTransfersTable th:nth-child(7),
-  #moneyTransfersTable td:nth-child(7) {
+  #moneyTransfersTable th:nth-child(4),
+  #moneyTransfersTable td:nth-child(4),
+  #moneyTransfersTable th:nth-child(6),
+  #moneyTransfersTable td:nth-child(6) {
     width: 10%;
   }
 }
@@ -3445,13 +3739,13 @@ input[type='checkbox'].cb {
     font-size: 0.8rem;
   }
 
-  #moneyTransfersTable th:nth-child(8),
-  #moneyTransfersTable td:nth-child(8) {
+  #moneyTransfersTable th:nth-child(7),
+  #moneyTransfersTable td:nth-child(7) {
     width: 28%;
     max-width: none;
   }
 
-  #moneyTransfersTable td:nth-child(9) .btn {
+  #moneyTransfersTable td:nth-child(8) .btn {
     white-space: nowrap;
   }
 }
@@ -3582,6 +3876,22 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
 .table th.col-actions,
 .table td.actions {
   width: 1%;
+  vertical-align: middle;
+}
+
+.table td.actions .btn--viewIcon,
+.table td.actions .btn--itemsIcon,
+.table td.actions .btn--editIcon,
+.table td.actions .btn--x {
+  margin-top: 0;
+  margin-bottom: 0;
+  vertical-align: middle;
+}
+
+.table td.col-delete .btn--x {
+  margin-top: 0;
+  margin-bottom: 0;
+  vertical-align: middle;
 }
 
 .table th.col-delete,
@@ -3599,17 +3909,26 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 999px;
   border: none;
   background: transparent;
-  color: var(--danger-text);
-  font-weight: 700;
+  color: var(--danger);
   line-height: 1;
+  vertical-align: middle;
+}
+
+html[data-theme="dark"] .btn--x {
+  color: var(--primary-text);
 }
 
 .btn--x:hover {
-  background: var(--menu-hover);
-  color: var(--danger-text);
+  background: transparent;
+  color: var(--danger);
+  filter: none;
+}
+
+html[data-theme="dark"] .btn--x:hover {
+  color: var(--primary-text);
 }
 
 .btn--x:focus-visible {
@@ -3617,27 +3936,23 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
   outline-offset: 2px;
 }
 
-/* Dark mode: delete X defaults to white unless row is highlighted. */
-html[data-theme="dark"] .btn--x,
-html[data-theme="dark"] .btn--x:hover {
-  color: #ffffff;
+.btn--x svg {
+  display: block;
+  width: 22px;
+  height: 20px;
+  flex: 0 0 22px;
 }
 
-html[data-theme="dark"] .incomeRow--missingBudget .btn--x,
-html[data-theme="dark"] .incomeRow--missingBudget .btn--x:hover,
-html[data-theme="dark"] .ordersRow--missingRequired .btn--x,
-html[data-theme="dark"] .ordersRow--missingRequired .btn--x:hover,
-html[data-theme="dark"] #ordersTable tr.ordersRow--approved .btn--x,
-html[data-theme="dark"] #ordersTable tr.ordersRow--approved .btn--x:hover,
-html[data-theme="dark"] #ordersTable tr.ordersRow--gtReview .btn--x,
-html[data-theme="dark"] #ordersTable tr.ordersRow--gtReview .btn--x:hover,
-html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--approved .btn--x,
-html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--approved .btn--x:hover,
-html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--gtReview .btn--x,
-html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--gtReview .btn--x:hover,
-html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt .btn--x,
-html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt .btn--x:hover {
-  color: #000000;
+.btn--editIcon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+#moneyTransfersTable .btn--x {
+  border-radius: 999px;
+  overflow: visible;
 }
 
 .table tr:last-child td {

@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <script>try{var __t=localStorage.getItem('payment_order_theme');if(__t==='dark'||__t==='light')document.documentElement.setAttribute('data-theme',__t);}catch(e){}</script>
+    <script>
+      try {
+        var __t = localStorage.getItem("payment_order_theme");
+        if (__t === "dark" || __t === "light")
+          document.documentElement.setAttribute("data-theme", __t);
+      } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
     <link rel="stylesheet" href="styles.css" />
@@ -129,15 +135,11 @@
                 aria-describedby="list-help"
               >
                 <caption id="list-help" class="sr-only">
-                  Newest requests appear first. Use the leftmost column to
-                  delete an entry, and use the Actions column to view details or
-                  open items.
+                  Newest requests appear first. Use the Actions column to view,
+                  edit, delete, or open items.
                 </caption>
                 <thead>
                   <tr>
-                    <th scope="col" class="col-delete">
-                      <span class="sr-only">Delete</span>
-                    </th>
                     <th
                       scope="col"
                       class="is-sortable"
@@ -236,7 +238,6 @@
                 </tbody>
                 <tfoot>
                   <tr class="ordersTotalsRow">
-                    <td class="col-delete"></td>
                     <td colspan="4" class="ordersTotalsRow__label">
                       Unapproved Total
                     </td>
@@ -245,7 +246,6 @@
                     <td colspan="5"></td>
                   </tr>
                   <tr class="ordersTotalsRow">
-                    <td class="col-delete"></td>
                     <td colspan="4" class="ordersTotalsRow__label">
                       Approved Total
                     </td>
@@ -254,7 +254,6 @@
                     <td colspan="5"></td>
                   </tr>
                   <tr class="ordersTotalsRow">
-                    <td class="col-delete"></td>
                     <td colspan="4" class="ordersTotalsRow__label">
                       Grand Total
                     </td>

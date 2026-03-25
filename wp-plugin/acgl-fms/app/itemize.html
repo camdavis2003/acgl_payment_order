@@ -2,10 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <script>try{var __t=localStorage.getItem('payment_order_theme');if(__t==='dark'||__t==='light')document.documentElement.setAttribute('data-theme',__t);}catch(e){}</script>
+    <script>
+      try {
+        var __t = localStorage.getItem("payment_order_theme");
+        if (__t === "dark" || __t === "light")
+          document.documentElement.setAttribute("data-theme", __t);
+      } catch (e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ACGL - FMS</title>
-    <link rel="stylesheet" href="styles.css?v=3759ec8-20260319200320" />
+    <link rel="stylesheet" href="styles.css?v=c99cfe7-20260320125923" />
   </head>
   <body>
     <header class="site-header">
@@ -84,7 +90,11 @@
           aria-label="Itemized items table"
           tabindex="0"
         >
-          <table class="table" aria-describedby="items-help">
+          <table
+            class="table"
+            data-table-enhance="off"
+            aria-describedby="items-help"
+          >
             <caption id="items-help" class="sr-only">
               Rows are numbered. Use Actions to edit or delete items. Totals are
               shown below.
@@ -158,7 +168,7 @@
           aria-label="Attachments table"
           tabindex="0"
         >
-          <table class="table">
+          <table class="table" data-table-enhance="off">
             <thead>
               <tr>
                 <th scope="col" class="num">#</th>
@@ -538,6 +548,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=3759ec8-20260319200320" defer></script>
+    <script src="app.js?v=c99cfe7-20260320125923" defer></script>
   </body>
 </html>

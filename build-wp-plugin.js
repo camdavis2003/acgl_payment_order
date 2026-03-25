@@ -38,6 +38,7 @@ const FILES = [
   'bic.js',
   'table-enhancements.js',
   'pdf-lib.min.js',
+  'datastore.js',
   'app.js',
   'styles.css',
   'wise_eur_2026_seed.csv',
@@ -87,7 +88,7 @@ function patchAssetUrlsInHtml(html, version) {
 
   // Append ?v=... to our local asset URLs to avoid stale browser/WP caches.
   // Only patch exact filenames and skip if a query string is already present.
-  const assets = ['styles.css', 'user-roles.js', 'app.js', 'iban.js', 'bic.js', 'table-enhancements.js', 'pdf-lib.min.js'];
+  const assets = ['styles.css', 'user-roles.js', 'datastore.js', 'app.js', 'iban.js', 'bic.js', 'table-enhancements.js', 'pdf-lib.min.js'];
   let out = String(html || '');
   for (const a of assets) {
     // href="styles.css"  /  src="app.js"

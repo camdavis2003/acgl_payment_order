@@ -103,15 +103,24 @@
         try { nativeSet(k, text); } catch { /* ignore */ }
       }
 
+      const meta = { fetchedAtMs: Date.now(), staleMs: getKeyStaleMs(k) };
       loadedKeys.add(k);
-      keyMeta.set(k, {
-        fetchedAtMs: Date.now(),
-        staleMs: getKeyStaleMs(k),
-      });
+      keyMeta.set(k, meta);
+      try { nativeSet(`__acgl_ds_meta_${k}`, JSON.stringify(meta)); } catch { /* ignore */ }
     }
 
     function isKeyStale(key) {
-      const meta = keyMeta.get(String(key || '').trim());
+      const k = String(key || '').trim();
+      let meta = keyMeta.get(k);
+      if (!meta || !Number.isFinite(meta.fetchedAtMs)) {
+        try {
+          const raw = nativeGet(`__acgl_ds_meta_${k}`);
+          if (raw) {
+            meta = JSON.parse(raw);
+            keyMeta.set(k, meta);
+          }
+        } catch { /* ignore */ }
+      }
       if (!meta || !Number.isFinite(meta.fetchedAtMs)) return true;
       return (Date.now() - meta.fetchedAtMs) > Number(meta.staleMs || DEFAULT_STALE_MS);
     }
@@ -122,7 +131,14 @@
       if (!getWpToken()) return false;
 
       if (!force && pendingReads.has(key)) return pendingReads.get(key);
-      if (!force && loadedKeys.has(key) && !isKeyStale(key)) return true;
+      if (!force && !isKeyStale(key)) {
+        if (!loadedKeys.has(key)) {
+          const stored = nativeGet(key);
+          mem.set(key, stored !== null ? stored : mem.get(key));
+          loadedKeys.add(key);
+        }
+        return true;
+      }
 
       const started = Date.now();
       const request = (async () => {

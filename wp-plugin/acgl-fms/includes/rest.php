@@ -883,7 +883,7 @@ function acgl_fms_register_rest_routes() {
 
             $perms = acgl_fms_normalize_permissions($user['permissions'] ?? []);
             $roleRaw = strtolower(trim((string) ($user['position'] ?? ($user['role'] ?? ''))));
-            $isAdminRole = in_array($roleRaw, ['admin', 'administrator', 'site administrator', 'super admin'], true);
+            $isAdminRole = acgl_fms_user_roles_is_admin_role_value($roleRaw);
             if ($isAdminRole) {
                 $perms = acgl_fms_normalize_permissions([
                     'budget' => 'full',

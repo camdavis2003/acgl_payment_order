@@ -30,7 +30,10 @@ const FILES = [
   'settings.html',
   'google_backup_setup.html',
   'itemize.html',
+  'money_transfer.html',
+  'money_transfers.html',
   'loading.html',
+  'user-roles.js',
   'iban.js',
   'bic.js',
   'table-enhancements.js',
@@ -84,7 +87,7 @@ function patchAssetUrlsInHtml(html, version) {
 
   // Append ?v=... to our local asset URLs to avoid stale browser/WP caches.
   // Only patch exact filenames and skip if a query string is already present.
-  const assets = ['styles.css', 'app.js', 'iban.js', 'bic.js', 'table-enhancements.js', 'pdf-lib.min.js'];
+  const assets = ['styles.css', 'user-roles.js', 'app.js', 'iban.js', 'bic.js', 'table-enhancements.js', 'pdf-lib.min.js'];
   let out = String(html || '');
   for (const a of assets) {
     // href="styles.css"  /  src="app.js"

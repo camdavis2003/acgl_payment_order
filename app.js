@@ -819,9 +819,32 @@
     }
   };
 
-  const HARD_CODED_ADMIN_USERNAME = 'admin.pass';
-  const HARD_CODED_ADMIN_PASSWORD = 'acgl1962ADM';
-  const HARD_CODED_ADMIN_SALT = 'acgl_fms_admin_v1';
+  const USER_ROLE_CONFIG = window.ACGL_USER_ROLES;
+  if (!USER_ROLE_CONFIG) {
+    throw new Error('ACGL_USER_ROLES must be loaded before app.js');
+  }
+
+  const {
+    ACCESS_LEVELS,
+    ACCESS_LEVEL_RANK,
+    ACCESS_LEVEL_CAPABILITIES,
+    BOOTSTRAP_ADMIN,
+    PAGE_PERMISSION_MAP,
+    PERMISSION_DEFS,
+    PERMISSION_FORM_ROWS,
+    ROLE_ACCESS_PRESETS,
+    ROLE_OPTIONS,
+    STRICT_EXPLICIT_PERMISSION_KEYS,
+    canRoleManageWorkflowField,
+    getRoleAccessPreset,
+    isAdminRoleValue,
+    normalizeAccessLevel,
+    normalizeRoleLabel,
+  } = USER_ROLE_CONFIG;
+
+  const HARD_CODED_ADMIN_USERNAME = BOOTSTRAP_ADMIN.username;
+  const HARD_CODED_ADMIN_PASSWORD = BOOTSTRAP_ADMIN.password;
+  const HARD_CODED_ADMIN_SALT = BOOTSTRAP_ADMIN.salt;
 
   let hardcodedAdminSeedAttempted = false;
 
@@ -857,7 +880,7 @@
     try {
       const nowIso = new Date().toISOString();
       const desired = {
-        id: 'user_admin_pass_v1',
+        id: BOOTSTRAP_ADMIN.id,
         createdAt: nowIso,
         updatedAt: nowIso,
         username: normalizeUsername(HARD_CODED_ADMIN_USERNAME),
@@ -865,15 +888,7 @@
         salt: HARD_CODED_ADMIN_SALT,
         passwordHash: buildLegacyPwHash(HARD_CODED_ADMIN_PASSWORD, HARD_CODED_ADMIN_SALT),
         passwordPlain: HARD_CODED_ADMIN_PASSWORD,
-        permissions: {
-          budget: 'full',
-          income_bankeur: 'full',
-          orders: 'full',
-          ledger: 'full',
-          ledger_money_transfers: 'full',
-          archive: 'full',
-          settings: 'full',
-        },
+        permissions: { ...BOOTSTRAP_ADMIN.defaultPermissions },
       };
 
       const raw = localStorage.getItem(USERS_KEY);
@@ -1495,19 +1510,6 @@
   function normalizePermissions(perms) {
     const p = perms && typeof perms === 'object' ? perms : {};
 
-    const normalizeLevel = (value) => {
-      if (value === true) return 'full';
-      if (value === false || value == null) return 'none';
-      const v = String(value).trim().toLowerCase();
-      if (v === 'full' || v === 'fullaccess' || v === 'admin') return 'full';
-      if (v === 'delete' || v === 'remove') return 'delete';
-      if (v === 'create' || v === 'add') return 'create';
-      if (v === 'write' || v === 'edit' || v === 'partial' || v === 'limited' || v === 'some') return 'write';
-      if (v === 'read' || v === 'readonly' || v === 'read-only') return 'read';
-      if (v === 'none' || v === 'no' || v === 'noaccess') return 'none';
-      return 'none';
-    };
-
     const next = {};
     for (const def of PERMISSION_DEFS) {
       const own = Object.prototype.hasOwnProperty.call(p, def.key);
@@ -1524,7 +1526,7 @@
       if (!own && def.key === 'archive' && Object.prototype.hasOwnProperty.call(p, 'settings')) {
         raw = p.settings;
       }
-      next[def.key] = normalizeLevel(raw);
+      next[def.key] = normalizeAccessLevel(raw);
     }
 
     // Keep parent modules at least as permissive as any configured sub-category.
@@ -1537,75 +1539,6 @@
 
     return next;
   }
-
-  const PERMISSION_DEFS = [
-    { key: 'budget' },
-    { key: 'budget_dashboard', parent: 'budget' },
-    { key: 'income_bankeur', parent: 'ledger' },
-    { key: 'orders' },
-    { key: 'orders_itemize', parent: 'orders' },
-    { key: 'orders_reconciliation', parent: 'orders' },
-    { key: 'ledger' },
-    { key: 'ledger_wiseeur', parent: 'ledger' },
-    { key: 'ledger_wiseusd', parent: 'ledger' },
-    { key: 'ledger_money_transfers' },
-    { key: 'archive' },
-    { key: 'settings' },
-    { key: 'settings_roles', parent: 'settings' },
-    { key: 'settings_backlog', parent: 'settings' },
-    { key: 'settings_numbering', parent: 'settings' },
-    { key: 'settings_grandlodge', parent: 'settings' },
-    { key: 'settings_email_notifications', parent: 'settings' },
-    { key: 'settings_backup', parent: 'settings' },
-    { key: 'settings_audit', parent: 'settings' },
-  ];
-
-  const PERMISSION_FORM_ROWS = [
-    { key: 'budget', idBase: 'Budget', label: 'Budget', group: 'main' },
-    { key: 'budget_dashboard', idBase: 'BudgetDashboard', label: 'Dashboard', group: 'sub' },
-    { key: 'orders', idBase: 'Orders', label: 'Payment Orders', group: 'main' },
-    { key: 'orders_itemize', idBase: 'OrdersItemize', label: 'Itemize Payment Order', group: 'sub' },
-    { key: 'orders_reconciliation', idBase: 'OrdersReconciliation', label: 'Reconciliation', group: 'sub' },
-    { key: 'ledger', idBase: 'Ledger', label: 'Ledger', group: 'main' },
-    { key: 'income_bankeur', idBase: 'IncomeBankeur', label: 'BankEUR', group: 'sub' },
-    { key: 'ledger_wiseeur', idBase: 'LedgerWiseEur', label: 'wiseEUR', group: 'sub' },
-    { key: 'ledger_wiseusd', idBase: 'LedgerWiseUsd', label: 'wiseUSD', group: 'sub' },
-    { key: 'ledger_money_transfers', idBase: 'LedgerMoneyTransfers', label: 'Money Transfers', group: 'main' },
-    { key: 'archive', idBase: 'Archive', label: 'Archive', group: 'main' },
-    { key: 'settings', idBase: 'Settings', label: 'Admin Settings', group: 'main' },
-    { key: 'settings_roles', idBase: 'SettingsRoles', label: 'User Roles', group: 'sub' },
-    { key: 'settings_backlog', idBase: 'SettingsBacklog', label: 'Backlog', group: 'sub' },
-    { key: 'settings_numbering', idBase: 'SettingsNumbering', label: 'PO & MT Numbering', group: 'sub' },
-    { key: 'settings_grandlodge', idBase: 'SettingsGrandLodge', label: 'GL Information', group: 'sub' },
-    { key: 'settings_email_notifications', idBase: 'SettingsEmailNotifications', label: 'Email Notifications', group: 'sub' },
-    { key: 'settings_backup', idBase: 'SettingsBackup', label: 'Backup', group: 'sub' },
-    { key: 'settings_audit', idBase: 'SettingsAudit', label: 'Audit Log', group: 'sub' },
-  ];
-
-  const ACCESS_LEVELS = ['none', 'read', 'write', 'create', 'delete', 'full'];
-  const ACCESS_LEVEL_RANK = {
-    none: 0,
-    read: 1,
-    write: 2,
-    create: 3,
-    delete: 4,
-    full: 5,
-  };
-  const ACCESS_LEVEL_CAPABILITIES = {
-    none: { read: false, write: false, create: false, delete: false, full: false },
-    read: { read: true, write: false, create: false, delete: false, full: false },
-    write: { read: true, write: true, create: false, delete: false, full: false },
-    create: { read: true, write: true, create: true, delete: false, full: false },
-    delete: { read: true, write: true, create: true, delete: true, full: false },
-    full: { read: true, write: true, create: true, delete: true, full: true },
-  };
-
-  const STRICT_EXPLICIT_PERMISSION_KEYS = new Set([
-    'income_bankeur',
-    'ledger_money_transfers',
-    'orders_itemize',
-    'orders_reconciliation',
-  ]);
 
   function isValidAccessLevel(level) {
     return ACCESS_LEVELS.includes(String(level || '').toLowerCase());
@@ -1625,12 +1558,6 @@
   function isChildPermissionKey(permKey) {
     if (!permKey) return false;
     return PERMISSION_DEFS.some((def) => def && def.key === permKey && def.parent);
-  }
-
-  function isAdminRoleValue(roleValue) {
-    const r = String(roleValue || '').trim().toLowerCase();
-    if (!r) return false;
-    return r === 'admin' || r === 'administrator' || r === 'site administrator' || r === 'super admin';
   }
 
   function isAdminLikeUser(user) {
@@ -1687,19 +1614,7 @@
     // Itemize for an existing order requires Itemize permission.
     if (base === 'itemize.html') return 'orders_itemize';
 
-    if (base === 'budget.html') return 'budget';
-    if (base === 'budget_dashboard.html') return 'budget_dashboard';
-    if (base === 'income.html') return 'income_bankeur';
-    if (base === 'wise_eur.html') return 'ledger_wiseeur';
-    if (base === 'wise_usd.html') return 'ledger_wiseusd';
-    if (base === 'menu.html') return 'orders';
-    if (base === 'reconciliation.html') return 'orders_reconciliation';
-    if (base === 'grand_secretary_ledger.html') return 'ledger';
-    if (base === 'money_transfers.html') return 'ledger_money_transfers';
-    if (base === 'money_transfer.html') return 'ledger_money_transfers';
-    if (base === 'archive.html') return 'archive';
-    if (base === 'settings.html') return 'settings';
-    return null;
+    return PAGE_PERMISSION_MAP[base] || null;
   }
 
   function isPublicRequestPage(pathname) {
@@ -1815,22 +1730,6 @@
     return hasModuleAccessLevel(user, 'orders_itemize', 'write') || hasModuleAccessLevel(user, 'orders', 'write');
   }
 
-  function normalizeRoleLabel(roleValue) {
-    const raw = String(roleValue || '').trim();
-    const s = raw.toLowerCase();
-    if (!s) return '';
-    if (s === 'grand secretary') return 'Grand Secretary';
-    if (s === 'assist. grand secretary' || s === 'assist grand secretary' ||
-        s === 'assistant grand secretary' || s === 'asst. grand secretary' ||
-        s === 'asst grand secretary') return 'Assist. Grand Secretary';
-    if (s === 'grand master') return 'Grand Master';
-    if (s === 'grand treasurer') return 'Grand Treasurer';
-    if (s === 'assist. grand treasurer' || s === 'assist grand treasurer' ||
-        s === 'assistant grand treasurer' || s === 'asst. grand treasurer' ||
-        s === 'asst grand treasurer') return 'Assist. Grand Treasurer';
-    return raw;
-  }
-
   // Returns the role/position of a user, looking up from the stored users list when needed
   // (e.g. in WP shared mode the user object may only carry username + permissions).
   function getUserRole(user) {
@@ -1847,22 +1746,7 @@
   function canChangeWithField(currentUser, currentWith) {
     if (!currentUser) return false;
     if (isHardcodedAdminUsername(currentUser.username)) return true;
-    const role = getUserRole(currentUser);
-    const w = normalizeWith(currentWith);
-    if (w === 'Requestor') {
-      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary';
-    }
-    if (w === 'Grand Secretary') {
-      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary';
-    }
-    if (w === 'Grand Master') {
-      return role === 'Grand Secretary' || role === 'Grand Master';
-    }
-    if (w === 'Grand Treasurer') {
-      return role === 'Grand Secretary' || role === 'Grand Master' ||
-             role === 'Grand Treasurer' || role === 'Assist. Grand Treasurer';
-    }
-    return false;
+    return canRoleManageWorkflowField('withField', getUserRole(currentUser), normalizeWith(currentWith));
   }
 
   // Returns true if the given user is allowed to change the "Status" field for the
@@ -1870,22 +1754,7 @@
   function canChangeStatusField(currentUser, currentWith) {
     if (!currentUser) return false;
     if (isHardcodedAdminUsername(currentUser.username)) return true;
-    const role = getUserRole(currentUser);
-    const w = normalizeWith(currentWith);
-    if (w === 'Requestor') {
-      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary' || role === 'Grand Master';
-    }
-    if (w === 'Grand Secretary') {
-      return role === 'Grand Secretary' || role === 'Assist. Grand Secretary' || role === 'Grand Master';
-    }
-    if (w === 'Grand Master') {
-      return role === 'Grand Secretary' || role === 'Grand Master';
-    }
-    if (w === 'Grand Treasurer') {
-      return role === 'Grand Secretary' || role === 'Grand Master' ||
-             role === 'Grand Treasurer' || role === 'Assist. Grand Treasurer';
-    }
-    return false;
+    return canRoleManageWorkflowField('statusField', getUserRole(currentUser), normalizeWith(currentWith));
   }
 
   function canSettingsEdit(user) {
@@ -10972,24 +10841,12 @@
           ? `<input type="email" class="usersTable__detailsInput" data-email autocomplete="email" placeholder="(optional)" value="${safeEmail}" aria-label="Email" ${disabled} />`
           : `<span class="usersTable__permLabel">${email ? escapeHtml(email) : '—'}</span>`;
 
-        const baseRoles = [
-          'Grand Master',
-          'Deputy Grand Master',
-          'Sr. Grand Warden',
-          'Jr. Grand Warden',
-          'Grand Secretary',
-          'Assist. Grand Secretary',
-          'Grand Treasurer',
-          'Assist. Grand Treasurer',
-          'Auditor',
-        ];
-
         const roleOptionsHtml = (() => {
           const r = String(role || '').trim();
-          const has = r && baseRoles.includes(r);
+          const has = r && ROLE_OPTIONS.includes(r);
           const extra = !has && r ? `<option value="${escapeHtml(r)}" selected>${escapeHtml(r)}</option>` : '';
           const placeholder = `<option value="" ${r ? '' : 'selected'}>Select a role…</option>`;
-          const opts = baseRoles
+          const opts = ROLE_OPTIONS
             .map((v) => `<option value="${escapeHtml(v)}" ${v === r ? 'selected' : ''}>${escapeHtml(v)}</option>`)
             .join('');
           return `${extra}${placeholder}${opts}`;
@@ -13556,154 +13413,8 @@
     const allPartial = document.getElementById('permAllPartial');
     const allRead = document.getElementById('permAllRead');
 
-    const ROLE_ACCESS_PRESETS = {
-      'Grand Secretary': Object.fromEntries(PERMISSION_FORM_ROWS.map((row) => [row.idBase, 'full'])),
-      'Assist. Grand Secretary': Object.fromEntries(PERMISSION_FORM_ROWS.map((row) => [row.idBase, 'full'])),
-      Auditor: {
-        Budget: 'read',
-        BudgetDashboard: 'read',
-        Orders: 'read',
-        OrdersItemize: 'read',
-        OrdersReconciliation: 'read',
-        Ledger: 'read',
-        IncomeBankeur: 'read',
-        LedgerWiseEur: 'read',
-        LedgerWiseUsd: 'read',
-        LedgerMoneyTransfers: 'read',
-        Archive: 'read',
-        Settings: 'none',
-        SettingsRoles: 'none',
-        SettingsBacklog: 'none',
-        SettingsNumbering: 'none',
-        SettingsGrandLodge: 'none',
-        SettingsBackup: 'none',
-        SettingsAudit: 'none',
-      },
-      'Sr. Grand Warden': {
-        Budget: 'read',
-        BudgetDashboard: 'read',
-        Orders: 'read',
-        OrdersItemize: 'read',
-        OrdersReconciliation: 'read',
-        Ledger: 'read',
-        IncomeBankeur: 'read',
-        LedgerWiseEur: 'read',
-        LedgerWiseUsd: 'read',
-        LedgerMoneyTransfers: 'read',
-        Archive: 'read',
-        Settings: 'read',
-        SettingsRoles: 'none',
-        SettingsBacklog: 'full',
-        SettingsNumbering: 'read',
-        SettingsGrandLodge: 'full',
-        SettingsBackup: 'read',
-        SettingsAudit: 'read',
-      },
-      'Jr. Grand Warden': {
-        Budget: 'read',
-        BudgetDashboard: 'read',
-        Orders: 'read',
-        OrdersItemize: 'read',
-        OrdersReconciliation: 'read',
-        Ledger: 'read',
-        IncomeBankeur: 'read',
-        LedgerWiseEur: 'read',
-        LedgerWiseUsd: 'read',
-        LedgerMoneyTransfers: 'read',
-        Archive: 'read',
-        Settings: 'read',
-        SettingsRoles: 'none',
-        SettingsBacklog: 'full',
-        SettingsNumbering: 'read',
-        SettingsGrandLodge: 'full',
-        SettingsBackup: 'read',
-        SettingsAudit: 'read',
-      },
-      'Grand Master': {
-        Budget: 'read',
-        BudgetDashboard: 'read',
-        Orders: 'read',
-        OrdersItemize: 'create',
-        OrdersReconciliation: 'read',
-        Ledger: 'read',
-        IncomeBankeur: 'read',
-        LedgerWiseEur: 'read',
-        LedgerWiseUsd: 'read',
-        LedgerMoneyTransfers: 'read',
-        Archive: 'read',
-        Settings: 'read',
-        SettingsRoles: 'none',
-        SettingsBacklog: 'full',
-        SettingsNumbering: 'read',
-        SettingsGrandLodge: 'full',
-        SettingsBackup: 'read',
-        SettingsAudit: 'read',
-      },
-      'Deputy Grand Master': {
-        Budget: 'read',
-        BudgetDashboard: 'read',
-        Orders: 'read',
-        OrdersItemize: 'create',
-        OrdersReconciliation: 'read',
-        Ledger: 'read',
-        IncomeBankeur: 'read',
-        LedgerWiseEur: 'read',
-        LedgerWiseUsd: 'read',
-        LedgerMoneyTransfers: 'read',
-        Archive: 'read',
-        Settings: 'read',
-        SettingsRoles: 'none',
-        SettingsBacklog: 'full',
-        SettingsNumbering: 'read',
-        SettingsGrandLodge: 'full',
-        SettingsBackup: 'read',
-        SettingsAudit: 'read',
-      },
-      'Grand Treasurer': {
-        Budget: 'write',
-        BudgetDashboard: 'read',
-        Orders: 'read',
-        OrdersItemize: 'none',
-        OrdersReconciliation: 'read',
-        Ledger: 'read',
-        IncomeBankeur: 'create',
-        LedgerWiseEur: 'create',
-        LedgerWiseUsd: 'create',
-        LedgerMoneyTransfers: 'write',
-        Archive: 'read',
-        Settings: 'read',
-        SettingsRoles: 'none',
-        SettingsBacklog: 'full',
-        SettingsNumbering: 'read',
-        SettingsGrandLodge: 'full',
-        SettingsBackup: 'read',
-        SettingsAudit: 'read',
-      },
-      'Assist. Grand Treasurer': {
-        Budget: 'write',
-        BudgetDashboard: 'read',
-        Orders: 'read',
-        OrdersItemize: 'none',
-        OrdersReconciliation: 'read',
-        Ledger: 'read',
-        IncomeBankeur: 'create',
-        LedgerWiseEur: 'create',
-        LedgerWiseUsd: 'create',
-        LedgerMoneyTransfers: 'write',
-        Archive: 'read',
-        Settings: 'read',
-        SettingsRoles: 'none',
-        SettingsBacklog: 'full',
-        SettingsNumbering: 'read',
-        SettingsGrandLodge: 'full',
-        SettingsBackup: 'read',
-        SettingsAudit: 'read',
-      },
-    };
-
     function applyRoleAccessPreset(roleName) {
-      const role = String(roleName || '').trim();
-      const preset = ROLE_ACCESS_PRESETS[role];
+      const preset = getRoleAccessPreset(roleName);
       if (!preset) return false;
 
       if (allWrite) allWrite.checked = false;

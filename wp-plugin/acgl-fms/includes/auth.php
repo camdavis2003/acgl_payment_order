@@ -151,6 +151,8 @@ function acgl_fms_key_to_module($key) {
 function acgl_fms_token_allows_key($tokenPayload, $key, $isWrite) {
     if (!is_array($tokenPayload)) return false;
 
+    if (function_exists('acgl_fms_payload_is_admin') && acgl_fms_payload_is_admin($tokenPayload)) return true;
+
     $username = strtolower(trim((string) ($tokenPayload['u'] ?? '')));
     if ($username === '') return false;
 
@@ -308,6 +310,27 @@ function acgl_fms_find_user_by_username($users, $username) {
         if ($ru !== '' && $ru === $u) return $row;
     }
     return null;
+}
+
+function acgl_fms_payload_is_admin($tokenPayload) {
+    if (!is_array($tokenPayload)) return false;
+
+    $username = strtolower(trim((string) ($tokenPayload['u'] ?? '')));
+    if ($username === '') return false;
+
+    if ($username === strtolower(trim((string) acgl_fms_user_roles_bootstrap_admin_username()))) {
+        return true;
+    }
+
+    $users = acgl_fms_load_users_from_kv();
+    $user = acgl_fms_find_user_by_username($users, $username);
+    if (is_array($user)) {
+        $roleRaw = strtolower(trim((string) ($user['position'] ?? ($user['role'] ?? ''))));
+        if (acgl_fms_user_roles_is_admin_role_value($roleRaw)) return true;
+    }
+
+    $perms = acgl_fms_normalize_permissions($tokenPayload['p'] ?? []);
+    return ($perms['settings'] ?? 'none') === 'full';
 }
 
 function acgl_fms_authorize_kv($request, $keyOrNull, $isWrite) {

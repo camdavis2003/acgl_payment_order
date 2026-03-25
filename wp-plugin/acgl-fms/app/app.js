@@ -1560,11 +1560,30 @@
     return PERMISSION_DEFS.some((def) => def && def.key === permKey && def.parent);
   }
 
+  function hasFullAdminPermissionSet(perms) {
+    const p = normalizePermissions(perms);
+    return p.budget === 'full'
+      && p.income_bankeur === 'full'
+      && p.orders === 'full'
+      && p.ledger === 'full'
+      && p.ledger_money_transfers === 'full'
+      && p.archive === 'full'
+      && p.settings === 'full';
+  }
+
   function isAdminLikeUser(user) {
     if (!user) return false;
     if (isHardcodedAdminUsername(user.username)) return true;
     if (isAdminRoleValue(user.position) || isAdminRoleValue(user.role)) return true;
+    if (hasFullAdminPermissionSet(user.permissions)) return true;
+    const directPerms = normalizePermissions(user.permissions);
+    if (directPerms.settings === 'full') return true;
     const full = getUserByUsername(user.username);
+    if (full) {
+      if (hasFullAdminPermissionSet(full.permissions)) return true;
+      const fullPerms = normalizePermissions(full.permissions);
+      if (fullPerms.settings === 'full') return true;
+    }
     if (full && (isAdminRoleValue(full.position) || isAdminRoleValue(full.role))) return true;
     return false;
   }
@@ -12736,6 +12755,7 @@
     const hasExplicitSettingsAccess = (permKey, minLevel = 'read') => {
       if (!hasAnyUsers) return true;
       if (!currentUser || !permKey) return false;
+      if (isAdminLikeUser(currentUser)) return true;
       const rawPerms = currentUser && currentUser.permissions && typeof currentUser.permissions === 'object'
         ? currentUser.permissions
         : {};
@@ -12750,6 +12770,7 @@
     const hasStrictExplicitSettingsAccess = (permKey, minLevel = 'read') => {
       if (!hasAnyUsers) return true;
       if (!currentUser || !permKey) return false;
+      if (isAdminLikeUser(currentUser)) return true;
       const rawPerms = currentUser && currentUser.permissions && typeof currentUser.permissions === 'object'
         ? currentUser.permissions
         : {};
@@ -12758,7 +12779,15 @@
       if (hasOwnPermissionKey(rawPerms, permKey)) {
         return hasModuleAccessLevel({ permissions: { [permKey]: rawPerms[permKey] } }, permKey, minLevel);
       }
-      if (hasSettingsChildren && isChildPermissionKey(permKey)) return false;
+      if (hasSettingsChildren && isChildPermissionKey(permKey)) {
+        // Full access at Settings parent should still grant all Settings child cards.
+        const settingsParentLevel = hasOwnPermissionKey(rawPerms, 'settings') ? rawPerms.settings : null;
+        if (settingsParentLevel != null) {
+          const settingsAllows = hasModuleAccessLevel({ permissions: { settings: settingsParentLevel } }, 'settings', minLevel);
+          if (settingsAllows) return true;
+        }
+        return false;
+      }
       return hasModuleAccessLevel(currentUser, permKey, minLevel);
     };
 

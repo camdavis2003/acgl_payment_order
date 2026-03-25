@@ -17670,6 +17670,7 @@
     sortDir: 'asc',
     defaultEmptyText: null,
     canVerify: false,
+    canDelete: false,
   };
 
   function ensureWiseEurDefaultEmptyText() {
@@ -17864,6 +17865,9 @@
   function renderWiseEurRows(entries) {
     if (!wiseEurTbody) return;
     const canVerify = Boolean(wiseEurViewState.canVerify);
+    const canDeleteRows = Boolean(wiseEurViewState.canDelete);
+    const deleteAriaDisabled = canDeleteRows ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteRows ? '' : ' data-tooltip="Requires Delete access for wiseEUR."';
     const year = getActiveBudgetYear();
     const activeYear = getActiveBudgetYear();
     const inMap = getInDescMapForYear(activeYear);
@@ -18011,7 +18015,7 @@
             <td>${bankStatements}</td>
             <td class="actions">
               <button type="button" class="btn btn--editIcon" data-wise-eur-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn btn--x" data-wise-eur-action="delete" aria-label="Delete entry" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+              <button type="button" class="btn btn--x" data-wise-eur-action="delete" aria-label="Delete entry" title="${canDeleteRows ? 'Delete' : 'Requires Delete access for wiseEUR.'}" aria-disabled="${deleteAriaDisabled}"${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -18663,6 +18667,7 @@
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseEurViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
+    wiseEurViewState.canDelete = currentUser ? canDelete(currentUser, 'income_wise_eur') : false;
 
     const wiseEurNewLink = document.getElementById('wiseEurNewLink');
     const wiseEurExportCsvLink = document.getElementById('wiseEurExportCsvLink');
@@ -19391,6 +19396,10 @@
       const action = btn.getAttribute('data-wise-eur-action');
 
       if (action === 'delete') {
+        if (btn.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(btn, 'Requires Delete access for wiseEUR.');
+          return;
+        }
         if (!requireDeleteAccess('income_wise_eur', 'Delete access is required for wiseEUR.')) return;
         const ok = window.confirm('Delete this wiseEUR entry?');
         if (!ok) return;
@@ -19561,6 +19570,7 @@
     sortDir: 'asc',
     defaultEmptyText: null,
     canVerify: false,
+    canDelete: false,
   };
 
   function ensureWiseUsdDefaultEmptyText() {
@@ -19755,6 +19765,9 @@
   function renderWiseUsdRows(entries) {
     if (!wiseUsdTbody) return;
     const canVerify = Boolean(wiseUsdViewState.canVerify);
+    const canDeleteRows = Boolean(wiseUsdViewState.canDelete);
+    const deleteAriaDisabled = canDeleteRows ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteRows ? '' : ' data-tooltip="Requires Delete access for wiseUSD."';
     const year = getActiveBudgetYear();
     const activeYear = getActiveBudgetYear();
     const inMap = getInDescMapForYear(activeYear);
@@ -19902,7 +19915,7 @@
             <td>${bankStatements}</td>
             <td class="actions">
               <button type="button" class="btn btn--editIcon" data-wise-usd-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn btn--x" data-wise-usd-action="delete" aria-label="Delete entry" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+              <button type="button" class="btn btn--x" data-wise-usd-action="delete" aria-label="Delete entry" title="${canDeleteRows ? 'Delete' : 'Requires Delete access for wiseUSD.'}" aria-disabled="${deleteAriaDisabled}"${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
             </td>
           </tr>
         `.trim();
@@ -20353,6 +20366,7 @@
 
     // Verified checkbox should be editable for Income Write/Partial.
     wiseUsdViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
+    wiseUsdViewState.canDelete = currentUser ? canDelete(currentUser, 'income_wise_usd') : false;
 
     const wiseUsdNewLink = document.getElementById('wiseUsdNewLink');
     const wiseUsdExportCsvLink = document.getElementById('wiseUsdExportCsvLink');
@@ -21081,6 +21095,10 @@
       const action = btn.getAttribute('data-wise-usd-action');
 
       if (action === 'delete') {
+        if (btn.getAttribute('aria-disabled') === 'true') {
+          alertDisabledAction(btn, 'Requires Delete access for wiseUSD.');
+          return;
+        }
         if (!requireDeleteAccess('income_wise_usd', 'Delete access is required for wiseUSD.')) return;
         const ok = window.confirm('Delete this wiseUSD entry?');
         if (!ok) return;

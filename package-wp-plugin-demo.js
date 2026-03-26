@@ -142,6 +142,15 @@ function transformAppJs(srcText) {
   return out;
 }
 
+function transformDatastoreJs(srcText) {
+  let out = String(srcText);
+
+  // Point demo store at demo REST namespace.
+  out = replaceAll(out, 'acgl-fms/v1', 'acgl-fms-demo/v1');
+
+  return out;
+}
+
 async function zipDemoPlugin() {
   ensureDir(DIST_DIR);
   rmIfExists(OUT_ZIP);
@@ -190,6 +199,13 @@ async function zipDemoPlugin() {
     if (entryRel === 'app/app.js') {
       const raw = fs.readFileSync(abs, 'utf8');
       const transformed = transformAppJs(raw);
+      archive.append(transformed, { name: entryName });
+      continue;
+    }
+
+    if (entryRel === 'app/datastore.js') {
+      const raw = fs.readFileSync(abs, 'utf8');
+      const transformed = transformDatastoreJs(raw);
       archive.append(transformed, { name: entryName });
       continue;
     }

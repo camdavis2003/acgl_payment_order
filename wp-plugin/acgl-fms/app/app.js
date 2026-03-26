@@ -459,9 +459,11 @@
     if (key === 'payment_order_grand_lodge_info_v1') return true;
     if (key === 'payment_order_budget_years_v1') return true;
     if (key === 'payment_order_active_budget_year_v1') return true;
+    if (key === 'payment_order_notifications_settings_v1') return true;
 
     // Per-year datasets
     if (key.startsWith('payment_orders_')) return true;
+    if (key.startsWith('money_transfers_')) return true;
     if (key.startsWith('payment_order_income_')) return true;
     if (key.startsWith('payment_order_wise_eur_')) return true;
     if (key.startsWith('payment_order_wise_usd_')) return true;
@@ -508,186 +510,32 @@
 
   async function initWpSharedStorageBridge() {
     if (!IS_WP_SHARED_MODE) return;
-    if (typeof window.fetch !== 'function') return;
-    let storage;
-    try {
-      storage = window.localStorage;
-    } catch {
-      // Some embedded/browser privacy modes throw on storage access.
-      return;
-    }
-    if (!storage) return;
+    const dataStore = window.ACGLDataStore;
+    if (!dataStore || typeof dataStore.initWpSharedStorageBridge !== 'function') return;
 
-    const nativeGet = storage.getItem.bind(storage);
-    const nativeSet = storage.setItem.bind(storage);
-    const nativeRemove = storage.removeItem.bind(storage);
-
-    const mem = new Map();
-    const pendingUpserts = new Map();
-    const pendingDeletes = new Set();
-    let flushTimer = 0;
-    let flushing = false;
-
-    const kvListUrl = wpJoin('acgl-fms/v1/kv');
-    const itemUrl = (key) => wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(key || ''))}`);
-
-    async function hydrateSharedFromWp() {
-      const res = await wpFetchJson(kvListUrl, { method: 'GET' });
-      if (res.status === 401 || res.status === 403) return false;
-      if (!res.ok) throw new Error(`kv_list_failed_${res.status}`);
-
-      const payload = await readJsonResponse(res);
-      const items = payload && Array.isArray(payload.items) ? payload.items : [];
-
-      mem.clear();
-      for (const it of items) {
-        if (!it || typeof it !== 'object') continue;
-        const k = String(it.k || '').trim();
-        if (!isWpSharedKey(k)) continue;
-        const v = it.v === null || it.v === undefined ? null : String(it.v);
-        if (v === null) mem.delete(k);
-        else mem.set(k, v);
-      }
-      return true;
-    }
-
-    // 1) Load all shared keys from WP into memory.
-    try {
-      const ok = await hydrateSharedFromWp();
-      if (!ok) {
-        // Not signed into the app yet (public mode). Continue with an empty in-memory store.
-      }
-    } catch {
-      // Network errors: fall back to local storage.
-      return;
-    }
-
-    function scheduleFlush() {
-      if (flushTimer) return;
-      flushTimer = window.setTimeout(async () => {
-        flushTimer = 0;
-        if (flushing) return;
-        flushing = true;
-        try {
-          // Deletes first.
-          for (const key of Array.from(pendingDeletes)) {
-            pendingDeletes.delete(key);
-            pendingUpserts.delete(key);
-            try {
-              await wpFetchJson(itemUrl(key), { method: 'DELETE' });
-            } catch {
-              // ignore
-            }
-          }
-
-          // Upserts.
-          for (const [key, value] of Array.from(pendingUpserts.entries())) {
-            pendingUpserts.delete(key);
-            try {
-              await wpFetchJson(itemUrl(key), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ value: String(value) }),
-              });
-            } catch {
-              // ignore
-            }
-          }
-        } finally {
-          flushing = false;
-        }
-      }, 350);
-    }
-
-    async function flushNow() {
-      if (flushTimer) {
-        window.clearTimeout(flushTimer);
-        flushTimer = 0;
-      }
-      if (flushing) return;
-      flushing = true;
-      try {
-        // Deletes first.
-        for (const key of Array.from(pendingDeletes)) {
-          pendingDeletes.delete(key);
-          pendingUpserts.delete(key);
-          try {
-            await wpFetchJson(itemUrl(key), { method: 'DELETE' });
-          } catch {
-            // ignore
-          }
-        }
-
-        // Upserts.
-        for (const [key, value] of Array.from(pendingUpserts.entries())) {
-          pendingUpserts.delete(key);
-          try {
-            await wpFetchJson(itemUrl(key), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ value: String(value) }),
-            });
-          } catch {
-            // ignore
-          }
-        }
-      } finally {
-        flushing = false;
-      }
-    }
+    const bridge = await dataStore.initWpSharedStorageBridge({
+      isWpSharedMode: IS_WP_SHARED_MODE,
+      wpFetchJson,
+      wpJoin,
+      isWpSharedKey,
+      getWpToken,
+      readJsonResponse,
+      getBasename,
+    });
+    if (!bridge) return;
 
     // Expose a safe way to force persistence before navigation.
     // Used when the UI redirects immediately after writing shared keys.
-    window.acglFmsWpFlushNow = flushNow;
-    // Expose a way to refresh shared data after successful token login.
-    window.acglFmsWpHydrateSharedNow = hydrateSharedFromWp;
-
-    // 2) Override localStorage for shared keys only.
-    storage.getItem = (key) => {
-      const k = String(key || '');
-      if (!isWpSharedKey(k)) return nativeGet(k);
-      return mem.has(k) ? mem.get(k) : null;
+    window.acglFmsWpFlushNow = bridge.flushNow;
+    // Expose shared-store preload helpers used by auth + heavy page bootstraps.
+    window.acglFmsWpHydrateSharedNow = bridge.hydrateSharedFromWp;
+    window.acglFmsDataStore = {
+      preloadBootstrapEssentials: bridge.preloadBootstrapEssentials,
+      preloadCurrentPageDatasets: bridge.preloadCurrentPageDatasets,
+      preloadKeys: bridge.preloadKeys,
+      fetchSharedKeyFromWp: bridge.fetchSharedKeyFromWp,
+      initWpSharedStorageBridge: dataStore.initWpSharedStorageBridge,
     };
-
-    storage.setItem = (key, value) => {
-      const k = String(key || '');
-      if (!isWpSharedKey(k)) {
-        nativeSet(k, value);
-        return;
-      }
-
-      const v = String(value);
-      mem.set(k, v);
-
-      // In public (unauthenticated) mode, do not queue shared writes.
-      // Otherwise stale client-side writes could flush later after login.
-      if (!getWpToken()) return;
-
-      pendingDeletes.delete(k);
-      pendingUpserts.set(k, v);
-      scheduleFlush();
-    };
-
-    storage.removeItem = (key) => {
-      const k = String(key || '');
-      if (!isWpSharedKey(k)) {
-        nativeRemove(k);
-        return;
-      }
-
-      mem.delete(k);
-
-      // In public (unauthenticated) mode, do not queue shared deletes.
-      if (!getWpToken()) return;
-
-      pendingUpserts.delete(k);
-      pendingDeletes.add(k);
-      scheduleFlush();
-    };
-
-    // NOTE: In WP mode, the browser 'storage' event won't reflect shared writes.
-    // This app currently uses storage events mainly for cross-tab updates; in WP mode
-    // the shared store is authoritative and reload is typically acceptable.
   }
 
   try {
@@ -4338,11 +4186,42 @@
   let submitTokenHideTimer = null;
   let flashTokenHideTimer = null;
 
+  async function preloadBootstrapSharedData() {
+    if (!IS_WP_SHARED_MODE) return;
+    const store = window.acglFmsDataStore;
+    if (!store || typeof store.preloadBootstrapEssentials !== 'function') return;
+    try {
+      await Promise.race([
+        store.preloadBootstrapEssentials(),
+        new Promise((resolve) => window.setTimeout(resolve, 8000)),
+      ]);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function preloadCurrentPageSharedData() {
+    if (!IS_WP_SHARED_MODE) return;
+    const store = window.acglFmsDataStore;
+    if (!store || typeof store.preloadCurrentPageDatasets !== 'function') return;
+    try {
+      await Promise.race([
+        store.preloadCurrentPageDatasets(),
+        new Promise((resolve) => window.setTimeout(resolve, 8000)),
+      ]);
+    } catch {
+      // ignore
+    }
+  }
+
   // Remember where the user is in this session so a refresh/login can return here.
+  await preloadBootstrapSharedData();
   rememberLastPageNow();
 
   const authGateResult = renderAuthGate();
   if (authGateResult && authGateResult.blocked) return;
+
+  await preloadCurrentPageSharedData();
 
   function positionToast(el) {
     if (!el) return;

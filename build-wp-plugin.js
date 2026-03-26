@@ -2,6 +2,9 @@
   Builds the WordPress plugin app assets by copying the static app files into:
     wp-plugin/acgl-fms/app/
 
+  Source of truth is the project root app files.
+  The plugin app folder is a generated mirror (synced by sync-wp-app.js).
+
   Run:
     node build-wp-plugin.js
 */
@@ -12,49 +15,7 @@ const { spawnSync } = require('child_process');
 
 const ROOT = __dirname;
 const PLUGIN_APP_DIR = path.join(ROOT, 'wp-plugin', 'acgl-fms', 'app');
-
-const FILES = [
-  'index.html',
-  'about.html',
-  'help.html',
-  'user_guide.html',
-  'archive.html',
-  'menu.html',
-  'budget.html',
-  'budget_dashboard.html',
-  'income.html',
-  'wise_eur.html',
-  'wise_usd.html',
-  'reconciliation.html',
-  'grand_secretary_ledger.html',
-  'settings.html',
-  'google_backup_setup.html',
-  'itemize.html',
-  'money_transfer.html',
-  'money_transfers.html',
-  'loading.html',
-  'user-roles.js',
-  'iban.js',
-  'bic.js',
-  'table-enhancements.js',
-  'pdf-lib.min.js',
-  'datastore.js',
-  'app.js',
-  'styles.css',
-  'wise_eur_2026_seed.csv',
-  'wise_usd_2026_seed.csv',
-  'payment_order_template.pdf',
-];
-
-const OPTIONAL_FILES = new Set(['payment_order_template.pdf']);
-
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
-}
-
-function copyFile(src, dest) {
-  fs.copyFileSync(src, dest);
-}
+const SYNC_SCRIPT = path.join(ROOT, 'sync-wp-app.js');
 
 function tryGetGitHash() {
   try {
@@ -103,27 +64,31 @@ function copyHtmlWithCacheBusting(src, dest, version) {
   fs.writeFileSync(dest, patched, 'utf8');
 }
 
+function runSyncMirror() {
+  const res = spawnSync(process.execPath, [SYNC_SCRIPT], {
+    cwd: ROOT,
+    stdio: 'inherit',
+    shell: false,
+    windowsHide: true,
+  });
+  if (res.error) throw res.error;
+  if (typeof res.status === 'number' && res.status !== 0) {
+    throw new Error(`sync-wp-app.js failed with exit code ${res.status}`);
+  }
+}
+
 function main() {
-  ensureDir(PLUGIN_APP_DIR);
+  runSyncMirror();
 
   const ver = assetVersion();
 
-  for (const rel of FILES) {
-    const src = path.join(ROOT, rel);
-    const dest = path.join(PLUGIN_APP_DIR, rel);
-    if (!fs.existsSync(src)) {
-      if (OPTIONAL_FILES.has(rel)) {
-        console.warn(`Skipping optional missing file: ${rel}`);
-        continue;
-      }
-      throw new Error(`Missing source file: ${rel}`);
-    }
-
-    if (rel.endsWith('.html')) {
-      copyHtmlWithCacheBusting(src, dest, ver);
-    } else {
-      copyFile(src, dest);
-    }
+  const entries = fs.readdirSync(PLUGIN_APP_DIR, { withFileTypes: true });
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    const rel = String(e.name || '');
+    if (!rel.endsWith('.html')) continue;
+    const src = path.join(PLUGIN_APP_DIR, rel);
+    copyHtmlWithCacheBusting(src, src, ver);
   }
 
   // Remove placeholder file if it exists.

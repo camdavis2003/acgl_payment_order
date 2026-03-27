@@ -196,7 +196,12 @@ async function zipDemoPlugin() {
       continue;
     }
 
-    if (entryRel === 'app/app.js') {
+    if (
+      entryRel === 'app/app.js'
+      || entryRel === 'app/app-request.js'
+      || entryRel === 'app/app-workflows.js'
+      || entryRel === 'app/app-settings.js'
+    ) {
       const raw = fs.readFileSync(abs, 'utf8');
       const transformed = transformAppJs(raw);
       archive.append(transformed, { name: entryName });

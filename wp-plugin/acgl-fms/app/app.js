@@ -383,6 +383,48 @@
     }
   }
 
+  function decodeBase64UrlUtf8(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return '';
+    try {
+      const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+      return decodeURIComponent(escape(atob(padded)));
+    } catch {
+      return '';
+    }
+  }
+
+  function getWpPermsFromToken() {
+    const token = getWpToken();
+    if (!token) return null;
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+
+    try {
+      const payloadJson = decodeBase64UrlUtf8(parts[0]);
+      if (!payloadJson) return null;
+      const payload = JSON.parse(payloadJson);
+      const perms = payload && typeof payload === 'object' ? payload.p : null;
+      return perms && typeof perms === 'object' ? perms : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getEffectiveWpPerms() {
+    const fromSession = getWpPerms();
+    if (fromSession && Object.keys(fromSession).length > 0) return fromSession;
+
+    const fromToken = getWpPermsFromToken();
+    if (fromToken) {
+      setWpPerms(fromToken);
+      return fromToken;
+    }
+
+    return fromSession;
+  }
+
   function setWpPerms(perms) {
     try {
       sessionStorage.setItem(WP_PERMS_KEY, JSON.stringify(perms && typeof perms === 'object' ? perms : {}));
@@ -1344,7 +1386,7 @@
     const u = getCurrentUsername();
     if (!u) return null;
     if (IS_WP_SHARED_MODE) {
-      const perms = getWpPerms();
+      const perms = getEffectiveWpPerms();
       if (perms) {
         return {
           username: normalizeUsername(u),
@@ -24641,10 +24683,10 @@
   // Budget page editor (only runs when the table + button exist)
   maybeAutoBackupActiveYear();
   initBudgetYearNav();
-  initBudgetEditor();
-  initBudgetDashboard();
-  initBudgetNumberSelect();
-  initArchivePage();
+  if (typeof initBudgetEditor === 'function') initBudgetEditor();
+  if (typeof initBudgetDashboard === 'function') initBudgetDashboard();
+  if (typeof initBudgetNumberSelect === 'function') initBudgetNumberSelect();
+  if (typeof initArchivePage === 'function') initArchivePage();
 
   if (grandLodgeInfoForm) {
     const syncGrandLodgeImageMeta = (info) => {
@@ -25669,8 +25711,8 @@
   }
 
   // Settings page roles management
-  initRolesSettingsPage();
-  initBackupPage();
+  if (typeof initRolesSettingsPage === 'function') initRolesSettingsPage();
+  if (typeof initBackupPage === 'function') initBackupPage();
 
   if (form) {
     const base = getBasename(window.location.pathname);

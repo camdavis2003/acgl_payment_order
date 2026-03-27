@@ -385,6 +385,142 @@
     }
   }
 
+  function measureTextWidth(text, font) {
+    var s = normalizeWhitespace(text || '');
+    if (!s) return 0;
+    var canvas = measureTextWidth._canvas;
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      measureTextWidth._canvas = canvas;
+    }
+    var ctx = canvas.getContext && canvas.getContext('2d');
+    if (!ctx) return 0;
+    ctx.font = font || '14px sans-serif';
+    return ctx.measureText(s).width;
+  }
+
+  function shouldShowHeaderOverflowTooltip(cell, fullLabel) {
+    if (!canUseDom() || !cell) return false;
+    var computed;
+    try {
+      computed = window.getComputedStyle(cell);
+    } catch (err) {
+      return false;
+    }
+    if (!computed) return false;
+
+    var textOverflow = normalizeWhitespace(computed.textOverflow).toLowerCase();
+    if (textOverflow !== 'ellipsis') return false;
+
+    // Targeted fallback: ensure wiseUSD Counterparty header always gets
+    // the full-title popup when it is ellipsis-styled.
+    if (cell.matches && cell.matches('#wiseUsdTable th.wiseUsdCol--receivedFrom')) {
+      return true;
+    }
+
+    var overflowX = normalizeWhitespace(computed.overflowX).toLowerCase();
+    var overflow = normalizeWhitespace(computed.overflow).toLowerCase();
+    var clips = overflowX === 'hidden' || overflowX === 'clip' || overflow === 'hidden' || overflow === 'clip';
+    if (!clips) return false;
+
+    if (cell.scrollWidth > cell.clientWidth + 1) return true;
+
+    var label = normalizeWhitespace(fullLabel || '');
+    if (!label) label = normalizeWhitespace(cell.textContent || '');
+    if (!label) return false;
+
+    var padLeft = Number.parseFloat(computed.paddingLeft || '0');
+    var padRight = Number.parseFloat(computed.paddingRight || '0');
+    var available = cell.clientWidth - (Number.isFinite(padLeft) ? padLeft : 0) - (Number.isFinite(padRight) ? padRight : 0);
+
+    // Inline adornments in header cells consume text space (drag grip, etc.).
+    var occupied = 0;
+    if (cell.children && cell.children.length) {
+      for (var i = 0; i < cell.children.length; i += 1) {
+        var child = cell.children[i];
+        if (!child || child.tagName === 'SCRIPT' || child.tagName === 'STYLE') continue;
+        var childStyle;
+        try {
+          childStyle = window.getComputedStyle(child);
+        } catch (err) {
+          childStyle = null;
+        }
+        if (!childStyle || childStyle.display === 'none' || childStyle.position === 'absolute') continue;
+        occupied += child.getBoundingClientRect().width;
+      }
+    }
+
+    // Sort arrows are rendered via ::after and do not affect scrollWidth reliably.
+    try {
+      var after = window.getComputedStyle(cell, '::after');
+      var afterContent = normalizeWhitespace((after && after.content) || '');
+      if (afterContent && afterContent !== 'none' && afterContent !== 'normal') {
+        afterContent = afterContent.replace(/^['\"]|['\"]$/g, '');
+        if (afterContent) {
+          occupied += measureTextWidth(afterContent, computed.font) + 2;
+        }
+      }
+    } catch (err) {
+      // Ignore pseudo-element measurement failures.
+    }
+
+    var textWidth = measureTextWidth(label, computed.font);
+    var textRoom = available - occupied;
+    if (textRoom <= 1) return true;
+    return textWidth > textRoom + 0.5;
+  }
+
+  function syncSingleHeaderOverflowTooltip(cell, fullLabel) {
+    if (!cell || !cell.getAttribute) return;
+
+    var hasManagedTooltip = cell.dataset.teOverflowTooltipManaged === '1';
+    var hasForeignTooltip =
+      cell.hasAttribute('data-tooltip') ||
+      cell.hasAttribute('title') ||
+      (cell.hasAttribute('data-po-tooltip') && !hasManagedTooltip);
+    if (hasForeignTooltip) return;
+
+    var text = normalizeWhitespace(fullLabel || '');
+    if (!text) text = normalizeWhitespace(cell.textContent || '');
+    if (!text) return;
+
+    if (shouldShowHeaderOverflowTooltip(cell, text)) {
+      cell.setAttribute('data-po-tooltip', text);
+      cell.dataset.teOverflowTooltipManaged = '1';
+      return;
+    }
+
+    if (hasManagedTooltip) {
+      cell.removeAttribute('data-po-tooltip');
+      delete cell.dataset.teOverflowTooltipManaged;
+    }
+  }
+
+  function syncHeaderOverflowTooltips(instance) {
+    if (!instance || !instance.table) return;
+    var headerRow = getHeaderRow(instance.table);
+    if (!headerRow) return;
+
+    var cells = rowCells(headerRow);
+    for (var i = 0; i < cells.length; i += 1) {
+      var th = cells[i];
+      if (!(th.tagName === 'TH' || th.tagName === 'TD')) continue;
+      syncSingleHeaderOverflowTooltip(th, getColumnLabel(th, i));
+    }
+  }
+
+  function bindHeaderOverflowTooltip(th, headerIndex) {
+    if (!th || !th.dataset || th.dataset.teOverflowTooltipBound === '1') return;
+
+    var syncNow = function () {
+      syncSingleHeaderOverflowTooltip(th, getColumnLabel(th, headerIndex));
+    };
+
+    th.addEventListener('mouseenter', syncNow);
+    th.addEventListener('focusin', syncNow);
+    th.dataset.teOverflowTooltipBound = '1';
+  }
+
   function reorderRowCells(instance, row) {
     var cells = rowCells(row);
     if (cells.length !== instance.columns.length) return;
@@ -455,6 +591,7 @@
       }
 
       redistributeEqualWidths(instance);
+      syncHeaderOverflowTooltips(instance);
       updatePanelUi(instance);
     } finally {
       instance.syncing = false;
@@ -868,6 +1005,7 @@
       var isLocked = !!(col && col.locked);
       th.draggable = !isLocked && !hideDragGrip;
       th.classList.add('tableEnhanceHeaderCell');
+      bindHeaderOverflowTooltip(th, i);
       if (!isLocked && !hideDragGrip && !th.querySelector('.tableEnhanceDragHandle')) {
         var handle = document.createElement('span');
         handle.className = 'tableEnhanceDragHandle';
@@ -879,6 +1017,7 @@
           existingHandle.parentElement.removeChild(existingHandle);
         }
       }
+      syncSingleHeaderOverflowTooltip(th, getColumnLabel(th, i));
     }
 
     if (hideDragGrip) return;

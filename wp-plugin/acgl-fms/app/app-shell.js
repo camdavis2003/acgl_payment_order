@@ -9,6 +9,7 @@
   const APP_TAB_TITLE = 'ACGL - FMS';
   const APP_VERSION = '1.0.0';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
+  const ACTIVE_BUDGET_YEAR_FALLBACK_KEY = 'payment_order_active_budget_year_local_v1';
 
   function getBasename(pathname) {
     const parts = String(pathname || '')
@@ -29,9 +30,22 @@
   }
 
   function readStoredYear() {
+    const parseYear = (raw) => {
+      if (!/^\d{4}$/.test(raw)) return null;
+      const y = Number(raw);
+      if (!Number.isInteger(y)) return null;
+      if (y < 1900 || y > 3000) return null;
+      return y;
+    };
+
     try {
       const raw = String(localStorage.getItem(ACTIVE_BUDGET_YEAR_KEY) || '').trim();
-      if (/^\d{4}$/.test(raw)) return Number(raw);
+      const primary = parseYear(raw);
+      if (primary) return primary;
+
+      const fallbackRaw = String(localStorage.getItem(ACTIVE_BUDGET_YEAR_FALLBACK_KEY) || '').trim();
+      const fallback = parseYear(fallbackRaw);
+      if (fallback) return fallback;
     } catch {
       // ignore
     }

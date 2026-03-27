@@ -616,6 +616,7 @@
   const BUDGET_TABLE_HTML_KEY = 'payment_order_budget_table_html_v1';
   const BUDGET_YEARS_KEY = 'payment_order_budget_years_v1';
   const ACTIVE_BUDGET_YEAR_KEY = 'payment_order_active_budget_year_v1';
+  const ACTIVE_BUDGET_YEAR_FALLBACK_KEY = 'payment_order_active_budget_year_local_v1';
   const BUDGET_TEMPLATE_ROWS_KEY = 'payment_order_budget_template_rows_v1';
   const USERS_KEY = 'payment_order_users_v1';
   const BACKLOG_KEY = 'payment_order_backlog_v1';
@@ -1887,12 +1888,17 @@
   }
 
   function loadActiveBudgetYear() {
-    try {
-      const raw = localStorage.getItem(ACTIVE_BUDGET_YEAR_KEY);
+    const parseYear = (raw) => {
       const y = Number(raw);
       if (!Number.isInteger(y)) return null;
       if (y < 1900 || y > 3000) return null;
       return y;
+    };
+
+    try {
+      const primary = parseYear(localStorage.getItem(ACTIVE_BUDGET_YEAR_KEY));
+      if (primary) return primary;
+      return parseYear(localStorage.getItem(ACTIVE_BUDGET_YEAR_FALLBACK_KEY));
     } catch {
       return null;
     }
@@ -1902,11 +1908,15 @@
     const y = Number(year);
     if (!Number.isInteger(y) || y < 1900 || y > 3000) return;
     localStorage.setItem(ACTIVE_BUDGET_YEAR_KEY, String(y));
+    // Local-only fallback: protects user selection if shared hydration temporarily
+    // serves stale/missing active-year data during updates or reloads.
+    localStorage.setItem(ACTIVE_BUDGET_YEAR_FALLBACK_KEY, String(y));
   }
 
   function clearActiveBudgetYear() {
     try {
       localStorage.removeItem(ACTIVE_BUDGET_YEAR_KEY);
+      localStorage.removeItem(ACTIVE_BUDGET_YEAR_FALLBACK_KEY);
     } catch {
       // ignore
     }

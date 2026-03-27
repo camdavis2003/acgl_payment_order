@@ -41,6 +41,7 @@ const FILES = [
   'pdf-lib.min.js',
   'datastore.js',
   'app.js',
+  'app-shell.js',
   'styles.css',
   'hoverPopup.css',
   'hoverPopup.js',

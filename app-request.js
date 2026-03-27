@@ -7619,7 +7619,9 @@
     }
 
     // Seed 2025 Income (year-scoped) if missing / too few.
-    const incomeKey = getIncomeKeyForYear(targetYear);
+    // Keep this key local so dev seeding doesn't depend on workflow helpers
+    // that can be stripped from page-specific bundles.
+    const incomeKey = `payment_order_income_${targetYear}_v1`;
     if (incomeKey) {
       const INCOME_MOCK_VERSION_KEY = 'payment_orders_income_mock_version';
       const INCOME_MOCK_VERSION = '3';
@@ -10709,6 +10711,15 @@
 
   
   // [bundle-strip:request-remove-itemize] removed in page-specific build.
+
+
+  // [bundle-fix:income-key-helper] Income section is stripped in this bundle,
+  // but dev seeding still references this helper during startup.
+  function getIncomeKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_income_${y}_v1`;
+  }
 
 
   // [bundle-fix:request-auth-wiring] The request bundle strips workflow wiring

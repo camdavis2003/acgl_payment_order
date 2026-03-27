@@ -56,6 +56,7 @@
     const itemUrl = (key) => wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(key || ''))}`);
 
     const DEFAULT_STALE_MS = 45 * 1000;
+    const BOOTSTRAP_STALE_MS = 2 * 60 * 1000;
     const BOOTSTRAP_KEYS = [
       'payment_order_users_v1',
       'payment_order_active_budget_year_v1',
@@ -63,6 +64,7 @@
       'payment_order_numbering',
       'payment_order_grand_lodge_info_v1',
       'payment_order_notifications_settings_v1',
+      'payment_order_backlog_v1',
     ];
 
     function debugStoreLog(message, extra) {
@@ -77,19 +79,9 @@
 
     function getKeyStaleMs(keyRaw) {
       const key = String(keyRaw || '');
-      if (
-        key === 'payment_order_users_v1'
-        || key === 'payment_order_numbering'
-        || key === 'payment_order_grand_lodge_info_v1'
-        || key === 'payment_order_budget_years_v1'
-        || key === 'payment_order_active_budget_year_v1'
-        || key === 'payment_order_notifications_settings_v1'
-      ) {
-        return 2 * 60 * 1000;
-      }
+      if (BOOTSTRAP_KEYS.includes(key)) return BOOTSTRAP_STALE_MS;
       return DEFAULT_STALE_MS;
     }
-
     function markLoadedKey(key, value) {
       const k = String(key || '').trim();
       if (!k) return;
@@ -206,6 +198,9 @@
       }
       if (base === 'grand_secretary_ledger.html') {
         return [incomeKey, wiseEurKey, wiseUsdKey, ordersKey, reconciliationKey, moneyTransfersKey, gsLedgerVerifiedKey];
+      }
+      if (base === 'settings.html') {
+        return [ordersKey, incomeKey];
       }
       return [];
     }

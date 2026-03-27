@@ -26,6 +26,17 @@ const M_CATCH = '\n})().catch((err) => {';
 const M_REQUEST_BLOCK = '\n  if (form) {';
 const M_KEYDOWN = "\n  document.addEventListener('keydown', (e) => {";
 
+const INCOME_KEY_HELPER_FALLBACK = `
+
+  // [bundle-fix:income-key-helper] Income section is stripped in this bundle,
+  // but dev seeding still references this helper during startup.
+  function getIncomeKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return \`payment_order_income_\${y}_v1\`;
+  }
+`;
+
 function assertFound(haystack, needle, label) {
   const idx = haystack.indexOf(needle);
   if (idx < 0) throw new Error(`Missing marker (${label}): ${needle}`);
@@ -65,6 +76,7 @@ function buildRequestBundle(source) {
   out = removeBetween(out, M_SETTINGS, M_INCOME, 'request-remove-settings');
   out = removeBetween(out, M_INCOME, M_REQUEST_BLOCK, 'request-remove-workflows');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'request-remove-itemize');
+  out = insertBeforeMarker(out, M_CATCH, INCOME_KEY_HELPER_FALLBACK, 'request-insert-income-key-helper');
   out = insertBeforeMarker(
     out,
     M_CATCH,
@@ -146,6 +158,7 @@ function buildSettingsBundle(source) {
   out = removeBetween(out, M_INCOME, M_BACKUP_FN, 'settings-remove-workflows');
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'settings-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'settings-remove-itemize');
+  out = insertBeforeMarker(out, M_CATCH, INCOME_KEY_HELPER_FALLBACK, 'settings-insert-income-key-helper');
   return banner('settings') + out;
 }
 

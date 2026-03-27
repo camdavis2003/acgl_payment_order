@@ -7618,7 +7618,9 @@
     }
 
     // Seed 2025 Income (year-scoped) if missing / too few.
-    const incomeKey = getIncomeKeyForYear(targetYear);
+    // Keep this key local so dev seeding doesn't depend on workflow helpers
+    // that can be stripped from page-specific bundles.
+    const incomeKey = `payment_order_income_${targetYear}_v1`;
     if (incomeKey) {
       const INCOME_MOCK_VERSION_KEY = 'payment_orders_income_mock_version';
       const INCOME_MOCK_VERSION = '3';
@@ -12220,17 +12222,63 @@
     /** @type {Array<{ms:number, at:string, module:string, record:string, user:string, action:string, changes:Array<{field:string,from:string,to:string}>}>} */
     const events = [];
 
+    const loadOrdersForAudit = (year) => {
+      if (typeof loadOrders === 'function') return loadOrders(year);
+      try {
+        const key = `payment_orders_${Number(year)}_v1`;
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : null;
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const ensureOrderTimelineForAudit = (order) => {
+      if (typeof ensureOrderTimeline === 'function') return ensureOrderTimeline(order);
+      return [];
+    };
+
+    const persistOrderTimelineForAudit = (order, year) => {
+      if (typeof upsertOrder === 'function') {
+        upsertOrder(order, year);
+      }
+    };
+
+    const loadIncomeForAudit = (year) => {
+      if (typeof loadIncome === 'function') return loadIncome(year);
+      try {
+        const key = `payment_order_income_${Number(year)}_v1`;
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : null;
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const ensureIncomeTimelineForAudit = (entry) => {
+      if (typeof ensureIncomeTimeline === 'function') return ensureIncomeTimeline(entry);
+      return [];
+    };
+
+    const persistIncomeTimelineForAudit = (entry, year) => {
+      if (typeof upsertIncomeEntry === 'function') {
+        upsertIncomeEntry(entry, year);
+      }
+    };
+
     for (const year of yearsToInclude) {
-      const orders = loadOrders(year);
+      const orders = loadOrdersForAudit(year);
       for (const order of orders || []) {
         if (!order || typeof order !== 'object') continue;
         let timeline = Array.isArray(order.timeline) ? order.timeline : [];
         if (timeline.length === 0) {
-          timeline = ensureOrderTimeline(order);
+          timeline = ensureOrderTimelineForAudit(order);
           // Persist a seeded timeline once so the Activity Log is truly recorded.
           // (Avoid fabricating timestamps: only persist if the record already has createdAt.)
           if (order.createdAt) {
-            upsertOrder({ ...order, timeline }, year);
+            persistOrderTimelineForAudit({ ...order, timeline }, year);
           }
         }
         const po = formatPaymentOrderNoForDisplay(order.paymentOrderNo);
@@ -12264,16 +12312,16 @@
         }
       }
 
-      const income = loadIncome(year);
+      const income = loadIncomeForAudit(year);
       for (const entry of income || []) {
         if (!entry || typeof entry !== 'object') continue;
         let timeline = Array.isArray(entry.timeline) ? entry.timeline : [];
         if (timeline.length === 0) {
-          timeline = ensureIncomeTimeline(entry);
+          timeline = ensureIncomeTimelineForAudit(entry);
           // Persist a seeded timeline once so the Activity Log is truly recorded.
           // (Avoid fabricating timestamps: only persist if the record already has createdAt.)
           if (entry.createdAt) {
-            upsertIncomeEntry({ ...entry, timeline }, year);
+            persistIncomeTimelineForAudit({ ...entry, timeline }, year);
           }
         }
         const tx = formatDate(entry.date);
@@ -13047,10 +13095,14 @@
       if (!usersTbody || usersTbody.dataset.userRoleTooltipBound) return;
       usersTbody.dataset.userRoleTooltipBound = '1';
 
-      bindUnifiedHoverTooltipScope(usersTbody);
+      const bindHoverScope = (typeof bindUnifiedHoverTooltipScope === 'function')
+        ? bindUnifiedHoverTooltipScope
+        : () => {};
+
+      bindHoverScope(usersTbody);
       const tableEl = document.getElementById('usersTable');
       const wrapEl = tableEl && tableEl.closest ? tableEl.closest('.table-wrap') : null;
-      bindUnifiedHoverTooltipScope(wrapEl);
+      bindHoverScope(wrapEl);
       hideUsersRoleTooltip = (typeof window.__acglHideUnifiedHoverTooltip === 'function')
         ? window.__acglHideUnifiedHoverTooltip
         : () => {};
@@ -13060,9 +13112,13 @@
       if (!modalEl || modalEl.dataset.rolesTooltipBound) return;
       modalEl.dataset.rolesTooltipBound = '1';
 
-      bindUnifiedHoverTooltipScope(modalEl);
+      const bindHoverScope = (typeof bindUnifiedHoverTooltipScope === 'function')
+        ? bindUnifiedHoverTooltipScope
+        : () => {};
+
+      bindHoverScope(modalEl);
       const bodyEl = modalEl.querySelector ? modalEl.querySelector('.modal__body') : null;
-      bindUnifiedHoverTooltipScope(bodyEl);
+      bindHoverScope(bodyEl);
       hideCreateUserTooltip = (typeof window.__acglHideUnifiedHoverTooltip === 'function')
         ? window.__acglHideUnifiedHoverTooltip
         : () => {};
@@ -24087,6 +24143,53 @@
     const canUseGdrive = Boolean(IS_WP_SHARED_MODE);
     if (gdriveUploadBtn) gdriveUploadBtn.hidden = !canUseGdrive;
 
+    const normalizeYear = (year) => {
+      if (typeof normalizeBackupYear === 'function') return normalizeBackupYear(year);
+      const y = Number(year);
+      if (!Number.isInteger(y)) return null;
+      if (y < 1900 || y > 2500) return null;
+      return y;
+    };
+
+    const loadBackupIndexSafe = (year) => {
+      if (typeof loadBackupIndex === 'function') return loadBackupIndex(year);
+      return [];
+    };
+
+    const formatBackupCreatedAtSafe = (value) => {
+      if (typeof formatBackupCreatedAt === 'function') return formatBackupCreatedAt(value);
+      return formatIsoForList(value);
+    };
+
+    const downloadBackupByIdSafe = (year, id) => {
+      if (typeof downloadBackupById === 'function') {
+        downloadBackupById(year, id);
+        return;
+      }
+      window.alert('Backup download is unavailable in this build.');
+    };
+
+    const loadBackupPayloadFromStorageSafe = (year, id) => {
+      if (typeof loadBackupPayloadFromStorage === 'function') {
+        return loadBackupPayloadFromStorage(year, id);
+      }
+      return null;
+    };
+
+    const restoreYearBackupFromPayloadSafe = (payload) => {
+      if (typeof restoreYearBackupFromPayload === 'function') {
+        return restoreYearBackupFromPayload(payload);
+      }
+      return { ok: false, error: 'restore_unavailable' };
+    };
+
+    const createYearBackupSafe = (year, reason) => {
+      if (typeof createYearBackup === 'function') {
+        return createYearBackup(year, reason);
+      }
+      return { ok: false, error: 'create_unavailable' };
+    };
+
     function formatIsoForList(iso) {
       const s = String(iso || '').trim();
       if (!s) return '';
@@ -24099,10 +24202,10 @@
     let gdriveCloudFiles = [];
 
     function getCloudYearForUi() {
-      const active = normalizeBackupYear(getActiveBudgetYear());
+      const active = normalizeYear(getActiveBudgetYear());
       if (active) return active;
       const years = loadBudgetYears();
-      const y = Array.isArray(years) && years.length > 0 ? normalizeBackupYear(years[0]) : null;
+      const y = Array.isArray(years) && years.length > 0 ? normalizeYear(years[0]) : null;
       return y;
     }
 
@@ -24282,7 +24385,7 @@
             render();
             return;
           }
-          const res = restoreYearBackupFromPayload(data.payload);
+          const res = restoreYearBackupFromPayloadSafe(data.payload);
           if (!res.ok && res.error === 'wp_login_required') {
             window.alert('Please sign in.');
             return;
@@ -24314,7 +24417,7 @@
 
     function getKnownYears() {
       const years = loadBudgetYears();
-      const active = normalizeBackupYear(getActiveBudgetYear());
+      const active = normalizeYear(getActiveBudgetYear());
       const out = Array.isArray(years) ? years.slice() : [];
       if (active && !out.includes(active)) out.push(active);
       return out.filter((v) => Number.isInteger(Number(v))).sort((a, b) => b - a);
@@ -24322,7 +24425,7 @@
 
     function render() {
       const years = getKnownYears();
-      const activeYear = normalizeBackupYear(getActiveBudgetYear());
+      const activeYear = normalizeYear(getActiveBudgetYear());
       grid.innerHTML = '';
 
       let anyBackups = false;
@@ -24351,7 +24454,7 @@
 
           const label = document.createElement('div');
           label.className = 'muted backupRow__label';
-          label.textContent = formatBackupCreatedAt(meta.createdAt);
+          label.textContent = formatBackupCreatedAtSafe(meta.createdAt);
           row.appendChild(label);
 
           const buttons = document.createElement('div');
@@ -24364,7 +24467,7 @@
           dl.setAttribute('aria-label', 'Download backup');
           dl.innerHTML = DOWNLOAD_ICON_SVG;
           dl.addEventListener('click', () => {
-            downloadBackupById(y, meta.id);
+            downloadBackupByIdSafe(y, meta.id);
           });
           buttons.appendChild(dl);
 
@@ -24378,12 +24481,12 @@
             if (!requireSettingsEditAccess('Backup access required to restore backups.', 'settings_backup')) return;
             const ok = window.confirm(`Restore ${String(y)} from this backup? This will overwrite ${String(y)} data.`);
             if (!ok) return;
-            const payload = loadBackupPayloadFromStorage(y, meta.id);
+            const payload = loadBackupPayloadFromStorageSafe(y, meta.id);
             if (!payload) {
               window.alert('Backup not found.');
               return;
             }
-            const res = restoreYearBackupFromPayload(payload);
+            const res = restoreYearBackupFromPayloadSafe(payload);
             if (!res.ok && res.error === 'wp_login_required') {
               window.alert('Please sign in.');
               return;
@@ -24414,7 +24517,7 @@
       let activeWpCard = null;
 
       for (const y of years) {
-        const idx = loadBackupIndex(y);
+        const idx = loadBackupIndexSafe(y);
         if (idx.length > 0) anyBackups = true;
 
         // Only render a WordPress year card if it has backups, or if it's the active year.
@@ -24456,7 +24559,7 @@
     if (createActiveBtn && !createActiveBtn.dataset.bound) {
       createActiveBtn.dataset.bound = '1';
       createActiveBtn.addEventListener('click', () => {
-        const y = normalizeBackupYear(getActiveBudgetYear());
+        const y = normalizeYear(getActiveBudgetYear());
         if (!y) {
           window.alert('No active year.');
           return;
@@ -24466,7 +24569,7 @@
           return;
         }
         if (!requireSettingsEditAccess('Backup access required to create backups.', 'settings_backup')) return;
-        const res = createYearBackup(y, 'manual');
+        const res = createYearBackupSafe(y, 'manual');
         if (!res.ok) {
           window.alert('Could not create backup.');
           return;
@@ -24489,14 +24592,14 @@
         try {
           const text = await file.text();
           const payload = JSON.parse(text);
-          const y = normalizeBackupYear(payload && payload.year);
+          const y = normalizeYear(payload && payload.year);
           if (!y) {
             window.alert('Invalid backup file.');
             return;
           }
           const ok = window.confirm(`Restore ${String(y)} from this file? This will overwrite ${String(y)} data.`);
           if (!ok) return;
-          const res = restoreYearBackupFromPayload(payload);
+          const res = restoreYearBackupFromPayloadSafe(payload);
           if (!res.ok && res.error === 'wp_login_required') {
             window.alert('Please sign in.');
             return;
@@ -24531,7 +24634,16 @@
   installNavAutoSync();
 
   // Dev-only: seed 2025 mock budget + payment orders.
-  seedMockData2025IfDev();
+  // Never let test data seeding crash page bootstrap.
+  try {
+    seedMockData2025IfDev();
+  } catch (err) {
+    try {
+      if (isDevEnvironment()) console.warn('Dev seed skipped due to error:', err);
+    } catch {
+      // ignore
+    }
+  }
 
   // Theme toggle works on both pages
   applyTheme(getPreferredTheme());
@@ -24681,7 +24793,7 @@
   }
 
   // Budget page editor (only runs when the table + button exist)
-  maybeAutoBackupActiveYear();
+  if (typeof maybeAutoBackupActiveYear === 'function') maybeAutoBackupActiveYear();
   initBudgetYearNav();
   if (typeof initBudgetEditor === 'function') initBudgetEditor();
   if (typeof initBudgetDashboard === 'function') initBudgetDashboard();

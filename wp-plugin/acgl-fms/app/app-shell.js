@@ -153,7 +153,7 @@
       li.className = 'appNavTree__item';
 
       const a = document.createElement('a');
-      a.className = 'appNavTree__link';
+      a.className = 'appNav__link appNavTree__link';
       a.textContent = item.label;
       a.href = withCurrentEmbedParams(item.href);
 

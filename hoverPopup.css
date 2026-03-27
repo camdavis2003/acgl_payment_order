@@ -1,0 +1,48 @@
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after,
+[data-tooltip]:focus-within::after,
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::before,
+[data-tooltip]:focus-within::before,
+[data-po-tooltip]:hover::after,
+[data-po-tooltip]:focus-visible::after,
+[data-po-tooltip]:focus-within::after,
+[data-po-tooltip]:hover::before,
+[data-po-tooltip]:focus-visible::before,
+[data-po-tooltip]:focus-within::before,
+[data-role-tooltip]:hover::after,
+[data-role-tooltip]:focus-visible::after,
+[data-role-tooltip]:focus-within::after,
+[data-role-tooltip]:hover::before,
+[data-role-tooltip]:focus-visible::before,
+[data-role-tooltip]:focus-within::before {
+  content: none;
+}
+
+.budgetCode[data-tooltip] {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.floatingTooltip {
+  position: fixed;
+  z-index: var(--z-floating-tooltip);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  max-width: min(360px, calc(100vw - 40px));
+  max-height: min(260px, calc(100vh - 80px));
+  overflow: auto;
+  white-space: normal;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.floatingTooltip.userRoleTooltip {
+  font-size: inherit;
+  line-height: inherit;
+}

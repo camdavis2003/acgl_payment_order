@@ -42,6 +42,8 @@ const FILES = [
   'datastore.js',
   'app.js',
   'styles.css',
+  'hoverPopup.css',
+  'hoverPopup.js',
   'wise_eur_2026_seed.csv',
   'wise_usd_2026_seed.csv',
   'payment_order_template.pdf',

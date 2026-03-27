@@ -21288,7 +21288,7 @@
     });
 
     if (setActiveBtn) {
-      setActiveBtn.addEventListener('click', (e) => {
+      setActiveBtn.addEventListener('click', async (e) => {
         e.preventDefault();
         if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
         saveActiveBudgetYear(budgetYear);
@@ -21315,6 +21315,13 @@
 
         // Grand Secretary Ledger: initialize Verified store on first activation (if missing).
         ensureGsLedgerVerifiedStoreExistsForYear(budgetYear);
+
+        // Flush immediately so the active year and all initialised year lists reach the
+        // WP database before the user navigates away.  Without this the writes sit in a
+        // 350 ms deferred queue and can be lost if the page unloads in time.
+        if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
+          try { await window.acglFmsWpFlushNow(); } catch { /* ignore */ }
+        }
 
         syncActiveBudgetButton();
         // Re-render nav so the parent Budget link points at the new active year.

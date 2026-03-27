@@ -4547,6 +4547,22 @@ body.is-modal-open {
   gap: 8px;
 }
 
+.btn--backlogEdit {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.btn--backlogEdit:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.btn--backlogEdit:focus-visible {
+  outline-color: #1d4ed8;
+}
+
 .backlog__archiveToggle {
   appearance: none;
   border: none;

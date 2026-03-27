@@ -7,6 +7,7 @@
     "dev": "node dev-server.js",
     "start": "node dev-server.js",
     "test": "node --test",
+    "sync:wp": "node sync-wp-app.js",
     "build:wp": "node build-wp-plugin.js",
     "package:wp": "node package-wp-plugin.js --slug acgl-fms-wp --out acgl-fms-wp.zip",
     "package:demo": "node package-wp-plugin-demo.js"

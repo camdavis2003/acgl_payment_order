@@ -8771,8 +8771,9 @@
 
       if (!text) return '';
 
+      const isManagedOverflowTooltip = !!(target.dataset && target.dataset.teOverflowTooltipManaged === '1');
       const label = String(target.getAttribute('aria-label') || target.textContent || '').trim();
-      if (normalizeTooltipText(text) && normalizeTooltipText(text) === normalizeTooltipText(label)) return '';
+      if (!isManagedOverflowTooltip && normalizeTooltipText(text) && normalizeTooltipText(text) === normalizeTooltipText(label)) return '';
       return text;
     };
 
@@ -11367,7 +11368,7 @@
             <div class="backlog__actions">
               ${attachmentBtn}
               <button type="button" class="btn btn--viewGrey" data-backlog-action="comment" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}>Comment</button>
-              <button type="button" class="btn btn--editIcon" data-backlog-action="edit" aria-label="Edit" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--backlogEdit" data-backlog-action="edit" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}>Edit</button>
               <button type="button" class="btn" data-backlog-action="complete" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}>${escapeHtml(completeText)}</button>
               <button type="button" class="btn btn--danger" data-backlog-action="delete" ${actionsDisabled ? 'aria-disabled="true" data-tooltip="Read only access."' : ''}>Delete</button>
             </div>

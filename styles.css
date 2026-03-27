@@ -1820,14 +1820,6 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
   cursor: pointer;
 }
 
-/* Legacy pseudo-element tooltips are disabled; JS floating tooltip is the single source. */
-.budgetMenu__panel .actionLink[data-tooltip]:hover::after,
-.budgetMenu__panel .actionLink[data-tooltip]:focus-visible::after,
-.budgetMenu__panel .actionLink[data-tooltip]:hover::before,
-.budgetMenu__panel .actionLink[data-tooltip]:focus-visible::before {
-  content: none;
-}
-
 .budgetTable tr.budgetRow--selected td {
   background: var(--menu-hover);
 }
@@ -1983,58 +1975,6 @@ html[data-theme="dark"] #gsLedgerTable tr.gsLedgerRow--missingMt a {
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
-}
-
-/* Tooltip popup for buttons (e.g., Set Active Budget) */
-.btn[data-tooltip] {
-  position: relative;
-}
-
-.btn[data-tooltip]:hover::after,
-.btn[data-tooltip]:focus-visible::after,
-.btn[data-tooltip]:hover::before,
-.btn[data-tooltip]:focus-visible::before {
-  content: none;
-}
-
-/* Tooltip popup for displayed Budget Numbers */
-.budgetCode[data-tooltip] {
-  position: relative;
-  cursor: help;
-  text-decoration: underline dotted;
-  text-underline-offset: 2px;
-}
-
-.budgetCode[data-tooltip]:hover::after,
-.budgetCode[data-tooltip]:focus-visible::after {
-  content: none;
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 10px);
-  width: max-content;
-  max-width: 360px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  white-space: normal;
-  z-index: var(--z-tooltip);
-}
-
-.budgetCode[data-tooltip]:hover::before,
-.budgetCode[data-tooltip]:focus-visible::before {
-  content: none;
-  position: absolute;
-  left: 18px;
-  bottom: calc(100% + 4px);
-  width: 0;
-  height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-top: 7px solid var(--border);
-  z-index: var(--z-tooltip-arrow);
 }
 
 .btn--primary {
@@ -2537,49 +2477,6 @@ body[data-page="about"] main.container > section.card {
   border-radius: 0;
   background: transparent;
   margin: 0 6px 0 0;
-}
-
-/* Tooltip popup for Settings roles grid labels (e.g., Budget Partial access) */
-.rolesGrid__check[data-tooltip] {
-  position: relative;
-}
-
-.rolesGrid__check[data-tooltip]:hover::after,
-.rolesGrid__check[data-tooltip]:focus-within::after,
-.rolesGrid__check[data-tooltip]:hover::before,
-.rolesGrid__check[data-tooltip]:focus-within::before {
-  content: none;
-}
-
-/* Add User modal: use JS-driven tooltips so hovering does not expand scroll area */
-#createUserModal .rolesGrid__check[data-tooltip]:hover::after,
-#createUserModal .rolesGrid__check[data-tooltip]:focus-within::after,
-#createUserModal .rolesGrid__check[data-tooltip]:hover::before,
-#createUserModal .rolesGrid__check[data-tooltip]:focus-within::before {
-  content: none;
-}
-
-.floatingTooltip {
-  position: fixed;
-  z-index: var(--z-floating-tooltip);
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  border: 2px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  max-width: min(360px, calc(100vw - 40px));
-  max-height: min(260px, calc(100vh - 80px));
-  overflow: auto;
-  white-space: normal;
-  box-sizing: border-box;
-  pointer-events: none;
-}
-
-/* Retain selector for compatibility if legacy markup still references it. */
-.floatingTooltip.userRoleTooltip {
-  font-size: inherit;
-  line-height: inherit;
 }
 
 @media (max-width: 900px) {

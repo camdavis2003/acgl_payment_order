@@ -52,6 +52,7 @@
     const pendingDeletes = new Set();
     let flushTimer = 0;
     let flushing = false;
+    let activeFlushPromise = null;
 
     const itemUrl = (key) => wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(key || ''))}`);
 
@@ -249,33 +250,41 @@
         flushTimer = 0;
         if (flushing) return;
         flushing = true;
-        try {
-          for (const key of Array.from(pendingDeletes)) {
-            pendingDeletes.delete(key);
-            pendingUpserts.delete(key);
-            try {
-              await wpFetchJson(itemUrl(key), { method: 'DELETE' });
-            } catch {
-              // ignore
-            }
+        activeFlushPromise = (async () => {
+          try {
+            await runFlush();
+          } finally {
+            flushing = false;
+            activeFlushPromise = null;
           }
-
-          for (const [key, value] of Array.from(pendingUpserts.entries())) {
-            pendingUpserts.delete(key);
-            try {
-              await wpFetchJson(itemUrl(key), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ value: String(value) }),
-              });
-            } catch {
-              // ignore
-            }
-          }
-        } finally {
-          flushing = false;
-        }
+        })();
+        await activeFlushPromise;
       }, 350);
+    }
+
+    async function runFlush() {
+      for (const key of Array.from(pendingDeletes)) {
+        pendingDeletes.delete(key);
+        pendingUpserts.delete(key);
+        try {
+          await wpFetchJson(itemUrl(key), { method: 'DELETE' });
+        } catch {
+          // ignore
+        }
+      }
+
+      for (const [key, value] of Array.from(pendingUpserts.entries())) {
+        pendingUpserts.delete(key);
+        try {
+          await wpFetchJson(itemUrl(key), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: String(value) }),
+          });
+        } catch {
+          // ignore
+        }
+      }
     }
 
     async function flushNow() {
@@ -283,34 +292,25 @@
         window.clearTimeout(flushTimer);
         flushTimer = 0;
       }
-      if (flushing) return;
-      flushing = true;
-      try {
-        for (const key of Array.from(pendingDeletes)) {
-          pendingDeletes.delete(key);
-          pendingUpserts.delete(key);
-          try {
-            await wpFetchJson(itemUrl(key), { method: 'DELETE' });
-          } catch {
-            // ignore
-          }
-        }
 
-        for (const [key, value] of Array.from(pendingUpserts.entries())) {
-          pendingUpserts.delete(key);
-          try {
-            await wpFetchJson(itemUrl(key), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ value: String(value) }),
-            });
-          } catch {
-            // ignore
-          }
-        }
-      } finally {
-        flushing = false;
+      // If a flush is already running, wait for it to finish, then flush any
+      // ops that were queued while it was in-flight (e.g., from a delete
+      // handler that fires just as the 350ms timer was draining).
+      if (flushing && activeFlushPromise) {
+        try { await activeFlushPromise; } catch { /* ignore */ }
       }
+      if (flushing) return;
+
+      flushing = true;
+      activeFlushPromise = (async () => {
+        try {
+          await runFlush();
+        } finally {
+          flushing = false;
+          activeFlushPromise = null;
+        }
+      })();
+      await activeFlushPromise;
     }
 
     storage.getItem = (key) => {

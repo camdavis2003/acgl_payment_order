@@ -40,7 +40,10 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const RELAX_DEMO_SETTINGS_CARD_VISIBILITY = String(process.env.DEMO_RELAX_SETTINGS_CARD_VISIBILITY || '').trim() === '1';
 const DEMO_BRAND_UI = String(process.env.DEMO_BRAND_UI || '').trim() === '1';
 const DEMO_LEGACY_DATA_MIGRATION = String(process.env.DEMO_LEGACY_DATA_MIGRATION || '1').trim() !== '0';
-const DEMO_ISOLATE_BROWSER_DATA_KEYS = String(process.env.DEMO_ISOLATE_BROWSER_DATA_KEYS || '').trim() === '1';
+// Data-key isolation is ON by default so demo and prod never share localStorage keys
+// when both plugins are active on the same WordPress site.
+// Set DEMO_ISOLATE_BROWSER_DATA_KEYS=0 to disable (not recommended for co-install).
+const DEMO_ISOLATE_BROWSER_DATA_KEYS = String(process.env.DEMO_ISOLATE_BROWSER_DATA_KEYS || '1').trim() !== '0';
 
 // Folder name *inside* the zip (i.e. wp-content/plugins/<this>/...).
 // Keep this distinct from production to avoid WP "replace existing" behavior.
@@ -109,6 +112,23 @@ function transformPhp(srcText) {
   out = replaceAll(out, 'ACGL_FMS_', 'ACGL_FMS_DEMO_');
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
 
+  // When data-key isolation is on, the demo app uses payment_order_demo_* keys in
+  // localStorage and in WP REST calls.  The PHP key-to-module auth helper must strip
+  // that infix so it can resolve the correct permission module for each key.
+  // This replacement runs AFTER the acgl_fms_* rename so the function is already named
+  // acgl_fms_demo_key_to_module in the transformed source.
+  if (DEMO_ISOLATE_BROWSER_DATA_KEYS) {
+    out = out.replace(
+      /function acgl_fms_demo_key_to_module\(\$key\) \{(\r?\n)([ \t]+)\$k = \(string\) \$key;/,
+      (_, nl, indent) =>
+        `function acgl_fms_demo_key_to_module($key) {${nl}${indent}$k = (string) $key;${nl}` +
+        `${indent}// Strip demo data-key infix for canonical module lookup.${nl}` +
+        `${indent}$k = preg_replace('/^payment_order_demo_/', 'payment_order_', $k);${nl}` +
+        `${indent}$k = preg_replace('/^payment_orders_demo_/', 'payment_orders_', $k);${nl}` +
+        `${indent}$k = preg_replace('/^money_transfers_demo_/', 'money_transfers_', $k);`
+    );
+  }
+
   // Optional UI branding so demo and prod can be visually distinguished.
   if (DEMO_BRAND_UI) {
     out = replaceAll(out, ' — FMS</title>', ' — FMS (DEMO)</title>');
@@ -131,32 +151,48 @@ function transformPhp(srcText) {
         acgl_fms_demo_db_install();
 
       // DEMO one-time seed: copy selected settings data from production storage.
+      // This is activation-only and marker-gated (no recurring runtime sync).
       try {
         global $wpdb;
-          $demo_table = acgl_fms_demo_kv_table_name();
+        $demo_table = acgl_fms_demo_kv_table_name();
         $prod_table = $wpdb->prefix . implode('_', ['acgl', 'fms', 'kv']);
+        $seed_marker_key = 'payment_order_demo_seed_marker_v1';
+        $seed_marker = acgl_fms_demo_kv_get_raw($seed_marker_key);
 
-        if (is_string($prod_table) && $prod_table !== '' && $prod_table !== $demo_table) {
+        if (
+          (!is_string($seed_marker) || trim($seed_marker) === '') &&
+          is_string($prod_table) &&
+          $prod_table !== '' &&
+          $prod_table !== $demo_table
+        ) {
           $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $prod_table));
           if (is_string($exists) && $exists === $prod_table) {
-            $seed_keys = [
-              'payment_order_users_v1',
-              'payment_order_backlog_v1',
-              'payment_order_grand_lodge_info_v1',
+            // target_key = key stored in demo table (demo-prefixed, matches demo JS)
+            // source_key = key read from prod table (canonical name)
+            $seed_map = [
+              'payment_order_demo_users_v1'           => 'payment_order_users_v1',
+              'payment_order_demo_backlog_v1'          => 'payment_order_backlog_v1',
+              'payment_order_demo_grand_lodge_info_v1' => 'payment_order_grand_lodge_info_v1',
             ];
 
-            foreach ($seed_keys as $seed_key) {
-              $target_key = (string) $seed_key;
-              if ($target_key === '') continue;
+            foreach ($seed_map as $target_key => $source_key) {
+              $target_key = (string) $target_key;
+              $source_key = (string) $source_key;
+              if ($target_key === '' || $source_key === '') continue;
 
-                    $current = acgl_fms_demo_kv_get_raw($target_key);
+              $current = acgl_fms_demo_kv_get_raw($target_key);
               if (is_string($current) && trim($current) !== '') continue;
 
-              $source = $wpdb->get_var($wpdb->prepare("SELECT v FROM {$prod_table} WHERE k = %s", $target_key));
+              $source = $wpdb->get_var($wpdb->prepare("SELECT v FROM {$prod_table} WHERE k = %s", $source_key));
               if (!is_string($source) || trim($source) === '') continue;
 
               acgl_fms_demo_kv_set_raw($target_key, $source);
             }
+
+            acgl_fms_demo_kv_set_raw($seed_marker_key, wp_json_encode([
+              'seeded_at' => time(),
+              'source' => 'activation',
+            ]));
           }
         }
       } catch (Throwable $e) {
@@ -224,124 +260,6 @@ function transformAppJs(srcText) {
     // ignore
   }
 
-  // WordPress shared-mode one-time snapshot: copy selected production keys
-  // into demo keys when demo keys are still empty.
-  try {
-    const SNAPSHOT_KEY = 'acgl_fms_prod_snapshot_pulled_v1';
-    if (sessionStorage.getItem(SNAPSHOT_KEY) === '1' || localStorage.getItem(SNAPSHOT_KEY) === '1') return;
-
-    const tokenKey = 'acgl_fms_wp_token_v1';
-    const wpCtxKey = 'acgl_fms_wp_ctx_v1';
-    const token = String(sessionStorage.getItem(tokenKey) || '').trim();
-    if (!token) return;
-
-    const params = new URLSearchParams(window.location.search || '');
-    let demoRestBase = String(params.get('restUrl') || '').trim();
-
-    if (!demoRestBase) {
-      const rawCtx = String(sessionStorage.getItem(wpCtxKey) || '').trim();
-      if (rawCtx) {
-        try {
-          const parsed = JSON.parse(rawCtx);
-          demoRestBase = parsed && typeof parsed === 'object' ? String(parsed.restUrl || '').trim() : '';
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    if (!demoRestBase) return;
-    const demoNs = ['acgl-fms-demo', 'v1'].join('/');
-    if (!demoRestBase.includes(demoNs)) return;
-    const prodNs = ['acgl-fms', 'v1'].join('/');
-    const prodRestBase = demoRestBase.replace(demoNs, prodNs);
-    if (!prodRestBase || prodRestBase === demoRestBase) return;
-
-    const authHeaders = { Authorization: 'Bearer ' + token };
-    const normalizedBase = (u) => {
-      let s = String(u || '');
-      while (s.endsWith('/')) s = s.slice(0, -1);
-      return s;
-    };
-    const readKv = async (baseUrl, key) => {
-      const url = normalizedBase(baseUrl) + '/kv/' + encodeURIComponent(key);
-      const res = await fetch(url, { method: 'GET', credentials: 'omit', headers: authHeaders });
-      if (!res.ok) return null;
-      try {
-        return await res.json();
-      } catch {
-        return null;
-      }
-    };
-    const writeKv = async (baseUrl, key, valueRaw) => {
-      const url = normalizedBase(baseUrl) + '/kv/' + encodeURIComponent(key);
-      const res = await fetch(url, {
-        method: 'POST',
-        credentials: 'omit',
-        headers: {
-          ...authHeaders,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ value: String(valueRaw ?? '') }),
-      });
-      return res.ok;
-    };
-
-    const demoPrefix = ['payment', 'order', 'demo', ''].join('_');
-    const prodPrefix = ['payment', 'order', ''].join('_');
-    const demoKeys = [
-      'payment_order_users_v1',
-      'payment_order_backlog_v1',
-      'payment_order_grand_lodge_info_v1',
-    ];
-
-    (async () => {
-      let checked = 0;
-      let copied = 0;
-      let alreadyPopulated = 0;
-
-      for (const demoKey of demoKeys) {
-        checked += 1;
-        const dst = await readKv(demoRestBase, demoKey);
-        const dstRaw = dst && typeof dst === 'object' ? dst.v : null;
-        if (typeof dstRaw === 'string' && dstRaw.trim() !== '') {
-          alreadyPopulated += 1;
-          continue;
-        }
-
-        const srcKey = String(demoKey).startsWith(demoPrefix)
-          ? prodPrefix + String(demoKey).slice(demoPrefix.length)
-          : String(demoKey);
-
-        const src = await readKv(prodRestBase, srcKey);
-        const srcRaw = src && typeof src === 'object' ? src.v : null;
-        if (typeof srcRaw !== 'string' || srcRaw.trim() === '') continue;
-
-        const ok = await writeKv(demoRestBase, demoKey, srcRaw);
-        if (ok) copied += 1;
-      }
-
-      const done = copied > 0 || alreadyPopulated >= demoKeys.length;
-      if (done && checked > 0) {
-        try {
-          sessionStorage.setItem(SNAPSHOT_KEY, '1');
-          localStorage.setItem(SNAPSHOT_KEY, '1');
-        } catch {
-          // ignore
-        }
-      }
-
-      if (copied > 0) {
-        try {
-          window.dispatchEvent(new Event('storage'));
-        } catch {
-          // ignore
-        }
-      }
-    })();
-  } catch {
-    // ignore
-  }
 })();
 `;
 

@@ -1386,16 +1386,27 @@
   function getCurrentUser() {
     const u = getCurrentUsername();
     if (!u) return null;
+    const normalizedUsername = normalizeUsername(u);
+    const storedUser = getUserByUsername(normalizedUsername);
+
     if (IS_WP_SHARED_MODE) {
       const perms = getEffectiveWpPerms();
       if (perms) {
         return {
-          username: normalizeUsername(u),
+          ...(storedUser && typeof storedUser === 'object' ? storedUser : {}),
+          username: normalizedUsername,
           permissions: perms,
         };
       }
+
+      if (storedUser) {
+        return {
+          ...storedUser,
+          username: normalizedUsername,
+        };
+      }
     }
-    return getUserByUsername(u);
+    return storedUser;
   }
 
   function normalizePermissions(perms) {

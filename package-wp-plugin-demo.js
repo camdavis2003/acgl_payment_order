@@ -130,14 +130,75 @@ function transformHtml(srcText) {
 function transformAppJs(srcText) {
   let out = String(srcText);
 
+  const legacyMigrationBootstrap = `
+/* DEMO one-time legacy key migration (prod remains untouched).
+   Copies old shared browser keys into demo-prefixed keys so existing demo/mock data survives isolation. */
+(() => {
+  try {
+    const MIGRATION_KEY = 'acgl_fms_demo_legacy_keys_migrated_v1';
+    if (localStorage.getItem(MIGRATION_KEY) === '1') return;
+
+    const prefixes = ['payment_order_', 'payment_orders_', 'money_transfers_'];
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith('payment_order_demo_') || k.startsWith('payment_orders_demo_') || k.startsWith('money_transfers_demo_')) continue;
+      if (prefixes.some((p) => k.startsWith(p))) keys.push(k);
+    }
+
+    for (const oldKey of keys) {
+      let newKey = oldKey;
+      if (oldKey.startsWith('payment_orders_')) {
+        newKey = oldKey.replace(/^payment_orders_/, 'payment_orders_demo_');
+      } else if (oldKey.startsWith('payment_order_')) {
+        newKey = oldKey.replace(/^payment_order_/, 'payment_order_demo_');
+      } else if (oldKey.startsWith('money_transfers_')) {
+        newKey = oldKey.replace(/^money_transfers_/, 'money_transfers_demo_');
+      }
+
+      if (newKey === oldKey) continue;
+      if (localStorage.getItem(newKey) !== null) continue;
+
+      const value = localStorage.getItem(oldKey);
+      if (value !== null) localStorage.setItem(newKey, value);
+    }
+
+    localStorage.setItem(MIGRATION_KEY, '1');
+  } catch {
+    // ignore
+  }
+})();
+`;
+
+  out = `${legacyMigrationBootstrap}\n${out}`;
+
   // Make demo tab title obvious even after JS overrides document.title.
   out = replaceAll(out, "const APP_TAB_TITLE = 'ACGL - FMS';", "const APP_TAB_TITLE = 'ACGL - FMS (DEMO)';");
 
   // Separate browser state between production and demo.
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
+  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
+  out = replaceAll(out, 'money_transfers_', 'money_transfers_demo_');
 
   // Point demo app at demo REST namespace.
   out = replaceAll(out, 'acgl-fms/v1', 'acgl-fms-demo/v1');
+
+  return out;
+}
+
+function transformAppShellJs(srcText) {
+  let out = String(srcText);
+
+  // Keep shell/nav identity clearly demo.
+  out = replaceAll(out, "const APP_TAB_TITLE = 'ACGL - FMS';", "const APP_TAB_TITLE = 'ACGL - FMS (DEMO)';");
+
+  // Separate browser state between production and demo.
+  out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
+  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
+  out = replaceAll(out, 'money_transfers_', 'money_transfers_demo_');
 
   return out;
 }
@@ -147,6 +208,9 @@ function transformDatastoreJs(srcText) {
 
   // Point demo store at demo REST namespace.
   out = replaceAll(out, 'acgl-fms/v1', 'acgl-fms-demo/v1');
+  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
+  out = replaceAll(out, 'money_transfers_', 'money_transfers_demo_');
 
   return out;
 }
@@ -204,6 +268,13 @@ async function zipDemoPlugin() {
     ) {
       const raw = fs.readFileSync(abs, 'utf8');
       const transformed = transformAppJs(raw);
+      archive.append(transformed, { name: entryName });
+      continue;
+    }
+
+    if (entryRel === 'app/app-shell.js') {
+      const raw = fs.readFileSync(abs, 'utf8');
+      const transformed = transformAppShellJs(raw);
       archive.append(transformed, { name: entryName });
       continue;
     }

@@ -20614,7 +20614,7 @@
           delBtn.setAttribute('title', `Delete all data for budget year ${yearLabel}`);
           delBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zM3.042 3.5h9.916l-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92zm3.458 1.5a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 1 0v-6a.5.5 0 0 0-.5-.5m3 0a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 1 0v-6a.5.5 0 0 0-.5-.5"/></svg>';
 
-          delBtn.addEventListener('click', (e) => {
+          delBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             e.stopPropagation();
 
@@ -20669,6 +20669,20 @@
             appendAppAuditEvent(`Budget (${yearLabel})`, `Budget ${yearLabel}`, 'Deleted', [
               { field: 'Year', from: yearLabel, to: '' },
             ]);
+
+            // In WP shared mode, ensure deletes are persisted before rerender so
+            // stale server data does not repopulate the year list.
+            if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
+              try { await window.acglFmsWpFlushNow(); } catch { /* ignore */ }
+            }
+            if (IS_WP_SHARED_MODE && typeof window.acglFmsWpHydrateSharedNow === 'function') {
+              try { await window.acglFmsWpHydrateSharedNow({ force: true, includePage: false }); } catch { /* ignore */ }
+            }
+
+            // If the year still exists after a forced sync, surface it clearly.
+            if (loadBudgetYears().some((yr) => Number(yr) === yearNum)) {
+              window.alert(`Could not fully remove budget year ${yearLabel} from shared storage. Check budget delete permissions and try again.`);
+            }
 
             initArchivePage();
           });

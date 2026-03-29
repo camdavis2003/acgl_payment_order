@@ -38,7 +38,9 @@ const ROOT = __dirname;
 const PLUGIN_DIR = path.join(ROOT, 'wp-plugin', 'acgl-fms');
 const DIST_DIR = path.join(ROOT, 'dist');
 const RELAX_DEMO_SETTINGS_CARD_VISIBILITY = String(process.env.DEMO_RELAX_SETTINGS_CARD_VISIBILITY || '').trim() === '1';
-const DEMO_BRAND_UI = String(process.env.DEMO_BRAND_UI || '').trim() === '1';
+// Demo UI branding is ON by default so browser tabs clearly indicate demo.
+// Set DEMO_BRAND_UI=0 to disable.
+const DEMO_BRAND_UI = String(process.env.DEMO_BRAND_UI || '1').trim() !== '0';
 const DEMO_LEGACY_DATA_MIGRATION = String(process.env.DEMO_LEGACY_DATA_MIGRATION || '1').trim() !== '0';
 // Data-key isolation is ON by default so demo and prod never share localStorage keys
 // when both plugins are active on the same WordPress site.

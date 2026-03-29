@@ -134,12 +134,77 @@
     }
   }
 
+  // Returns true if the user has a valid WP session token (sessionStorage or
+  // localStorage mirror written by app-request.js after sign-in).
+  function isWpAuthenticated() {
+    const sessionKey = 'acgl_fms_wp_token_v1';
+    const userKey = 'payment_order_current_user_v1';
+    let token = '';
+    let username = '';
+    try {
+      token = String(sessionStorage.getItem(sessionKey) || '').trim();
+      username = String(sessionStorage.getItem(userKey) || '').trim();
+    } catch { /* ignore */ }
+    try {
+      // Walk up to the top-level window sessionStorage (same-origin iframe).
+      if (window.top && window.top !== window && window.top.sessionStorage) {
+        if (!token) token = String(window.top.sessionStorage.getItem(sessionKey) || '').trim();
+        if (!username) username = String(window.top.sessionStorage.getItem(userKey) || '').trim();
+      }
+    } catch { /* ignore */ }
+
+    if (!token || !username) return false;
+
+    const parts = token.split('.');
+    if (parts.length < 2) return false;
+    try {
+      const b64 = parts[0].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+      const payload = JSON.parse(decodeURIComponent(escape(atob(padded))));
+      const exp = Number(payload && payload.exp);
+      if (Number.isFinite(exp) && (Date.now() / 1000) >= exp) return false;
+    } catch {
+      return false;
+    }
+
+    return true;
+  }
+
   function initNavShell() {
     const shell = document.querySelector('[data-app-shell]');
     const nav = document.getElementById('appNav');
     const navTree = document.querySelector('[data-nav-tree]');
     const toggleBtn = document.getElementById('navToggle');
     if (!shell || !navTree) return;
+
+    // If the user is not authenticated, only show the request form link so
+    // protected pages are not reachable via the shell nav on public pages
+    // such as about.html that skip the full auth gate.
+    if (!isWpAuthenticated()) {
+      const ul = document.createElement('ul');
+      ul.className = 'appNavTree__list';
+      const li = document.createElement('li');
+      li.className = 'appNavTree__item';
+      const a = document.createElement('a');
+      a.className = 'appNav__link appNavTree__link';
+      a.textContent = 'New Request Form';
+      a.href = withCurrentEmbedParams('index.html?new=1');
+      li.appendChild(a);
+      ul.appendChild(li);
+      navTree.innerHTML = '';
+      navTree.appendChild(ul);
+      if (nav) {
+        nav.hidden = true;
+        nav.setAttribute('aria-hidden', 'true');
+      }
+      if (toggleBtn) {
+        toggleBtn.hidden = true;
+        toggleBtn.setAttribute('aria-hidden', 'true');
+      }
+      shell.classList.remove('appShell--navOpen');
+      shell.classList.add('appShell--navClosed');
+      return;
+    }
 
     const activeYear = getActiveYear();
     const links = [

@@ -2648,7 +2648,19 @@
     }
 
     const alreadyOpen = document.querySelector('.authGate[data-manual-auth-gate="1"]');
-    if (alreadyOpen) return;
+    if (alreadyOpen) {
+      // If a previous manual gate is still in the DOM, bring it back/focus it
+      // instead of no-op so Sign in never appears broken.
+      alreadyOpen.hidden = false;
+      try {
+        alreadyOpen.removeAttribute('aria-hidden');
+      } catch {
+        // ignore
+      }
+      const existingUser = alreadyOpen.querySelector('#authUsername');
+      if (existingUser && typeof existingUser.focus === 'function') existingUser.focus();
+      return;
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'authGate';
@@ -10196,6 +10208,15 @@
     updateReconciliationHeaderIndicators();
   }
 
+  // app-workflows bundle must resolve reconciliation rows by ID locally.
+  // (The monolith helper is not always present after page-bundle stripping.)
+  function findReconciliationOrderById(orderId, year) {
+    const id = String(orderId || '').trim();
+    if (!id) return null;
+    const list = loadReconciliationOrders(year);
+    return (Array.isArray(list) ? list : []).find((o) => String((o && o.id) || '').trim() === id) || null;
+  }
+
   function deleteReconciliationOrderById(id) {
     const year = getActiveBudgetYear();
     const orders = loadReconciliationOrders(year);
@@ -10206,7 +10227,7 @@
 
   function handleReconcileAction(id) {
     const year = getActiveBudgetYear();
-    const order = getReconciliationOrderById(id, year);
+    const order = findReconciliationOrderById(id, year);
     if (!order) return;
 
     const poNo = String(order.paymentOrderNo || '').trim();
@@ -10444,7 +10465,7 @@
       const action = actionEl.getAttribute('data-action');
 
       if (action === 'downloadPdf') {
-        const order = getReconciliationOrderById(id, year);
+        const order = findReconciliationOrderById(id, year);
         if (!order) return;
         if (hasOrderMissingRequiredValues(order)) {
           window.alert('Complete all required fields before downloading a PDF.');
@@ -10464,10 +10485,10 @@
 
       if (action === 'edit') {
         if (!requireWriteOrCreateAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
-        const order = getReconciliationOrderById(id, year);
+        const order = findReconciliationOrderById(id, year);
         if (!order) return;
         beginEditingOrder(order);
-        window.location.href = `index.html?year=${encodeURIComponent(String(year))}&return=reconciliation`;
+        window.location.href = withWpEmbedParams(`index.html?year=${encodeURIComponent(String(year))}&return=reconciliation&resumeDraft=1`);
         return;
       }
 
@@ -15734,10 +15755,24 @@
 
         const receiptsRaw = String(get(idx.receipts)).trim();
         const disburseRaw = String(get(idx.disburse)).trim();
-        let receipts = parseNonNegativeAmount(receiptsRaw);
-        let disburse = parseNonNegativeAmount(disburseRaw);
+        const receiptsSigned = parseSignedAmount(receiptsRaw);
+        const disburseSigned = parseSignedAmount(disburseRaw);
 
-        if (receipts === null && disburse === null) {
+        // Respect explicit CSV columns first.
+        // Any value in Disburse is treated as outflow (absolute), so it does not
+        // get remapped into Receipts by the generic amount fallback.
+        let receipts = null;
+        let disburse = null;
+        if (receiptsRaw && receiptsSigned !== null && receiptsSigned > 0) {
+          receipts = receiptsSigned;
+        }
+        if (disburseRaw && disburseSigned !== null && disburseSigned !== 0) {
+          disburse = Math.abs(disburseSigned);
+        }
+
+        // Only use the generic Amount column when neither explicit amount
+        // column is populated.
+        if (!receiptsRaw && !disburseRaw && receipts === null && disburse === null) {
           const amount = parseSignedAmount(get(idx.amount));
           if (amount === null) {
             if (!relaxRequired && (receiptsRaw || disburseRaw || String(get(idx.amount)).trim())) {
@@ -15831,7 +15866,6 @@
         if (!proceed) return;
       }
 
-      const positiveImported = imported.filter((e) => computeWiseEurNet(e) > 0);
       const negativeImported = imported.filter((e) => computeWiseEurNet(e) < 0);
 
       if (negativeImported.length > 0) {
@@ -15843,12 +15877,14 @@
       }
 
       const existing = existingBefore;
-      const merged = [...positiveImported, ...(Array.isArray(existing) ? existing : [])];
+      // Keep all imported rows (including disbursements) in wiseEUR,
+      // and also mirror disbursements into Reconciliation.
+      const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
       saveWiseEur(merged, year);
       applyWiseEurView();
 
       if (typeof showFlashToken === 'function') {
-        showFlashToken(`Imported ${positiveImported.length} wiseEUR row(s). Moved ${negativeImported.length} row(s) to Reconciliation.`);
+        showFlashToken(`Imported ${imported.length} wiseEUR row(s). Synced ${negativeImported.length} disbursement row(s) to Reconciliation.`);
       }
     }
 
@@ -17433,10 +17469,24 @@
 
         const receiptsRaw = String(get(idx.receipts)).trim();
         const disburseRaw = String(get(idx.disburse)).trim();
-        let receipts = parseNonNegativeAmount(receiptsRaw);
-        let disburse = parseNonNegativeAmount(disburseRaw);
+        const receiptsSigned = parseSignedAmount(receiptsRaw);
+        const disburseSigned = parseSignedAmount(disburseRaw);
 
-        if (receipts === null && disburse === null) {
+        // Respect explicit CSV columns first.
+        // Any value in Disburse is treated as outflow (absolute), so it does not
+        // get remapped into Receipts by the generic amount fallback.
+        let receipts = null;
+        let disburse = null;
+        if (receiptsRaw && receiptsSigned !== null && receiptsSigned > 0) {
+          receipts = receiptsSigned;
+        }
+        if (disburseRaw && disburseSigned !== null && disburseSigned !== 0) {
+          disburse = Math.abs(disburseSigned);
+        }
+
+        // Only use the generic Amount column when neither explicit amount
+        // column is populated.
+        if (!receiptsRaw && !disburseRaw && receipts === null && disburse === null) {
           const amount = parseSignedAmount(get(idx.amount));
           if (amount === null) {
             if (!relaxRequired && (receiptsRaw || disburseRaw || String(get(idx.amount)).trim())) {
@@ -17530,7 +17580,6 @@
         if (!proceed) return;
       }
 
-      const positiveImported = imported.filter((e) => computeWiseUsdNet(e) > 0);
       const negativeImported = imported.filter((e) => computeWiseUsdNet(e) < 0);
 
       if (negativeImported.length > 0) {
@@ -17542,12 +17591,14 @@
       }
 
       const existing = existingBefore;
-      const merged = [...positiveImported, ...(Array.isArray(existing) ? existing : [])];
+      // Keep all imported rows (including disbursements) in wiseUSD,
+      // and also mirror disbursements into Reconciliation.
+      const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
       saveWiseUsd(merged, year);
       applyWiseUsdView();
 
       if (typeof showFlashToken === 'function') {
-        showFlashToken(`Imported ${positiveImported.length} wiseUSD row(s). Moved ${negativeImported.length} row(s) to Reconciliation.`);
+        showFlashToken(`Imported ${imported.length} wiseUSD row(s). Synced ${negativeImported.length} disbursement row(s) to Reconciliation.`);
       }
     }
 

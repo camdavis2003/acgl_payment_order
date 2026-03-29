@@ -2647,7 +2647,19 @@
     }
 
     const alreadyOpen = document.querySelector('.authGate[data-manual-auth-gate="1"]');
-    if (alreadyOpen) return;
+    if (alreadyOpen) {
+      // If a previous manual gate is still in the DOM, bring it back/focus it
+      // instead of no-op so Sign in never appears broken.
+      alreadyOpen.hidden = false;
+      try {
+        alreadyOpen.removeAttribute('aria-hidden');
+      } catch {
+        // ignore
+      }
+      const existingUser = alreadyOpen.querySelector('#authUsername');
+      if (existingUser && typeof existingUser.focus === 'function') existingUser.focus();
+      return;
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'authGate';
@@ -10466,7 +10478,7 @@
         const order = getReconciliationOrderById(id, year);
         if (!order) return;
         beginEditingOrder(order);
-        window.location.href = `index.html?year=${encodeURIComponent(String(year))}&return=reconciliation`;
+        window.location.href = withWpEmbedParams(`index.html?year=${encodeURIComponent(String(year))}&return=reconciliation&resumeDraft=1`);
         return;
       }
 
@@ -24685,8 +24697,30 @@
       authHeaderBtn.dataset.bound = 'true';
       authHeaderBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        openAuthLoginOverlay();
+        try {
+          openAuthLoginOverlay();
+        } catch {
+          // Hard fallback: force a reload route that auto-opens login.
+          window.location.href = withWpEmbedParams('index.html?showLogin=1');
+        }
       });
+    }
+
+    // URL-flag fallback for environments where direct overlay open can be blocked
+    // by stale UI state. Trigger once, then clean the URL.
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.get('showLogin') === '1') {
+        openAuthLoginOverlay();
+        params.delete('showLogin');
+        const nextQs = params.toString();
+        const nextUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
+        if (window.history && typeof window.history.replaceState === 'function') {
+          window.history.replaceState(null, '', nextUrl);
+        }
+      }
+    } catch {
+      // ignore
     }
   }
 

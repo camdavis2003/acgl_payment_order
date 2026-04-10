@@ -767,7 +767,7 @@
   function ensureHardcodedAdminUserExists() {
     if (IS_WP_SHARED_MODE) return;
     if (hardcodedAdminSeedAttempted) return;
-    hardcodedAdminSeedAttempted = true;
+    if (!HARD_CODED_ADMIN_USERNAME || !HARD_CODED_ADMIN_PASSWORD || !HARD_CODED_ADMIN_SALT) return;
 
     try {
       const nowIso = new Date().toISOString();

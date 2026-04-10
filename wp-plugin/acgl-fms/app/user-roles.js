@@ -118,11 +118,32 @@
     'settings.html': 'settings',
   });
 
+  function isLocalDevHost() {
+    try {
+      const h = String((global && global.location && global.location.hostname) || '').trim().toLowerCase();
+      return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+    } catch {
+      return false;
+    }
+  }
+
+  function readLocalDevSecret(key) {
+    if (!isLocalDevHost()) return '';
+    try {
+      return String(global.localStorage.getItem(String(key || '')) || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
   const BOOTSTRAP_ADMIN = Object.freeze({
     id: 'user_admin_pass_v1',
     username: 'admin.pass',
-    password: 'acgl1962ADM',
-    salt: 'acgl_fms_admin_v1',
+    // Dev-only: set these keys in localStorage on localhost.
+    // localStorage.setItem('acgl_dev_bootstrap_admin_password_v1', '...')
+    // localStorage.setItem('acgl_dev_bootstrap_admin_salt_v1', '...')
+    password: readLocalDevSecret('acgl_dev_bootstrap_admin_password_v1'),
+    salt: readLocalDevSecret('acgl_dev_bootstrap_admin_salt_v1'),
     defaultPermissions: Object.freeze({
       budget: 'full',
       income_bankeur: 'full',

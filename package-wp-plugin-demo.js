@@ -105,6 +105,10 @@ function transformPhp(srcText) {
   out = replaceAll(out, 'ACGL_FMS_', 'ACGL_FMS_DEMO_');
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
 
+  // Separate app data keys from production to avoid cross-app state bleed.
+  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
+  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+
   // Make the full-page wrapper tab title clearly DEMO.
   out = replaceAll(out, ' — FMS</title>', ' — FMS (DEMO)</title>');
 
@@ -136,8 +140,12 @@ function transformAppJs(srcText) {
   // Separate browser state between production and demo.
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
 
-  // Point demo app at demo REST namespace.
-  out = replaceAll(out, 'acgl-fms/v1', 'acgl-fms-demo/v1');
+  // Point demo app at demo slugs/routes/namespaces.
+  out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
+
+  // Separate browser/app data keys from production.
+  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
+  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
 
   return out;
 }
@@ -145,9 +153,21 @@ function transformAppJs(srcText) {
 function transformDatastoreJs(srcText) {
   let out = String(srcText);
 
-  // Point demo store at demo REST namespace.
-  out = replaceAll(out, 'acgl-fms/v1', 'acgl-fms-demo/v1');
+  // Keep all JS identifiers/routes isolated from production.
+  out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
+  out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
 
+  // Separate browser/app data keys from production.
+  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
+  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+
+  return out;
+}
+
+function transformMarkdown(srcText) {
+  let out = String(srcText);
+  out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
+  out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
   return out;
 }
 
@@ -206,6 +226,20 @@ async function zipDemoPlugin() {
     if (entryRel === 'app/datastore.js') {
       const raw = fs.readFileSync(abs, 'utf8');
       const transformed = transformDatastoreJs(raw);
+      archive.append(transformed, { name: entryName });
+      continue;
+    }
+
+    if (entryRel.startsWith('app/') && entryRel.endsWith('.js')) {
+      const raw = fs.readFileSync(abs, 'utf8');
+      const transformed = transformDatastoreJs(raw);
+      archive.append(transformed, { name: entryName });
+      continue;
+    }
+
+    if (entryRel.toLowerCase() === 'readme.md') {
+      const raw = fs.readFileSync(abs, 'utf8');
+      const transformed = transformMarkdown(raw);
       archive.append(transformed, { name: entryName });
       continue;
     }

@@ -94,6 +94,62 @@ function replaceAll(haystack, needle, replacement) {
   return String(haystack).split(String(needle)).join(String(replacement));
 }
 
+function namespaceDemoDataKeys(srcText) {
+  let out = String(srcText);
+
+  const exactKeyMap = [
+    ['payment_order_users_v1', 'payment_order_demo_users_v1'],
+    ['payment_order_backlog_v1', 'payment_order_demo_backlog_v1'],
+    ['payment_order_auth_audit_v1', 'payment_order_demo_auth_audit_v1'],
+    ['payment_order_numbering', 'payment_order_demo_numbering'],
+    ['payment_order_grand_lodge_info_v1', 'payment_order_demo_grand_lodge_info_v1'],
+    ['payment_order_budget_years_v1', 'payment_order_demo_budget_years_v1'],
+    ['payment_order_active_budget_year_v1', 'payment_order_demo_active_budget_year_v1'],
+    ['payment_order_notifications_settings_v1', 'payment_order_demo_notifications_settings_v1'],
+    ['payment_orders_legacy_migrated_v1', 'payment_orders_demo_legacy_migrated_v1'],
+    ['payment_order_budget_table_html_v1', 'payment_order_demo_budget_table_html_v1'],
+    ['payment_order_theme', 'payment_order_demo_theme'],
+    ['payment_order_draft', 'payment_order_demo_draft'],
+    ['payment_order_draft_items', 'payment_order_demo_draft_items'],
+    ['payment_order_edit_order_id', 'payment_order_demo_edit_order_id'],
+    ['payment_order_edit_order_year_v1', 'payment_order_demo_edit_order_year_v1'],
+    ['payment_order_budget_template_rows_v1', 'payment_order_demo_budget_template_rows_v1'],
+    ['payment_order_current_user_v1', 'payment_order_demo_current_user_v1'],
+    ['payment_order_login_at_v1', 'payment_order_demo_login_at_v1'],
+    ['payment_order_last_activity_at_v1', 'payment_order_demo_last_activity_at_v1'],
+    ['payment_order_app_audit_v1', 'payment_order_demo_app_audit_v1'],
+    ['payment_order_flash_token', 'payment_order_demo_flash_token'],
+    ['payment_order_attachments_db', 'payment_order_demo_attachments_db'],
+  ];
+
+  const prefixKeyMap = [
+    ['payment_orders_', 'payment_orders_demo_'],
+    ['payment_order_income_', 'payment_order_demo_income_'],
+    ['payment_order_wise_eur_', 'payment_order_demo_wise_eur_'],
+    ['payment_order_wise_usd_', 'payment_order_demo_wise_usd_'],
+    ['payment_order_budget_table_html_', 'payment_order_demo_budget_table_html_'],
+    ['payment_order_budget_meta_', 'payment_order_demo_budget_meta_'],
+    ['payment_order_gs_ledger_verified_', 'payment_order_demo_gs_ledger_verified_'],
+    ['payment_order_backup_', 'payment_order_demo_backup_'],
+    ['payment_order_wise_eur_idtrack_backfill_', 'payment_order_demo_wise_eur_idtrack_backfill_'],
+    ['payment_order_wise_eur_budget_backfill_', 'payment_order_demo_wise_eur_budget_backfill_'],
+    ['payment_order_wise_usd_idtrack_backfill_', 'payment_order_demo_wise_usd_idtrack_backfill_'],
+    ['payment_order_wise_usd_budget_backfill_', 'payment_order_demo_wise_usd_budget_backfill_'],
+    ['payment_order_wise_eur_seeded_', 'payment_order_demo_wise_eur_seeded_'],
+    ['payment_order_wise_usd_seeded_', 'payment_order_demo_wise_usd_seeded_'],
+    ['payment_order_budget_checksums_visible_', 'payment_order_demo_budget_checksums_visible_'],
+  ];
+
+  for (const [from, to] of exactKeyMap) {
+    out = replaceAll(out, from, to);
+  }
+  for (const [from, to] of prefixKeyMap) {
+    out = replaceAll(out, from, to);
+  }
+
+  return out;
+}
+
 function transformPhp(srcText) {
   let out = String(srcText);
 
@@ -104,10 +160,7 @@ function transformPhp(srcText) {
   // Namespacing / isolation.
   out = replaceAll(out, 'ACGL_FMS_', 'ACGL_FMS_DEMO_');
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
-
-  // Separate app data keys from production to avoid cross-app state bleed.
-  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
-  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+  out = namespaceDemoDataKeys(out);
 
   // Make the full-page wrapper tab title clearly DEMO.
   out = replaceAll(out, ' — FMS</title>', ' — FMS (DEMO)</title>');
@@ -142,10 +195,7 @@ function transformAppJs(srcText) {
 
   // Point demo app at demo slugs/routes/namespaces.
   out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
-
-  // Separate browser/app data keys from production.
-  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
-  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+  out = namespaceDemoDataKeys(out);
 
   return out;
 }
@@ -156,10 +206,7 @@ function transformDatastoreJs(srcText) {
   // Keep all JS identifiers/routes isolated from production.
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
   out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
-
-  // Separate browser/app data keys from production.
-  out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
-  out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
+  out = namespaceDemoDataKeys(out);
 
   return out;
 }

@@ -8548,38 +8548,33 @@
     const wrapEl = tableEl && tableEl.closest ? tableEl.closest('.table-wrap') : null;
     if (!wrapEl || !usersTbody) return;
 
-    const maxUsers = Math.max(1, Number(maxVisibleUsers) || 1);
-    const maxRows = maxUsers;
-    const rows = Array.from(usersTbody.querySelectorAll('tr'));
-
-    wrapEl.style.overflowY = 'auto';
-    if (!rows || rows.length <= maxRows) {
+    const bodyEl = wrapEl.closest ? wrapEl.closest('.settingsCardBody') : null;
+    if (!bodyEl) {
       wrapEl.style.maxHeight = '';
+      wrapEl.style.overflowY = 'auto';
       return;
     }
 
-    const prevScrollTop = wrapEl.scrollTop;
-    if (prevScrollTop) wrapEl.scrollTop = 0;
-    let total = 0;
-    try {
-      const wrapRect = wrapEl.getBoundingClientRect ? wrapEl.getBoundingClientRect() : null;
-      const last = rows[Math.min(maxRows, rows.length) - 1];
-      const lastRect = last && last.getBoundingClientRect ? last.getBoundingClientRect() : null;
-      if (wrapRect && lastRect) {
-        total = (lastRect.bottom - wrapRect.top);
-      }
-    } finally {
-      if (prevScrollTop) wrapEl.scrollTop = prevScrollTop;
+    let occupied = 0;
+    const bodyChildren = Array.from(bodyEl.children || []);
+    for (const child of bodyChildren) {
+      if (!child || child === wrapEl) continue;
+      const style = window.getComputedStyle ? window.getComputedStyle(child) : null;
+      if (style && style.display === 'none') continue;
+      const mt = style ? (Number.parseFloat(style.marginTop) || 0) : 0;
+      const mb = style ? (Number.parseFloat(style.marginBottom) || 0) : 0;
+      occupied += (child.offsetHeight || 0) + mt + mb;
     }
 
-    if (!Number.isFinite(total) || total <= 0) {
-      total = 0;
-      for (let i = 0; i < Math.min(maxRows, rows.length); i += 1) {
-        total += rows[i].offsetHeight;
-      }
+    const available = Math.floor((bodyEl.clientHeight || 0) - occupied);
+    if (!Number.isFinite(available) || available <= 0) {
+      wrapEl.style.maxHeight = '';
+      wrapEl.style.overflowY = 'auto';
+      return;
     }
 
-    wrapEl.style.maxHeight = `${Math.max(140, Math.ceil(total))}px`;
+    wrapEl.style.maxHeight = `${Math.max(140, available)}px`;
+    wrapEl.style.overflowY = 'auto';
   }
 
   function renderUsersTable() {
@@ -8691,11 +8686,11 @@
 
     usersTbody.innerHTML = rows;
 
-    // Enforce: max 3 visible users; scroll to see the rest.
+    // Fit users table to the available height of the User Roles card body.
     // Run twice to reduce cases where first paint hasn't finalized heights yet.
     requestAnimationFrame(() => {
-      applyMaxVisibleUsers(3);
-      requestAnimationFrame(() => applyMaxVisibleUsers(3));
+      applyMaxVisibleUsers();
+      requestAnimationFrame(() => applyMaxVisibleUsers());
     });
   }
 
@@ -11686,6 +11681,273 @@
 
   
   // [bundle-strip:settings-remove-workflows] removed in page-specific build.
+  // ---- Backups (year-scoped snapshots) ----
+
+  const BACKUP_SCHEMA = 'acgl-fms-year-backup';
+  const BACKUP_VERSION = 1;
+  const BACKUP_MAX_PER_YEAR = 30;
+  const BACKUP_AUTO_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+  function normalizeBackupYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    if (y < 1900 || y > 3000) return null;
+    return y;
+  }
+
+  function getBackupIndexKeyForYear(year) {
+    const y = normalizeBackupYear(year);
+    if (!y) return null;
+    return `payment_order_backup_index_${y}_v1`;
+  }
+
+  function getBackupLastAutoKeyForYear(year) {
+    const y = normalizeBackupYear(year);
+    if (!y) return null;
+    return `payment_order_backup_last_auto_${y}_v1`;
+  }
+
+  function getBackupDataKeyForYearId(year, id) {
+    const y = normalizeBackupYear(year);
+    if (!y) return null;
+    const raw = String(id ?? '').trim();
+    if (!raw) return null;
+    const safe = raw.replace(/[^A-Za-z0-9_\-]/g, '').slice(0, 40);
+    if (!safe) return null;
+    return `payment_order_backup_${y}_${safe}_v1`;
+  }
+
+  function getBackupScopedKeysForYear(year) {
+    const y = normalizeBackupYear(year);
+    if (!y) return [];
+    const out = [];
+    const add = (k) => {
+      if (k) out.push(k);
+    };
+
+    add(getPaymentOrdersKeyForYear(y));
+    add(getPaymentOrdersReconciliationKeyForYear(y));
+    add(getIncomeKeyForYear(y));
+    add(getBudgetTableKeyForYear(y));
+    add(getWiseEurKeyForYear(y));
+    add(getWiseUsdKeyForYear(y));
+    add(getGsLedgerVerifiedKeyForYear(y));
+
+    return out;
+  }
+
+  function loadBackupIndex(year) {
+    const key = getBackupIndexKeyForYear(year);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveBackupIndex(year, index) {
+    const key = getBackupIndexKeyForYear(year);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(Array.isArray(index) ? index : []));
+  }
+
+  function makeBackupIdNow() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+  }
+
+  function createYearBackup(year, kind) {
+    const y = normalizeBackupYear(year);
+    if (!y) return { ok: false, error: 'invalid_year' };
+
+    if (IS_WP_SHARED_MODE && !getWpToken()) {
+      return { ok: false, error: 'wp_login_required' };
+    }
+
+    if (IS_WP_SHARED_MODE) {
+      const hasAnyUsers = loadUsers().length > 0;
+      const u = getCurrentUser();
+      if (hasAnyUsers && (!u || !canSettingsEdit(u))) {
+        return { ok: false, error: 'forbidden' };
+      }
+    }
+
+    const id = makeBackupIdNow();
+    const createdAt = new Date().toISOString();
+    const keys = getBackupScopedKeysForYear(y);
+    const values = {};
+    for (const k of keys) {
+      values[k] = localStorage.getItem(k);
+    }
+
+    const payload = {
+      schema: BACKUP_SCHEMA,
+      version: BACKUP_VERSION,
+      year: y,
+      id,
+      createdAt,
+      kind: kind === 'auto' ? 'auto' : 'manual',
+      keys: values,
+    };
+
+    const dataKey = getBackupDataKeyForYearId(y, id);
+    if (!dataKey) return { ok: false, error: 'invalid_id' };
+
+    const text = JSON.stringify(payload);
+    localStorage.setItem(dataKey, text);
+
+    const meta = {
+      id,
+      createdAt,
+      kind: payload.kind,
+      bytes: text.length,
+      keyCount: keys.length,
+    };
+
+    const index = loadBackupIndex(y);
+    const nextIndex = [meta, ...(Array.isArray(index) ? index : []).filter((m) => m && m.id !== id)].slice(0, BACKUP_MAX_PER_YEAR);
+    saveBackupIndex(y, nextIndex);
+
+    try {
+      const keep = new Set(nextIndex.map((m) => (m && m.id ? String(m.id) : '')).filter(Boolean));
+      for (const m of Array.isArray(index) ? index : []) {
+        const mid = m && m.id ? String(m.id) : '';
+        if (!mid || keep.has(mid)) continue;
+        const dk = getBackupDataKeyForYearId(y, mid);
+        if (dk) localStorage.removeItem(dk);
+      }
+    } catch {
+      // ignore
+    }
+
+    return { ok: true, year: y, id, meta, payload };
+  }
+
+  function loadBackupPayloadFromStorage(year, id) {
+    const y = normalizeBackupYear(year);
+    if (!y) return null;
+    const dataKey = getBackupDataKeyForYearId(y, id);
+    if (!dataKey) return null;
+    try {
+      const raw = localStorage.getItem(dataKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function downloadBackupById(year, id) {
+    const payload = loadBackupPayloadFromStorage(year, id);
+    if (!payload) {
+      window.alert('Backup not found.');
+      return;
+    }
+    const y = normalizeBackupYear(payload.year);
+    const bid = String(payload.id || id || '');
+    const fileName = `acgl-fms-backup-${String(y || year)}-${bid}.json`;
+    const text = JSON.stringify(payload, null, 2);
+    const blob = new Blob([text], { type: 'application/json;charset=utf-8;' });
+    downloadBlob(blob, fileName);
+  }
+
+  function restoreYearBackupFromPayload(payloadRaw) {
+    const payload = payloadRaw && typeof payloadRaw === 'object' ? payloadRaw : null;
+    if (!payload) return { ok: false, error: 'invalid_payload' };
+    if (payload.schema !== BACKUP_SCHEMA) return { ok: false, error: 'invalid_schema' };
+    if (Number(payload.version) !== BACKUP_VERSION) return { ok: false, error: 'unsupported_version' };
+
+    if (IS_WP_SHARED_MODE && !getWpToken()) {
+      return { ok: false, error: 'wp_login_required' };
+    }
+
+    const bag = payload.keys && typeof payload.keys === 'object' ? payload.keys : {};
+
+    const years = [];
+    if (Array.isArray(payload.years)) {
+      for (const v of payload.years) {
+        const y = normalizeBackupYear(v);
+        if (y) years.push(y);
+      }
+    } else {
+      const y = normalizeBackupYear(payload.year);
+      if (y) years.push(y);
+    }
+
+    if (years.length === 0) return { ok: false, error: 'invalid_year' };
+
+    const allowed = new Set();
+    for (const y of years) {
+      for (const k of getBackupScopedKeysForYear(y)) allowed.add(k);
+    }
+
+    for (const k of Object.keys(bag)) {
+      if (!allowed.has(k)) continue;
+      const v = bag[k];
+      if (v === null || v === undefined) {
+        localStorage.removeItem(k);
+      } else {
+        localStorage.setItem(k, String(v));
+      }
+    }
+
+    try {
+      const existing = loadBudgetYears();
+      const merged = Array.from(new Set([...years, ...existing]));
+      saveBudgetYears(merged);
+    } catch {
+      // ignore
+    }
+
+    return { ok: true, years };
+  }
+
+  function formatBackupCreatedAt(iso) {
+    const s = String(iso || '').trim();
+    if (!s) return 'Unknown date';
+    return s.replace('T', ' ').replace('Z', '');
+  }
+
+  function maybeAutoBackupActiveYear() {
+    const y = normalizeBackupYear(getActiveBudgetYear());
+    if (!y) return;
+
+    if (IS_WP_SHARED_MODE && !getWpToken()) return;
+    if (IS_WP_SHARED_MODE) {
+      const hasAnyUsers = loadUsers().length > 0;
+      const u = getCurrentUser();
+      if (hasAnyUsers && (!u || !canSettingsEdit(u))) return;
+    }
+
+    const lastKey = getBackupLastAutoKeyForYear(y);
+    if (!lastKey) return;
+    const now = Date.now();
+    try {
+      const last = Number(localStorage.getItem(lastKey) || '0');
+      if (Number.isFinite(last) && last > 0 && now - last < BACKUP_AUTO_INTERVAL_MS) return;
+    } catch {
+      // ignore
+    }
+
+    const keys = getBackupScopedKeysForYear(y);
+    const hasAny = keys.some((k) => localStorage.getItem(k) !== null);
+    if (!hasAny) return;
+
+    const res = createYearBackup(y, 'auto');
+    if (!res.ok) return;
+    try {
+      localStorage.setItem(lastKey, String(now));
+    } catch {
+      // ignore
+    }
+  }
+
 function initBackupPage() {
     const root = document.querySelector('[data-backup]');
     if (!root) return;

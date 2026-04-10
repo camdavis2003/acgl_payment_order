@@ -18,6 +18,7 @@ const OUT_SETTINGS = path.join(ROOT, 'app-settings.js');
 const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
 const OUT_BANKING = path.join(ROOT, 'app-banking.js');
 const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
+const OUT_OPERATIONS = path.join(ROOT, 'app-operations.js');
 
 const M_RECON = '// ---- Payment Orders Reconciliation (year-scoped) ----';
 const M_SETTINGS = '// ---- Roles / Users (settings page) ----';
@@ -28,6 +29,8 @@ const M_ITEMIZE = '// ---- Itemize page logic ----';
 const M_MT_LIST = '// ---- Money Transfers list page ----';
 const M_INCOME_COL_TYPES = 'const INCOME_COL_TYPES = {';
 const M_LOAD_INCOME_FN = 'function loadIncome(year) {';
+const M_BUDGET_EDITOR_FN = 'function initBudgetEditor() {';
+const M_ARCHIVE_FN = 'function initArchivePage() {';
 const M_CATCH = '\n})().catch((err) => {';
 const M_REQUEST_BLOCK = '\n  if (form) {';
 const M_KEYDOWN = "\n  document.addEventListener('keydown', (e) => {";
@@ -194,6 +197,16 @@ function buildTransfersBundle(source) {
   return banner('transfers') + out;
 }
 
+function buildOperationsBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'operations-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'operations-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'operations-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'operations-remove-money-transfers');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'operations-remove-budget-editor');
+  return banner('operations') + out;
+}
+
 function main() {
   const source = fs.readFileSync(SOURCE, 'utf8');
 
@@ -203,6 +216,7 @@ function main() {
   const itemize = buildItemizeBundle(source);
   const banking = buildBankingBundle(source);
   const transfers = buildTransfersBundle(source);
+  const operations = buildOperationsBundle(source);
 
   writeBundle(OUT_REQUEST, request);
   writeBundle(OUT_WORKFLOWS, workflows);
@@ -210,6 +224,7 @@ function main() {
   writeBundle(OUT_ITEMIZE, itemize);
   writeBundle(OUT_BANKING, banking);
   writeBundle(OUT_TRANSFERS, transfers);
+  writeBundle(OUT_OPERATIONS, operations);
 
   console.log('Page bundles generated successfully.');
 }

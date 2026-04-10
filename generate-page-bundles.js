@@ -291,6 +291,7 @@ function buildBudgetEditorBundle(source) {
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'budget-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'budget-remove-itemize');
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'budget-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'budget-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_DASHBOARD_FN, M_ARCHIVE_FN, 'budget-remove-dashboard');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'budget-remove-archive-and-backup');
   return banner('budget-editor') + out;
@@ -302,6 +303,7 @@ function buildBudgetDashboardBundle(source) {
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'budget-dashboard-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'budget-dashboard-remove-itemize');
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'budget-dashboard-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'budget-dashboard-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_BUDGET_DASHBOARD_FN, 'budget-dashboard-remove-editor');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'budget-dashboard-remove-archive-and-backup');
   return banner('budget-dashboard') + out;

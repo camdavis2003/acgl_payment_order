@@ -10103,6 +10103,26 @@
     }
   }
 
+  function getWiseEurReceipts(entry) {
+    const n = Number(entry && entry.receipts);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function getWiseEurDisburse(entry) {
+    const n = Number(entry && entry.disburse);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function getWiseUsdReceipts(entry) {
+    const n = Number(entry && entry.receipts);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function getWiseUsdDisburse(entry) {
+    const n = Number(entry && entry.disburse);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
   function buildGsLedgerRowsForYear(year) {
     const verified = loadGsLedgerVerifiedMap(year);
     const rows = [];
@@ -10344,6 +10364,26 @@
     const mt = getMoneyTransferForLedgerRow(year, row);
     if (!mt) return '';
     return String(mt.moneyTransferNo || mt.mtNo || mt.no || '').trim();
+  }
+
+  function isMtEligibleLedgerIncomeRow(row) {
+    const ledgerId = String(row && row.ledgerId ? row.ledgerId : '').trim();
+    if (!ledgerId || ledgerId.startsWith('po:')) return false;
+    const d = String(row && row.date ? row.date : '').trim();
+    if (!isIsoDateOnly(d)) return false;
+    const e = Number(row && row.euro);
+    const u = Number(row && row.usd);
+    return (Number.isFinite(e) && e > 0) || (Number.isFinite(u) && u > 0);
+  }
+
+  function normalizeMoneyTransferDate(row) {
+    const s = String((row && (row.mtDate || row.date || row.transferDate)) || '').trim();
+    if (isIsoDateOnly(s)) return s;
+
+    const legacyEnd = String((row && (row.rangeEnd || row.endDate || row.end)) || '').trim();
+    if (isIsoDateOnly(legacyEnd)) return legacyEnd;
+    const legacyStart = String((row && (row.rangeStart || row.startDate || row.start)) || '').trim();
+    return isIsoDateOnly(legacyStart) ? legacyStart : '';
   }
 
   function getGsLedgerSortValueForColumn(row, colKey, colType) {

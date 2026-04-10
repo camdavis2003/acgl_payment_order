@@ -11276,6 +11276,813 @@
   // [bundle-strip:wise-usd-remove-income-page] removed in page-specific build.
 
   // [bundle-strip:wise-usd-remove-wise-eur-page] removed in page-specific build.
+const WISE_USD_COL_TYPES = {
+    budgetNo: 'text',
+    datePL: 'date',
+    idTrack: 'text',
+    receivedFromDisbursedTo: 'text',
+    receipts: 'number',
+    disburse: 'number',
+    description: 'text',
+    issuanceDateBank: 'date',
+    verified: 'number',
+    checksum: 'number',
+    bankStatements: 'text',
+    remarks: 'text',
+  };
+
+  const wiseUsdViewState = {
+    globalFilter: '',
+    sortKey: 'datePL',
+    sortDir: 'asc',
+    defaultEmptyText: null,
+    canVerify: false,
+    canDelete: false,
+  };
+
+  function ensureWiseUsdDefaultEmptyText() {
+    if (!wiseUsdEmptyState) return;
+    if (wiseUsdViewState.defaultEmptyText !== null) return;
+    wiseUsdViewState.defaultEmptyText = wiseUsdEmptyState.textContent || 'No wiseUSD entries yet.';
+  }
+
+  function getWiseUsdReceipts(entry) {
+    const n = Number(entry && entry.receipts);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function getWiseUsdDisburse(entry) {
+    const n = Number(entry && entry.disburse);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function getWiseUsdVerified(entry) {
+    if (!entry) return false;
+    if (typeof entry.verified === 'boolean') return entry.verified;
+    const raw = entry.verified !== undefined ? entry.verified : entry.checkedByGTREAS;
+    if (raw === null || raw === undefined) return false;
+    const s = String(raw).trim().toLowerCase();
+    if (!s) return false;
+    if (s === '0' || s === 'false' || s === 'no' || s === 'n' || s === 'off') return false;
+    return true;
+  }
+
+  function computeWiseUsdNet(entry) {
+    return getWiseUsdReceipts(entry) - getWiseUsdDisburse(entry);
+  }
+
+  function hasWiseUsdMissingRequiredValues(entry) {
+    if (!entry) return true;
+    const date = String(entry.datePL || entry.date || '').trim();
+    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
+    const description = String(entry.description || entry.reference || '').trim();
+
+    const receipts = getWiseUsdReceipts(entry);
+    const disburse = getWiseUsdDisburse(entry);
+    const hasReceipts = Number.isFinite(receipts) && receipts > 0;
+    const hasDisburse = Number.isFinite(disburse) && disburse > 0;
+    const hasOneAmount = (hasReceipts && !hasDisburse) || (!hasReceipts && hasDisburse);
+
+    const rawBudgetNo = String(entry.budgetNo || '').trim();
+    const hasBudget = Boolean(extractInCodeFromBudgetNumberText(rawBudgetNo) || extractOutCodeFromBudgetNumberText(rawBudgetNo));
+
+    if (!date) return true;
+    if (!party) return true;
+    if (!description) return true;
+    if (!hasOneAmount) return true;
+    if (!hasBudget) return true;
+    return false;
+  }
+
+  function buildReconciliationOrderFromWiseUsdEntry(entry, year) {
+    if (!entry || !entry.id) return null;
+    const absUsd = getWiseUsdDisburse(entry);
+    if (!(Number.isFinite(absUsd) && absUsd > 0)) return null;
+
+    const date = String(entry.datePL || entry.date || '').trim();
+    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
+    const purpose = String(entry.description || entry.reference || '').trim() || 'wiseUSD disbursement';
+    const budgetNumber = String(entry.budgetNo || '').trim();
+    const itemTitle = purpose;
+
+    const po = buildPaymentOrder({
+      source: 'wiseUSD',
+      sourceEntryId: entry.id,
+      sourceEntryYear: year,
+      paymentOrderNo: '',
+      date,
+      name: party,
+      euro: null,
+      usd: absUsd,
+      items: [
+        {
+          id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          title: itemTitle,
+          euro: null,
+          usd: absUsd,
+        },
+      ],
+      address: '',
+      iban: '',
+      bic: '',
+      specialInstructions: '',
+      budgetNumber,
+      purpose,
+      with: 'Grand Secretary',
+      status: 'Submitted',
+    });
+    po.updatedAt = po.createdAt;
+    return po;
+  }
+
+  function getWiseUsdDisplayValueForColumn(entry, colKey) {
+    if (!entry) return '';
+    switch (colKey) {
+      case 'budgetNo':
+        return entry.budgetNo || '';
+      case 'datePL':
+        return formatDate(entry.datePL || entry.date);
+      case 'idTrack':
+        return entry.idTrack ? formatPaymentOrderNoForDisplay(entry.idTrack) : '';
+      case 'receivedFromDisbursedTo':
+        return entry.receivedFromDisbursedTo || entry.party || '';
+      case 'receipts': {
+        const n = getWiseUsdReceipts(entry);
+        return n ? formatCurrency(n, 'USD') : '';
+      }
+      case 'disburse': {
+        const n = getWiseUsdDisburse(entry);
+        return n ? formatCurrency(n, 'USD') : '';
+      }
+      case 'description':
+        return entry.description || entry.reference || '';
+      case 'issuanceDateBank':
+        return entry.issuanceDateBank ? formatDate(entry.issuanceDateBank) : '';
+      case 'verified':
+        return getWiseUsdVerified(entry) ? 'Yes' : '';
+      case 'checksum': {
+        const n = Number(entry && entry.checksum);
+        return Number.isFinite(n) ? formatCurrency(n, 'USD') : entry.checksum || '';
+      }
+      case 'bankStatements':
+        return entry.bankStatements || '';
+      case 'remarks':
+        return entry.remarks || '';
+      default:
+        return '';
+    }
+  }
+
+  function getWiseUsdSortValueForColumn(entry, colKey, colType) {
+    if (!entry) return null;
+    if (colType === 'number') {
+      if (colKey === 'receipts') return getWiseUsdReceipts(entry);
+      if (colKey === 'disburse') return getWiseUsdDisburse(entry);
+      if (colKey === 'verified') return getWiseUsdVerified(entry) ? 1 : 0;
+      if (colKey === 'checksum') {
+        const n = Number(entry && entry.checksum);
+        return Number.isFinite(n) ? n : null;
+      }
+      return null;
+    }
+    if (colType === 'date') {
+      const raw =
+        colKey === 'datePL'
+          ? String(entry.datePL || entry.date || '').trim()
+          : colKey === 'issuanceDateBank'
+            ? String(entry.issuanceDateBank || '').trim()
+            : '';
+      return raw ? raw : null;
+    }
+    return normalizeTextForSearch(getWiseUsdDisplayValueForColumn(entry, colKey));
+  }
+
+  function filterWiseUsdForView(entries, globalFilter) {
+    const needle = normalizeTextForSearch(globalFilter);
+    if (!needle) return entries || [];
+
+    const cols = Object.keys(WISE_USD_COL_TYPES);
+    return (entries || []).filter((e) => cols.some((k) => normalizeTextForSearch(getWiseUsdDisplayValueForColumn(e, k)).includes(needle)));
+  }
+
+  function sortWiseUsdForView(entries, sortKey, sortDir) {
+    const dir = sortDir === 'desc' ? -1 : 1;
+    const key = sortKey || 'datePL';
+    const colType = WISE_USD_COL_TYPES[key] || 'text';
+    const withIndex = (entries || []).map((entry, index) => ({ entry, index }));
+    withIndex.sort((a, b) => {
+      const av = getWiseUsdSortValueForColumn(a.entry, key, colType);
+      const bv = getWiseUsdSortValueForColumn(b.entry, key, colType);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'number') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+    return withIndex.map((x) => x.entry);
+  }
+
+  function renderWiseUsdRows(entries) {
+    if (!wiseUsdTbody) return;
+    const canVerify = Boolean(wiseUsdViewState.canVerify);
+    const canDeleteRows = Boolean(wiseUsdViewState.canDelete);
+    const deleteAriaDisabled = canDeleteRows ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteRows ? '' : ' data-tooltip="Requires Delete access for wiseUSD."';
+    const year = getActiveBudgetYear();
+    const activeYear = getActiveBudgetYear();
+    const inMap = getInDescMapForYear(activeYear);
+    const outMap = getOutDescMapForYear(activeYear);
+    const ordersBySourceEntryKey = new Map();
+    const reconcileBySourceEntryKey = new Map();
+    const ordersByPoCanon = new Map();
+    const reconcileByPoCanon = new Map();
+    const orderIds = new Set();
+    const sourceEntryKey = (sourceRaw, sourceEntryIdRaw) => {
+      const source = String(sourceRaw || '').trim().toLowerCase();
+      const sourceEntryId = String(sourceEntryIdRaw || '').trim();
+      if (!source || !sourceEntryId) return '';
+      return `${source}::${sourceEntryId}`;
+    };
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!ordersBySourceEntryKey.has(key)) {
+          ordersBySourceEntryKey.set(key, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryKey.get(key);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryKey.set(key, o);
+      }
+    }
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const key = sourceEntryKey(o.source, o.sourceEntryId);
+        if (!key) continue;
+        if (!reconcileBySourceEntryKey.has(key)) reconcileBySourceEntryKey.set(key, o);
+      }
+    }
+    const html = (entries || [])
+      .map((e) => {
+        const id = escapeHtml(e.id);
+        const isMissingRequired = hasWiseUsdMissingRequiredValues(e);
+        const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
+        const rawBudgetNo = getWiseUsdDisplayValueForColumn(e, 'budgetNo');
+        const receiptsAmt = getWiseUsdReceipts(e);
+        const disburseAmt = getWiseUsdDisburse(e);
+        let budgetNo = '';
+        if (receiptsAmt > 0 && disburseAmt <= 0) {
+          const code = extractInCodeFromBudgetNumberText(rawBudgetNo) || String(rawBudgetNo || '').trim();
+          const desc = (code && inMap ? inMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(rawBudgetNo);
+          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
+        } else if (disburseAmt > 0 && receiptsAmt <= 0) {
+          const code = extractOutCodeFromBudgetNumberText(rawBudgetNo) || String(rawBudgetNo || '').trim();
+          const desc = (code && outMap ? outMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(rawBudgetNo);
+          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
+        } else {
+          const code =
+            extractInCodeFromBudgetNumberText(rawBudgetNo) ||
+            extractOutCodeFromBudgetNumberText(rawBudgetNo) ||
+            String(rawBudgetNo || '').trim();
+          const desc =
+            (code && outMap ? outMap.get(code) : '') ||
+            (code && inMap ? inMap.get(code) : '') ||
+            (code ? BUDGET_DESC_BY_CODE.get(code) : '') ||
+            inferDescFromBudgetNumberText(rawBudgetNo);
+          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
+        }
+        const datePL = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'datePL'));
+        const idTrack = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'idTrack'));
+        const receivedFromDisbursedTo = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receivedFromDisbursedTo'));
+        const receipts = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receipts'));
+        const disburse = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'disburse'));
+        const descRaw = String(getWiseUsdDisplayValueForColumn(e, 'description') || '');
+        const strippedDescRaw = descRaw
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const isDisbursement = Number.isFinite(disburseAmt) && disburseAmt > 0;
+        const srcKey = isDisbursement ? sourceEntryKey('wiseUSD', e.id) : '';
+        const match = srcKey
+          ? (ordersBySourceEntryKey.get(srcKey) || reconcileBySourceEntryKey.get(srcKey))
+          : null;
+
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isDisbursement && isOnPaymentOrdersTable && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`)
+          : (isDisbursement && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
+        const description = `${descText}${convertedHtml}`;
+        const issuanceDateBank = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'issuanceDateBank'));
+        const verifiedChecked = getWiseUsdVerified(e) ? 'checked' : '';
+        const verifyDisabled = canVerify ? '' : 'disabled';
+        const checksum = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'checksum'));
+        const bankStatements = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'bankStatements'));
+
+        return `
+          <tr data-wise-usd-id="${id}"${rowClass}>
+            <td>${budgetNo}</td>
+            <td>${datePL}</td>
+            <td>${idTrack}</td>
+            <td class="wiseUsdCol--receivedFrom">${receivedFromDisbursedTo}</td>
+            <td class="num">${receipts}</td>
+            <td class="num">${disburse}</td>
+            <td>${description}</td>
+            <td>${issuanceDateBank}</td>
+            <td class="num">
+              <input type="checkbox" data-wise-usd-verify="1" data-wise-usd-id="${id}" aria-label="Verified" ${verifiedChecked} ${verifyDisabled} />
+            </td>
+            <td class="num">${checksum}</td>
+            <td>${bankStatements}</td>
+            <td class="actions">
+              <button type="button" class="btn btn--editIcon" data-wise-usd-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-wise-usd-action="delete" aria-label="Delete entry" title="${canDeleteRows ? 'Delete' : 'Requires Delete access for wiseUSD.'}" aria-disabled="${deleteAriaDisabled}"${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+            </td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    wiseUsdTbody.innerHTML = html;
+  }
+
+  function updateWiseUsdTotals(entries) {
+    const receiptsEl = document.getElementById('wiseUsdTotalReceipts');
+    const disburseEl = document.getElementById('wiseUsdTotalDisburse');
+    const netEl = document.getElementById('wiseUsdTotalReceiptsMinusDisburse');
+
+    if (!receiptsEl && !disburseEl && !netEl) return;
+
+    let totalReceipts = 0;
+    let totalDisburse = 0;
+    for (const e of entries || []) {
+      totalReceipts += getWiseUsdReceipts(e);
+      totalDisburse += getWiseUsdDisburse(e);
+    }
+
+    const net = totalReceipts - totalDisburse;
+
+    if (receiptsEl) receiptsEl.textContent = formatCurrency(totalReceipts, 'USD');
+    if (disburseEl) disburseEl.textContent = formatCurrency(totalDisburse, 'USD');
+    if (netEl) {
+      netEl.textContent = formatCurrency(net, 'USD');
+      netEl.classList.toggle('is-negative', net < 0);
+    }
+  }
+
+  function updateWiseUsdSortIndicators() {
+    if (!wiseUsdTbody) return;
+    const table = wiseUsdTbody.closest('table');
+    if (!table) return;
+
+    const sortKey = wiseUsdViewState.sortKey;
+    const sortDir = wiseUsdViewState.sortDir === 'desc' ? 'desc' : 'asc';
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) {
+        aria = sortDir === 'desc' ? 'descending' : 'ascending';
+      }
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initWiseUsdColumnSorting() {
+    if (!wiseUsdTbody) return;
+    const table = wiseUsdTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (wiseUsdViewState.sortKey === colKey) {
+        wiseUsdViewState.sortDir = wiseUsdViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        wiseUsdViewState.sortKey = colKey;
+        wiseUsdViewState.sortDir = 'asc';
+      }
+      applyWiseUsdView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateWiseUsdSortIndicators();
+  }
+
+  let currentWiseUsdId = null;
+
+  function getWiseUsdBudgetFlowKindFromAmountStrings(receiptsRaw, disburseRaw) {
+    const r = String(receiptsRaw || '').trim();
+    const d = String(disburseRaw || '').trim();
+    const receiptsNum = r === '' ? null : Number(r);
+    const disburseNum = d === '' ? null : Number(d);
+
+    const receiptsHas = Number.isFinite(receiptsNum) && receiptsNum > 0;
+    const disburseHas = Number.isFinite(disburseNum) && disburseNum > 0;
+
+    if (receiptsHas && !disburseHas) return 'in';
+    if (disburseHas && !receiptsHas) return 'out';
+    if (!receiptsHas && !disburseHas) return null;
+    return 'both';
+  }
+
+  function syncWiseUsdBudgetNoSelect(selectEl, receiptsEl, disburseEl, initialBudgetNo) {
+    if (!selectEl) return;
+
+    const kind = getWiseUsdBudgetFlowKindFromAmountStrings(receiptsEl && receiptsEl.value, disburseEl && disburseEl.value);
+    const activeYear = getActiveBudgetYear();
+
+    // Preserve current selection when possible.
+    const prevValue = String(selectEl.value || '').trim();
+    const preferred = prevValue || String(initialBudgetNo || '').trim();
+
+    // Reset options.
+    selectEl.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+
+    if (kind === 'both') {
+      placeholder.textContent = 'Enter only one: Receipts or Disburse';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      selectEl.appendChild(placeholder);
+      selectEl.disabled = true;
+      return;
+    }
+
+    if (!kind) {
+      placeholder.textContent = 'Enter Receipts or Disburse first';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      selectEl.appendChild(placeholder);
+      selectEl.disabled = true;
+      return;
+    }
+
+    placeholder.textContent = 'Select a Budget #';
+    selectEl.appendChild(placeholder);
+    selectEl.disabled = false;
+
+    const accounts = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
+    const items = Array.isArray(accounts) ? accounts : [];
+
+    if (items.length === 0) {
+      const none = document.createElement('option');
+      none.value = '__none__';
+      none.disabled = true;
+      none.textContent = kind === 'in' ? 'No IN accounts found in the active budget' : 'No OUT accounts found in the active budget';
+      selectEl.appendChild(none);
+      selectEl.value = '';
+      return;
+    }
+
+    const codes = [];
+    for (const item of items) {
+      const code = String(kind === 'in' ? item && item.inCode : item && item.outCode).trim();
+      if (!/^\d{4}$/.test(code)) continue;
+      const desc = String(item && item.desc ? item.desc : '').trim();
+      codes.push({ code, desc });
+    }
+
+    codes.sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true, sensitivity: 'base' }));
+
+    const allowed = new Set();
+    for (const { code, desc } of codes) {
+      allowed.add(code);
+      const opt = document.createElement('option');
+      opt.value = code;
+      opt.textContent = desc ? `${code} - ${desc}` : code;
+      selectEl.appendChild(opt);
+    }
+
+    if (preferred && allowed.has(preferred)) selectEl.value = preferred;
+    else selectEl.value = '';
+  }
+
+  function openWiseUsdModal(entry, year) {
+    if (!wiseUsdModal || !wiseUsdModalBody) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getWiseUsdYear();
+    currentWiseUsdId = entry && entry.id ? entry.id : null;
+
+    const titleEl = wiseUsdModal.querySelector('#wiseUsdModalTitle');
+    const subheadEl = wiseUsdModal.querySelector('#wiseUsdModalSubhead');
+    if (titleEl) titleEl.textContent = currentWiseUsdId ? 'wiseUSD (Edit)' : 'wiseUSD (New)';
+    if (subheadEl) subheadEl.textContent = `${y} wiseUSD`;
+
+    const budgetNoRaw = entry && entry.budgetNo ? String(entry.budgetNo).trim() : '';
+    const safeDatePL = escapeHtml(entry && (entry.datePL || entry.date) ? (entry.datePL || entry.date) : '');
+    const safeReceivedFrom = escapeHtml(entry && (entry.receivedFromDisbursedTo || entry.party) ? (entry.receivedFromDisbursedTo || entry.party) : '');
+    const safeDescription = escapeHtml(entry && (entry.description || entry.reference) ? (entry.description || entry.reference) : '');
+    const safeIssuanceDateBank = escapeHtml(entry && entry.issuanceDateBank ? entry.issuanceDateBank : '');
+    const canVerify = canIncomeEdit(getCurrentUser());
+    const verifiedChecked = getWiseUsdVerified(entry) ? 'checked' : '';
+    const verifiedDisabled = canVerify ? '' : 'disabled';
+
+    const checksum = entry && entry.checksum !== null && entry.checksum !== undefined && entry.checksum !== '' ? Number(entry.checksum) : null;
+    const safeChecksum = Number.isFinite(checksum) ? escapeHtml(String(checksum)) : '';
+
+    const safeBankStatements = escapeHtml(entry && entry.bankStatements ? entry.bankStatements : '');
+    const safeRemarks = escapeHtml(entry && entry.remarks ? entry.remarks : '');
+
+    const receipts = entry && entry.receipts !== null && entry.receipts !== undefined && entry.receipts !== '' ? Number(entry.receipts) : null;
+    const disburse = entry && entry.disburse !== null && entry.disburse !== undefined && entry.disburse !== '' ? Number(entry.disburse) : null;
+    const safeReceipts = Number.isFinite(receipts) && receipts > 0 ? escapeHtml(String(receipts)) : '';
+    const safeDisburse = Number.isFinite(disburse) && disburse > 0 ? escapeHtml(String(disburse)) : '';
+
+    wiseUsdModalBody.innerHTML = `
+      <form id="wiseUsdModalForm" novalidate>
+        <div class="grid">
+          <div class="field">
+            <label for="wiseUsdBudgetNo">Budget #</label>
+            <select id="wiseUsdBudgetNo" name="wiseUsdBudgetNo"></select>
+            <div class="error" id="error-wiseUsdBudgetNo" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="wiseUsdDatePL">ACTION DATE<span class="req" aria-hidden="true">*</span></label>
+            <input id="wiseUsdDatePL" name="wiseUsdDatePL" type="date" required value="${safeDatePL}" />
+            <div class="error" id="error-wiseUsdDatePL" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field field--span2">
+            <label for="wiseUsdReceivedFrom">RECEIVED FROM - DISBURSED TO:<span class="req" aria-hidden="true">*</span></label>
+            <input id="wiseUsdReceivedFrom" name="wiseUsdReceivedFrom" type="text" autocomplete="off" required value="${safeReceivedFrom}" />
+            <div class="error" id="error-wiseUsdReceivedFrom" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="wiseUsdReceipts">RECEIPTS $<span class="req" aria-hidden="true">*</span></label>
+            <input id="wiseUsdReceipts" name="wiseUsdReceipts" type="number" inputmode="decimal" step="0.01" min="0" value="${safeReceipts}" />
+            <div class="error" id="error-wiseUsdReceipts" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="wiseUsdDisburse">DISBURSE $<span class="req" aria-hidden="true">*</span></label>
+            <input id="wiseUsdDisburse" name="wiseUsdDisburse" type="number" inputmode="decimal" step="0.01" min="0" value="${safeDisburse}" />
+            <div class="error" id="error-wiseUsdDisburse" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field field--span2">
+            <label for="wiseUsdDescription">DESCRIPTION<span class="req" aria-hidden="true">*</span></label>
+            <textarea id="wiseUsdDescription" name="wiseUsdDescription" rows="3" required>${safeDescription}</textarea>
+            <div class="error" id="error-wiseUsdDescription" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="wiseUsdIssuanceDateBank">Issuance Date Bank</label>
+            <input id="wiseUsdIssuanceDateBank" name="wiseUsdIssuanceDateBank" type="date" value="${safeIssuanceDateBank}" />
+            <div class="error" id="error-wiseUsdIssuanceDateBank" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="wiseUsdVerified">Verified</label>
+            <div>
+              <input id="wiseUsdVerified" name="wiseUsdVerified" type="checkbox" ${verifiedChecked} ${verifiedDisabled} />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="wiseUsdChecksum">Checksum</label>
+            <input id="wiseUsdChecksum" name="wiseUsdChecksum" type="number" inputmode="decimal" step="0.01" value="${safeChecksum}" />
+            <div class="error" id="error-wiseUsdChecksum" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="wiseUsdBankStatements">Bank Statements</label>
+            <input id="wiseUsdBankStatements" name="wiseUsdBankStatements" type="text" autocomplete="off" value="${safeBankStatements}" />
+            <div class="error" id="error-wiseUsdBankStatements" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field field--span2">
+            <label for="wiseUsdRemarks">Remarks</label>
+            <textarea id="wiseUsdRemarks" name="wiseUsdRemarks" rows="2">${safeRemarks}</textarea>
+            <div class="error" id="error-wiseUsdRemarks" role="alert" aria-live="polite"></div>
+          </div>
+        </div>
+      </form>
+    `.trim();
+
+    wiseUsdModal.classList.add('is-open');
+    wiseUsdModal.setAttribute('aria-hidden', 'false');
+
+    const budgetNoEl = wiseUsdModalBody.querySelector('#wiseUsdBudgetNo');
+    const receiptsEl = wiseUsdModalBody.querySelector('#wiseUsdReceipts');
+    const disburseEl = wiseUsdModalBody.querySelector('#wiseUsdDisburse');
+    syncWiseUsdBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw);
+    if (receiptsEl) receiptsEl.addEventListener('input', () => syncWiseUsdBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw));
+    if (disburseEl) disburseEl.addEventListener('input', () => syncWiseUsdBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw));
+
+    const focusTarget = wiseUsdModalBody.querySelector('#wiseUsdDatePL');
+    if (focusTarget && focusTarget.focus) focusTarget.focus();
+  }
+
+  function closeWiseUsdModal() {
+    if (!wiseUsdModal || !wiseUsdModalBody) return;
+    wiseUsdModal.classList.remove('is-open');
+    wiseUsdModal.setAttribute('aria-hidden', 'true');
+    wiseUsdModalBody.innerHTML = '';
+    currentWiseUsdId = null;
+  }
+
+  function clearWiseUsdModalErrors() {
+    if (!wiseUsdModalBody) return;
+    const errors = Array.from(wiseUsdModalBody.querySelectorAll('.error'));
+    for (const el of errors) el.textContent = '';
+  }
+
+  function showWiseUsdModalErrors(errors) {
+    if (!wiseUsdModalBody || !errors) return;
+    const map = {
+      budgetNo: '#error-wiseUsdBudgetNo',
+      datePL: '#error-wiseUsdDatePL',
+      receivedFromDisbursedTo: '#error-wiseUsdReceivedFrom',
+      receipts: '#error-wiseUsdReceipts',
+      disburse: '#error-wiseUsdDisburse',
+      description: '#error-wiseUsdDescription',
+      issuanceDateBank: '#error-wiseUsdIssuanceDateBank',
+      checksum: '#error-wiseUsdChecksum',
+      bankStatements: '#error-wiseUsdBankStatements',
+      remarks: '#error-wiseUsdRemarks',
+    };
+    for (const [k, sel] of Object.entries(map)) {
+      const el = wiseUsdModalBody.querySelector(sel);
+      if (el) el.textContent = errors[k] || '';
+    }
+  }
+
+  function validateWiseUsdModalValues() {
+    if (!wiseUsdModalBody) return { ok: false };
+    const budgetNoEl = wiseUsdModalBody.querySelector('#wiseUsdBudgetNo');
+    const datePLEl = wiseUsdModalBody.querySelector('#wiseUsdDatePL');
+    const receivedFromEl = wiseUsdModalBody.querySelector('#wiseUsdReceivedFrom');
+    const receiptsEl = wiseUsdModalBody.querySelector('#wiseUsdReceipts');
+    const disburseEl = wiseUsdModalBody.querySelector('#wiseUsdDisburse');
+    const descriptionEl = wiseUsdModalBody.querySelector('#wiseUsdDescription');
+    const issuanceDateBankEl = wiseUsdModalBody.querySelector('#wiseUsdIssuanceDateBank');
+    const verifiedEl = wiseUsdModalBody.querySelector('#wiseUsdVerified');
+    const checksumEl = wiseUsdModalBody.querySelector('#wiseUsdChecksum');
+    const bankStatementsEl = wiseUsdModalBody.querySelector('#wiseUsdBankStatements');
+    const remarksEl = wiseUsdModalBody.querySelector('#wiseUsdRemarks');
+
+    const values = {
+      budgetNo: budgetNoEl ? String(budgetNoEl.value || '').trim() : '',
+      datePL: datePLEl ? String(datePLEl.value || '').trim() : '',
+      receivedFromDisbursedTo: receivedFromEl ? String(receivedFromEl.value || '').trim() : '',
+      receipts: receiptsEl ? String(receiptsEl.value || '').trim() : '',
+      disburse: disburseEl ? String(disburseEl.value || '').trim() : '',
+      description: descriptionEl ? String(descriptionEl.value || '').trim() : '',
+      issuanceDateBank: issuanceDateBankEl ? String(issuanceDateBankEl.value || '').trim() : '',
+      verified: verifiedEl ? Boolean(verifiedEl.checked) : false,
+      checksum: checksumEl ? String(checksumEl.value || '').trim() : '',
+      bankStatements: bankStatementsEl ? String(bankStatementsEl.value || '').trim() : '',
+      remarks: remarksEl ? String(remarksEl.value || '').trim() : '',
+    };
+
+    const errors = {};
+    if (!values.datePL) errors.datePL = 'This field is required.';
+    if (!values.receivedFromDisbursedTo) errors.receivedFromDisbursedTo = 'This field is required.';
+    if (!values.description) errors.description = 'This field is required.';
+
+    const receiptsNum = values.receipts === '' ? null : Number(values.receipts);
+    const disburseNum = values.disburse === '' ? null : Number(values.disburse);
+    const checksumNum = values.checksum === '' ? null : Number(values.checksum);
+
+    if (receiptsNum !== null && (!Number.isFinite(receiptsNum) || receiptsNum < 0)) errors.receipts = 'Enter a valid amount.';
+    if (disburseNum !== null && (!Number.isFinite(disburseNum) || disburseNum < 0)) errors.disburse = 'Enter a valid amount.';
+    if (checksumNum !== null && !Number.isFinite(checksumNum)) errors.checksum = 'Enter a valid amount.';
+
+    const receiptsHas = Number.isFinite(receiptsNum) && receiptsNum > 0;
+    const disburseHas = Number.isFinite(disburseNum) && disburseNum > 0;
+    if (!receiptsHas && !disburseHas) {
+      errors.receipts = 'Enter a Receipts or Disburse amount.';
+      errors.disburse = 'Enter a Receipts or Disburse amount.';
+    }
+    if (receiptsHas && disburseHas) {
+      errors.receipts = 'Enter only one: Receipts or Disburse.';
+      errors.disburse = 'Enter only one: Receipts or Disburse.';
+    }
+
+    const kind = receiptsHas && !disburseHas ? 'in' : disburseHas && !receiptsHas ? 'out' : null;
+    if (kind && values.budgetNo) {
+      const activeYear = getActiveBudgetYear();
+      const allowed = new Set();
+      const items = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
+      for (const item of items || []) {
+        const code = String(kind === 'in' ? item && item.inCode : item && item.outCode).trim();
+        if (/^\d{4}$/.test(code)) allowed.add(code);
+      }
+
+      if (!/^\d{4}$/.test(values.budgetNo)) {
+        errors.budgetNo = 'Select a valid budget number.';
+      } else if (allowed.size > 0 && !allowed.has(values.budgetNo)) {
+        errors.budgetNo = kind === 'in' ? 'Select an IN budget number from the active budget.' : 'Select an OUT budget number from the active budget.';
+      }
+    }
+
+    if (Object.keys(errors).length > 0) return { ok: false, errors };
+    return {
+      ok: true,
+      values: {
+        budgetNo: values.budgetNo,
+        datePL: values.datePL,
+        receivedFromDisbursedTo: values.receivedFromDisbursedTo,
+        receipts: receiptsHas ? receiptsNum : null,
+        disburse: disburseHas ? disburseNum : null,
+        description: values.description,
+        issuanceDateBank: values.issuanceDateBank,
+        verified: values.verified ? 1 : 0,
+        checksum: checksumNum,
+        bankStatements: values.bankStatements,
+        remarks: values.remarks,
+      },
+    };
+  }
+
+  function applyWiseUsdView() {
+    if (!wiseUsdTbody || !wiseUsdEmptyState) return;
+    ensureWiseUsdDefaultEmptyText();
+
+    const year = getWiseUsdYear();
+    const all = loadWiseUsd(year);
+    const filtered = filterWiseUsdForView(all, wiseUsdViewState.globalFilter);
+    const sorted = sortWiseUsdForView(filtered, wiseUsdViewState.sortKey, wiseUsdViewState.sortDir);
+
+    if (normalizeTextForSearch(wiseUsdViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
+      wiseUsdEmptyState.textContent = 'No wiseUSD entries match your search.';
+    } else {
+      wiseUsdEmptyState.textContent = wiseUsdViewState.defaultEmptyText;
+    }
+
+    wiseUsdEmptyState.hidden = sorted.length > 0;
+    renderWiseUsdRows(sorted);
+    updateWiseUsdTotals(sorted);
+    updateWiseUsdSortIndicators();
+  }
+
 function initWiseUsdListPage() {
     if (!wiseUsdTbody || !wiseUsdEmptyState) return;
     const year = getWiseUsdYear();

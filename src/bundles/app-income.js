@@ -10638,6 +10638,496 @@
 
   
   // [bundle-strip:income-remove-gs-ledger-page] removed in page-specific build.
+const INCOME_COL_TYPES = {
+    date: 'date',
+    remitter: 'text',
+    budgetNumber: 'text',
+    euro: 'number',
+    description: 'text',
+  };
+
+  const incomeViewState = {
+    globalFilter: '',
+    sortKey: 'date',
+    sortDir: 'desc',
+    defaultEmptyText: null,
+  };
+
+  function ensureIncomeDefaultEmptyText() {
+    if (!incomeEmptyState) return;
+    if (incomeViewState.defaultEmptyText !== null) return;
+    incomeViewState.defaultEmptyText = incomeEmptyState.textContent || 'No income entries yet.';
+  }
+
+  function getIncomeDisplayValueForColumn(entry, colKey, year) {
+    if (!entry) return '';
+    switch (colKey) {
+      case 'date':
+        return formatDate(entry.date);
+      case 'remitter':
+        return entry.remitter || '';
+      case 'budgetNumber':
+        return extractInCodeFromBudgetNumberText(entry.budgetNumber);
+      case 'euro':
+        return formatCurrency(entry.euro, 'EUR');
+      case 'description':
+        return entry.description || '';
+      default:
+        return '';
+    }
+  }
+
+  function getIncomeSortValueForColumn(entry, colKey, colType, year) {
+    if (!entry) return null;
+    if (colType === 'number') {
+      const raw = entry.euro;
+      const num = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+      return Number.isFinite(num) ? num : null;
+    }
+    if (colType === 'date') {
+      const raw = String(entry.date || '').trim();
+      return raw ? raw : null;
+    }
+    return normalizeTextForSearch(getIncomeDisplayValueForColumn(entry, colKey, year));
+  }
+
+  function sortIncomeForView(entries, sortKey, sortDir, year) {
+    const dir = sortDir === 'desc' ? -1 : 1;
+    if (!sortKey) {
+      return [...(entries || [])].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    }
+
+    const colType = INCOME_COL_TYPES[sortKey] || 'text';
+    const withIndex = (entries || []).map((entry, index) => ({ entry, index }));
+    withIndex.sort((a, b) => {
+      const av = getIncomeSortValueForColumn(a.entry, sortKey, colType, year);
+      const bv = getIncomeSortValueForColumn(b.entry, sortKey, colType, year);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'number') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+    return withIndex.map((x) => x.entry);
+  }
+
+  function filterIncomeForView(entries, globalFilter, year) {
+    const needle = normalizeTextForSearch(globalFilter);
+    if (!needle) return entries || [];
+
+    const cols = Object.keys(INCOME_COL_TYPES);
+    return (entries || []).filter((e) => {
+      return cols.some((colKey) => normalizeTextForSearch(getIncomeDisplayValueForColumn(e, colKey, year)).includes(needle));
+    });
+  }
+
+  function renderIncomeRows(entries, year) {
+    if (!incomeTbody) return;
+
+    const currentUser = getCurrentUser();
+    const canEditIncome = Boolean(currentUser && canWriteOrCreate(currentUser, 'income_bankeur'));
+    const canDeleteIncome = Boolean(currentUser && canDelete(currentUser, 'income_bankeur'));
+    const editDisabledAttr = '';
+    const editAriaDisabled = canEditIncome ? 'false' : 'true';
+    const editTooltipAttr = canEditIncome ? '' : ' data-tooltip="Edit and create access required for Income."';
+    const deleteDisabledAttr = '';
+    const deleteAriaDisabled = canDeleteIncome ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteIncome ? '' : ' data-tooltip="Requires Delete access for Income."';
+
+    const ordersBySourceEntryId = new Map();
+    const ordersByPoCanon = new Map();
+    const orderIds = new Set();
+    {
+      const orders = loadOrders(year);
+      for (const o of orders || []) {
+        if (!o || typeof o !== 'object') continue;
+
+        const oid = String(o.id || '').trim();
+        if (oid) orderIds.add(oid);
+
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
+
+        const sourceEntryId = String(o.sourceEntryId || '').trim();
+        if (!sourceEntryId) continue;
+        if (!ordersBySourceEntryId.has(sourceEntryId)) {
+          ordersBySourceEntryId.set(sourceEntryId, o);
+          continue;
+        }
+        // Prefer an order that has a PO number assigned.
+        const existing = ordersBySourceEntryId.get(sourceEntryId);
+        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
+        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
+        if (!existingPoNo && nextPoNo) ordersBySourceEntryId.set(sourceEntryId, o);
+      }
+    }
+
+    const reconcileBySourceEntryId = new Map();
+    const reconcileByPoCanon = new Map();
+    {
+      const rec = loadReconciliationOrders(year);
+      for (const o of rec || []) {
+        if (!o || typeof o !== 'object') continue;
+        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
+        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
+
+        const sourceEntryId = String(o.sourceEntryId || '').trim();
+        if (!sourceEntryId) continue;
+        if (!reconcileBySourceEntryId.has(sourceEntryId)) reconcileBySourceEntryId.set(sourceEntryId, o);
+      }
+    }
+
+    const rowsHtml = (entries || [])
+      .map((e) => {
+        const id = escapeHtml(e.id);
+        const isMissingBudget = String(e && e.budgetNumber ? e.budgetNumber : '').trim() === '';
+        const rowClass = isMissingBudget ? ' class="incomeRow--missingBudget"' : '';
+        const date = escapeHtml(getIncomeDisplayValueForColumn(e, 'date', year));
+        const remitter = escapeHtml(getIncomeDisplayValueForColumn(e, 'remitter', year));
+        const budgetCode = getIncomeDisplayValueForColumn(e, 'budgetNumber', year);
+        const budget = renderInBudgetNumberHtml(budgetCode, year);
+        const euro = escapeHtml(getIncomeDisplayValueForColumn(e, 'euro', year));
+        const descRaw = String(e && e.description ? e.description : '');
+        const strippedDescRaw = descRaw
+          // Avoid duplicating legacy/free-typed converted markers.
+          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
+          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
+          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
+          .trim();
+        const descText = escapeHtml(strippedDescRaw);
+
+        const euroRaw = Number(e && e.euro);
+        const isNegative = Number.isFinite(euroRaw) && euroRaw < 0;
+        const srcEntryId = isNegative ? `inc:${String(e.id || '')}` : '';
+        const match = srcEntryId
+          ? (ordersBySourceEntryId.get(srcEntryId) || reconcileBySourceEntryId.get(srcEntryId))
+          : null;
+
+        // Determine the PO number to display/link.
+        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
+        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
+        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
+        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
+
+        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
+        const poCanon = canonicalizePaymentOrderNo(poCandidate);
+        const poOrder = poCanon
+          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
+          : null;
+
+        const orderForLink = match || poOrder;
+        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
+        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
+        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
+        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
+        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
+        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
+
+        const convertedHtml = (isNegative && isOnPaymentOrdersTable && poDisplay)
+          ? (orderIdForLink
+            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
+            : ` (converted to ${poDisplay})`)
+          : (isNegative && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
+
+        const desc = `${descText}${convertedHtml}`;
+
+        return `
+          <tr${rowClass} data-income-id="${id}">
+            <td>${date}</td>
+            <td>${remitter}</td>
+            <td>${budget}</td>
+            <td class="num">${euro}</td>
+            <td>${desc}</td>
+            <td class="actions">
+              <button type="button" class="btn btn--editIcon" data-income-action="edit" aria-label="Edit" title="${canEditIncome ? 'Edit' : 'Read-only access for Income.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-income-action="delete" aria-label="Delete entry" title="${canDeleteIncome ? 'Delete' : 'Requires Delete access for Income.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L6 5a.5.5 0 0 1 .471-.53zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 0 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg></button>
+            </td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    incomeTbody.innerHTML = rowsHtml;
+  }
+
+  function updateIncomeSortIndicators() {
+    if (!incomeTbody) return;
+    const table = incomeTbody.closest('table');
+    if (!table) return;
+
+    const sortKey = incomeViewState.sortKey;
+    const sortDir = incomeViewState.sortDir === 'desc' ? 'desc' : 'asc';
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) {
+        aria = sortDir === 'desc' ? 'descending' : 'ascending';
+      }
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initIncomeColumnSorting() {
+    if (!incomeTbody) return;
+    const table = incomeTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (incomeViewState.sortKey === colKey) {
+        incomeViewState.sortDir = incomeViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        incomeViewState.sortKey = colKey;
+        incomeViewState.sortDir = 'asc';
+      }
+      applyIncomeView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateIncomeSortIndicators();
+  }
+
+  function populateIncomeBudgetSelect(select, year) {
+    if (!select) return;
+
+    const prev = String(select.value || '').trim();
+    select.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.selected = true;
+    placeholder.textContent = 'Select a budget number (restricted)…';
+    select.appendChild(placeholder);
+
+    const inAccounts = readInAccountsFromBudgetYear(year);
+    if (inAccounts.length === 0) {
+      const none = document.createElement('option');
+      none.value = '__none__';
+      none.disabled = true;
+      none.textContent = 'No IN accounts found in the active budget';
+      select.appendChild(none);
+      return;
+    }
+
+    for (const item of inAccounts) {
+      const opt = document.createElement('option');
+      opt.value = item.inCode;
+      opt.textContent = item.desc ? `${item.inCode} - ${item.desc}` : item.inCode;
+      select.appendChild(opt);
+    }
+
+    if (prev && inAccounts.some((x) => x.inCode === prev)) {
+      select.value = prev;
+    }
+  }
+
+  let currentIncomeId = null;
+
+  function openIncomeModal(entry, year) {
+    if (!incomeModal || !incomeModalBody) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    currentIncomeId = entry && entry.id ? entry.id : null;
+
+    // Backfill/persist an initial timeline entry for older records.
+    let entryForView = entry;
+    if (currentIncomeId && entryForView && (!Array.isArray(entryForView.timeline) || entryForView.timeline.length === 0)) {
+      const seeded = ensureIncomeTimeline(entryForView);
+      entryForView = { ...entryForView, timeline: seeded };
+      upsertIncomeEntry(entryForView, y);
+    }
+
+    const titleEl = incomeModal.querySelector('#incomeModalTitle');
+    const subheadEl = incomeModal.querySelector('#incomeModalSubhead');
+    if (titleEl) titleEl.textContent = currentIncomeId ? 'Income (Edit)' : 'Income (New)';
+    if (subheadEl) subheadEl.textContent = `${y} Income`;
+
+    const safeDate = escapeHtml(entryForView && entryForView.date ? entryForView.date : '');
+    const safeRemitter = escapeHtml(entryForView && entryForView.remitter ? entryForView.remitter : '');
+    const safeEuro =
+      entryForView && entryForView.euro !== null && entryForView.euro !== undefined && entryForView.euro !== '' ? escapeHtml(String(entryForView.euro)) : '';
+    const safeDesc = escapeHtml(entryForView && entryForView.description ? entryForView.description : '');
+    const safeBudget = escapeHtml(entryForView && entryForView.budgetNumber ? entryForView.budgetNumber : '');
+
+    const timelineHtml = currentIncomeId && entryForView ? renderIncomeTimelineGraph(entryForView) : '';
+
+    incomeModalBody.innerHTML = `
+      <form id="incomeModalForm" novalidate>
+        <div class="grid">
+          <div class="field">
+            <label for="incomeDate">Transaction Date<span class="req" aria-hidden="true">*</span></label>
+            <input id="incomeDate" name="incomeDate" type="date" required value="${safeDate}" />
+            <div class="error" id="error-incomeDate" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="incomeEuro">Euro (€)<span class="req" aria-hidden="true">*</span></label>
+            <input id="incomeEuro" name="incomeEuro" type="number" inputmode="decimal" step="0.01" required value="${safeEuro}" />
+            <div class="error" id="error-incomeEuro" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field">
+            <label for="incomeRemitter">Remitter<span class="req" aria-hidden="true">*</span></label>
+            <input id="incomeRemitter" name="incomeRemitter" type="text" autocomplete="off" required value="${safeRemitter}" />
+            <div class="error" id="error-incomeRemitter" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field field--span2">
+            <label for="incomeBudgetNumber">Budget Nr.</label>
+            <select id="incomeBudgetNumber" name="incomeBudgetNumber">
+              <option value="" selected>Select a budget number (restricted)…</option>
+            </select>
+            <div class="error" id="error-incomeBudgetNumber" role="alert" aria-live="polite"></div>
+          </div>
+
+          <div class="field field--span2">
+            <label for="incomeDescription">Description<span class="req" aria-hidden="true">*</span></label>
+            <textarea id="incomeDescription" name="incomeDescription" rows="3" required>${safeDesc}</textarea>
+            <div class="error" id="error-incomeDescription" role="alert" aria-live="polite"></div>
+          </div>
+        </div>
+      </form>
+      ${timelineHtml}
+    `.trim();
+
+    const select = incomeModalBody.querySelector('#incomeBudgetNumber');
+    if (select) {
+      populateIncomeBudgetSelect(select, y);
+      if (safeBudget) select.value = safeBudget;
+    }
+
+    incomeModal.classList.add('is-open');
+    incomeModal.setAttribute('aria-hidden', 'false');
+
+    const focusTarget = incomeModalBody.querySelector('#incomeDate');
+    if (focusTarget && focusTarget.focus) focusTarget.focus();
+  }
+
+  function closeIncomeModal() {
+    if (!incomeModal || !incomeModalBody) return;
+    incomeModal.classList.remove('is-open');
+    incomeModal.setAttribute('aria-hidden', 'true');
+    incomeModalBody.innerHTML = '';
+    currentIncomeId = null;
+  }
+
+  function clearIncomeModalErrors() {
+    if (!incomeModalBody) return;
+    const errors = Array.from(incomeModalBody.querySelectorAll('.error'));
+    for (const el of errors) el.textContent = '';
+  }
+
+  function showIncomeModalErrors(errors) {
+    if (!incomeModalBody || !errors) return;
+    const map = {
+      date: '#error-incomeDate',
+      euro: '#error-incomeEuro',
+      remitter: '#error-incomeRemitter',
+      budgetNumber: '#error-incomeBudgetNumber',
+      description: '#error-incomeDescription',
+    };
+    for (const [k, sel] of Object.entries(map)) {
+      const el = incomeModalBody.querySelector(sel);
+      if (el) el.textContent = errors[k] || '';
+    }
+  }
+
+  function validateIncomeModalValues() {
+    if (!incomeModalBody) return { ok: false };
+    const dateEl = incomeModalBody.querySelector('#incomeDate');
+    const euroEl = incomeModalBody.querySelector('#incomeEuro');
+    const remitterEl = incomeModalBody.querySelector('#incomeRemitter');
+    const budgetEl = incomeModalBody.querySelector('#incomeBudgetNumber');
+    const descEl = incomeModalBody.querySelector('#incomeDescription');
+
+    const values = {
+      date: dateEl ? String(dateEl.value || '').trim() : '',
+      euro: euroEl ? String(euroEl.value || '').trim() : '',
+      remitter: remitterEl ? String(remitterEl.value || '').trim() : '',
+      budgetNumber: budgetEl ? String(budgetEl.value || '').trim() : '',
+      description: descEl ? String(descEl.value || '').trim() : '',
+    };
+
+    const errors = {};
+    if (!values.date) errors.date = 'This field is required.';
+    if (!values.remitter) errors.remitter = 'This field is required.';
+    if (!values.description) errors.description = 'This field is required.';
+
+    const euroNum = Number(values.euro);
+    if (String(values.euro || '').trim() === '') errors.euro = 'This field is required.';
+    else if (!Number.isFinite(euroNum)) errors.euro = 'Enter a valid amount.';
+
+    if (Object.keys(errors).length > 0) return { ok: false, errors };
+    return {
+      ok: true,
+      values: {
+        date: values.date,
+        remitter: values.remitter,
+        budgetNumber: values.budgetNumber,
+        euro: euroNum,
+        description: values.description,
+      },
+    };
+  }
+
+  function applyIncomeView() {
+    if (!incomeTbody || !incomeEmptyState) return;
+    ensureIncomeDefaultEmptyText();
+
+    const year = getActiveBudgetYear();
+    const all = loadIncome(year);
+    const filtered = filterIncomeForView(all, incomeViewState.globalFilter, year);
+    const sorted = sortIncomeForView(filtered, incomeViewState.sortKey, incomeViewState.sortDir, year);
+
+    if (normalizeTextForSearch(incomeViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
+      incomeEmptyState.textContent = 'No income entries match your search.';
+    } else {
+      incomeEmptyState.textContent = incomeViewState.defaultEmptyText;
+    }
+
+    incomeEmptyState.hidden = sorted.length > 0;
+    renderIncomeRows(sorted, year);
+    updateIncomeTotals(sorted);
+    updateIncomeSortIndicators();
+  }
+
+  function updateIncomeTotals(entries) {
+    const totalEuroEl = document.getElementById('incomeTotalEuro');
+    if (!totalEuroEl) return;
+
+    let total = 0;
+    for (const e of entries || []) {
+      const n = Number(e && e.euro);
+      if (Number.isFinite(n)) total += n;
+    }
+    totalEuroEl.textContent = formatCurrency(total, 'EUR');
+  }
+
 function initIncomeListPage() {
     if (!incomeTbody || !incomeEmptyState) return;
     const year = getActiveBudgetYear();

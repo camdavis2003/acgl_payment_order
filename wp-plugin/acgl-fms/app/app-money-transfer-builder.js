@@ -12021,6 +12021,20 @@
     syncBuilderDateSubhead();
     applyAppTabTitle();
 
+    const validateMoneyTransferDate =
+      typeof globalThis.validateMoneyTransferDate === 'function'
+        ? globalThis.validateMoneyTransferDate
+        : (yearValue, mtDateValue) => {
+            const y = Number.isInteger(Number(yearValue)) ? Number(yearValue) : getActiveBudgetYear();
+            const d = String(mtDateValue || '').trim();
+            if (!isIsoDateOnly(d)) return 'MT Date is required.';
+
+            const budgetStart = getDerivedBudgetCreatedDateOnlyForYear(y);
+            if (isIsoDateOnly(budgetStart) && d < budgetStart) return `MT Date must be on or after ${budgetStart}.`;
+
+            return '';
+          };
+
     function syncBuilderDateControlAndValidation() {
       const mtDate = String(mtBuilderViewState.mtDate || '').trim();
 

@@ -19,6 +19,7 @@ const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
 const OUT_BANKING = path.join(ROOT, 'app-banking.js');
 const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
 const OUT_OPERATIONS = path.join(ROOT, 'app-operations.js');
+const OUT_BUDGET = path.join(ROOT, 'app-budget.js');
 
 const M_RECON = '// ---- Payment Orders Reconciliation (year-scoped) ----';
 const M_SETTINGS = '// ---- Roles / Users (settings page) ----';
@@ -207,6 +208,16 @@ function buildOperationsBundle(source) {
   return banner('operations') + out;
 }
 
+function buildBudgetBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'budget-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'budget-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'budget-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'budget-remove-money-transfers');
+  out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'budget-remove-archive-and-backup');
+  return banner('budget') + out;
+}
+
 function main() {
   const source = fs.readFileSync(SOURCE, 'utf8');
 
@@ -217,6 +228,7 @@ function main() {
   const banking = buildBankingBundle(source);
   const transfers = buildTransfersBundle(source);
   const operations = buildOperationsBundle(source);
+  const budget = buildBudgetBundle(source);
 
   writeBundle(OUT_REQUEST, request);
   writeBundle(OUT_WORKFLOWS, workflows);
@@ -225,6 +237,7 @@ function main() {
   writeBundle(OUT_BANKING, banking);
   writeBundle(OUT_TRANSFERS, transfers);
   writeBundle(OUT_OPERATIONS, operations);
+  writeBundle(OUT_BUDGET, budget);
 
   console.log('Page bundles generated successfully.');
 }

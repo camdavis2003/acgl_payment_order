@@ -44,6 +44,7 @@ const M_WISE_USD_INIT_FN = 'function initWiseUsdListPage() {';
 const M_BUDGET_EDITOR_FN = 'function initBudgetEditor() {';
 const M_BUDGET_DASHBOARD_FN = 'function initBudgetDashboard() {';
 const M_ARCHIVE_FN = 'function initArchivePage() {';
+const M_EVENT_WIRING = '// ---- Event wiring (only when the elements exist on the page) ----';
 const M_CATCH = '\n})().catch((err) => {';
 const M_REQUEST_BLOCK = '\n  if (form) {';
 const M_KEYDOWN = "\n  document.addEventListener('keydown', (e) => {";
@@ -80,6 +81,10 @@ function insertBeforeMarker(text, marker, insertText, label) {
   const before = text.slice(0, idx);
   const after = text.slice(idx);
   return `${before}${insertText}${after}`;
+}
+
+function stripBackupSection(text, label) {
+  return removeBetween(text, M_BACKUP_FN, M_EVENT_WIRING, label);
 }
 
 function banner(name) {
@@ -192,6 +197,7 @@ function buildIncomeBundle(source) {
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'income-remove-money-transfers');
   out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_INCOME_INIT_FN, 'income-remove-gs-ledger-page');
   out = removeBetween(out, M_WISE_EUR_INIT_FN, M_BUDGET_EDITOR_FN, 'income-remove-wise-pages');
+  out = stripBackupSection(out, 'income-remove-backups');
   return banner('income') + out;
 }
 
@@ -204,6 +210,7 @@ function buildGsLedgerBundle(source) {
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'gs-ledger-remove-money-transfers');
   out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'gs-ledger-remove-income-page');
   out = removeBetween(out, M_WISE_EUR_INIT_FN, M_BUDGET_EDITOR_FN, 'gs-ledger-remove-wise-pages');
+  out = stripBackupSection(out, 'gs-ledger-remove-backups');
   return banner('gs-ledger') + out;
 }
 
@@ -217,6 +224,7 @@ function buildWiseEurBundle(source) {
   out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'wise-eur-remove-income-page');
   out = removeBetween(out, M_WISE_USD_INIT_FN, M_BUDGET_EDITOR_FN, 'wise-eur-remove-wise-usd-page');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'wise-eur-remove-budget-editor');
+  out = stripBackupSection(out, 'wise-eur-remove-backups');
   return banner('wise-eur') + out;
 }
 
@@ -230,6 +238,7 @@ function buildWiseUsdBundle(source) {
   out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'wise-usd-remove-income-page');
   out = removeBetween(out, M_WISE_EUR_INIT_FN, M_WISE_USD_INIT_FN, 'wise-usd-remove-wise-eur-page');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'wise-usd-remove-budget-editor');
+  out = stripBackupSection(out, 'wise-usd-remove-backups');
   return banner('wise-usd') + out;
 }
 
@@ -240,6 +249,7 @@ function buildMoneyTransfersBundle(source) {
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'money-transfers-remove-itemize');
   out = removeBetween(out, M_MT_BUILDER, M_INCOME_COL_TYPES, 'money-transfers-remove-builder-page');
   out = removeBetween(out, M_INCOME_COL_TYPES, M_BACKUP_FN, 'money-transfers-remove-income-and-banking-pages');
+  out = stripBackupSection(out, 'money-transfers-remove-backups');
   return banner('money-transfers') + out;
 }
 
@@ -250,6 +260,7 @@ function buildMoneyTransferBundle(source) {
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'money-transfer-remove-itemize');
   out = removeBetween(out, M_MT_LIST, M_MT_BUILDER, 'money-transfer-remove-list-page');
   out = removeBetween(out, M_INCOME_COL_TYPES, M_BACKUP_FN, 'money-transfer-remove-income-and-banking-pages');
+  out = stripBackupSection(out, 'money-transfer-remove-backups');
   return banner('money-transfer') + out;
 }
 
@@ -263,6 +274,7 @@ function buildMenuBundle(source) {
   out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'menu-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'menu-remove-budget-editor');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'menu-remove-archive-page');
+  out = stripBackupSection(out, 'menu-remove-backups');
   return banner('menu') + out;
 }
 
@@ -275,6 +287,7 @@ function buildArchiveBundle(source) {
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'archive-remove-money-transfers');
   out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'archive-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'archive-remove-budget-editor');
+  out = stripBackupSection(out, 'archive-remove-backups');
   return banner('archive') + out;
 }
 
@@ -287,6 +300,7 @@ function buildReconciliationBundle(source) {
   out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'reconciliation-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'reconciliation-remove-budget-editor');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'reconciliation-remove-archive-page');
+  out = stripBackupSection(out, 'reconciliation-remove-backups');
   return banner('reconciliation') + out;
 }
 
@@ -299,6 +313,7 @@ function buildBudgetEditorBundle(source) {
   out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'budget-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_DASHBOARD_FN, M_ARCHIVE_FN, 'budget-remove-dashboard');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'budget-remove-archive-and-backup');
+  out = stripBackupSection(out, 'budget-remove-backups');
   return banner('budget-editor') + out;
 }
 
@@ -311,6 +326,7 @@ function buildBudgetDashboardBundle(source) {
   out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'budget-dashboard-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_BUDGET_DASHBOARD_FN, 'budget-dashboard-remove-editor');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'budget-dashboard-remove-archive-and-backup');
+  out = stripBackupSection(out, 'budget-dashboard-remove-backups');
   return banner('budget-dashboard') + out;
 }
 

@@ -1,4 +1,4 @@
-/* Generated from app.js by generate-page-bundles.js: banking. Do not edit manually. */
+/* Generated from app.js by generate-page-bundles.js: transfers. Do not edit manually. */
 /*
   Payment Order Request app (no backend)
   - Validates required fields
@@ -10507,7 +10507,7 @@
   }
 
   
-  // [bundle-strip:banking-remove-settings] removed in page-specific build.
+  // [bundle-strip:transfers-remove-settings] removed in page-specific build.
 // ---- Income (year-scoped) ----
 
   function getIncomeKeyForYear(year) {
@@ -11560,9 +11560,1436 @@
     applyGsLedgerView();
   }
 
-  
-  // [bundle-strip:banking-remove-money-transfers] removed in page-specific build.
-function loadIncome(year) {
+  // ---- Money Transfers list page ----
+
+  function isIsoDateOnly(value) {
+    const s = String(value || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(s);
+  }
+
+  function isoDateOnlyToMs(value) {
+    const s = String(value || '').trim();
+    if (!isIsoDateOnly(s)) return NaN;
+    // Use UTC noon to avoid DST edge-cases.
+    const ms = Date.parse(`${s}T12:00:00Z`);
+    return Number.isFinite(ms) ? ms : NaN;
+  }
+
+  function addDaysToIsoDateOnly(value, days) {
+    const ms = isoDateOnlyToMs(value);
+    if (!Number.isFinite(ms)) return '';
+    const delta = Number(days);
+    if (!Number.isFinite(delta)) return '';
+    const d = new Date(ms + delta * 24 * 60 * 60 * 1000);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function getTodayIsoDateOnly() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function normalizeMoneyTransferId(value) {
+    return String(value || '').trim();
+  }
+
+  function ensureMoneyTransfersHaveIdsForYear(year) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const all = loadMoneyTransfers(y);
+    if (!Array.isArray(all) || all.length === 0) return all || [];
+
+    let changed = false;
+    const next = all.map((row, idx) => {
+      const safe = row && typeof row === 'object' ? { ...row } : {};
+      const id = normalizeMoneyTransferId(safe.id);
+      if (!id) {
+        safe.id = (crypto?.randomUUID ? crypto.randomUUID() : `mt_${Date.now()}_${idx}_${Math.random().toString(16).slice(2)}`);
+        changed = true;
+      }
+      return safe;
+    });
+
+    if (changed) saveMoneyTransfers(next, y);
+    return next;
+  }
+
+  function normalizeMoneyTransferDate(row) {
+    const s = String((row && (row.mtDate || row.date || row.transferDate)) || '').trim();
+    if (isIsoDateOnly(s)) return s;
+
+    // Legacy fallback for older records that only had range fields.
+    const legacyEnd = String((row && (row.rangeEnd || row.endDate || row.end)) || '').trim();
+    if (isIsoDateOnly(legacyEnd)) return legacyEnd;
+    const legacyStart = String((row && (row.rangeStart || row.startDate || row.start)) || '').trim();
+    return isIsoDateOnly(legacyStart) ? legacyStart : '';
+  }
+
+  function normalizeMoneyTransferEntryLedgerIds(row) {
+    const parseRaw = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        const s = String(value || '').trim();
+        if (!s) return [];
+        if (s.startsWith('[') && s.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(s);
+            if (Array.isArray(parsed)) return parsed;
+          } catch {
+            // ignore and try CSV fallback
+          }
+        }
+        return s.split(',').map((x) => String(x || '').trim()).filter(Boolean);
+      }
+      return [];
+    };
+
+    const raw = row && row.entryLedgerIds !== undefined && row.entryLedgerIds !== null
+      ? parseRaw(row.entryLedgerIds)
+      : parseRaw(row && row.selectedLedgerIds);
+
+    const out = [];
+    const seen = new Set();
+    for (const v of raw || []) {
+      const id = String(v || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  }
+
+  function hasExplicitMoneyTransferSelection(row) {
+    if (!row || typeof row !== 'object') return false;
+    return Object.prototype.hasOwnProperty.call(row, 'entryLedgerIds')
+      || Object.prototype.hasOwnProperty.call(row, 'selectedLedgerIds');
+  }
+
+  function isMtEligibleLedgerIncomeRow(row) {
+    const ledgerId = String(row && row.ledgerId ? row.ledgerId : '').trim();
+    if (!ledgerId || ledgerId.startsWith('po:')) return false;
+    const d = String(row && row.date ? row.date : '').trim();
+    if (!isIsoDateOnly(d)) return false;
+    const e = Number(row && row.euro);
+    const u = Number(row && row.usd);
+    return (Number.isFinite(e) && e > 0) || (Number.isFinite(u) && u > 0);
+  }
+
+  function getAssignedMoneyTransferLedgerIdsForYear(year, { excludeTransferId } = {}) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const exclude = normalizeMoneyTransferId(excludeTransferId);
+    const allTransfers = ensureMoneyTransfersHaveIdsForYear(y);
+    const allLedgerRows = buildGsLedgerRowsForYear(y);
+    const out = new Set();
+
+    for (const t of Array.isArray(allTransfers) ? allTransfers : []) {
+      const transferId = normalizeMoneyTransferId(t && t.id);
+      if (exclude && transferId === exclude) continue;
+
+      const explicit = normalizeMoneyTransferEntryLedgerIds(t);
+      for (const id of explicit) out.add(id);
+    }
+
+    return out;
+  }
+
+  function getDerivedBudgetCreatedDateOnlyForYear(year) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    // Primary: earliest ledger row date (first entry on the Ledger).
+    const rows = buildGsLedgerRowsForYear(y);
+    let minDate = '';
+    for (const r of Array.isArray(rows) ? rows : []) {
+      const d = String(r && r.date ? r.date : '').trim();
+      if (!isIsoDateOnly(d)) continue;
+      if (!minDate || d < minDate) minDate = d;
+    }
+    if (minDate) return minDate;
+
+    // Fallback: approximate budget-year start (Apr 1 of prior year).
+    return `${y - 1}-04-01`;
+  }
+
+  function validateMoneyTransferDate(year, mtDate) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const d = String(mtDate || '').trim();
+    if (!isIsoDateOnly(d)) return 'MT Date is required.';
+
+    const budgetStart = getDerivedBudgetCreatedDateOnlyForYear(y);
+    if (isIsoDateOnly(budgetStart) && d < budgetStart) return `MT Date must be on or after ${budgetStart}.`;
+
+    return '';
+  }
+
+  function spellOutMoneyTransferNo(noRaw) {
+    const s = String(noRaw || '').trim();
+    if (!s) return 'Money Transfer';
+    return s.replace(/^MT\s*/i, 'Money Transfer ');
+  }
+
+  const moneyTransfersViewState = {
+    globalFilter: '',
+    sortKey: null,
+    sortDir: 'asc',
+    defaultEmptyText: null,
+    canVerify: false,
+    canWrite: false,
+  };
+
+  const MONEY_TRANSFERS_COL_TYPES = {
+    moneyTransferNo: 'text',
+    mtDate: 'date',
+    gsVerified: 'boolean',
+    grandSecretaryName: 'text',
+    gtVerified: 'boolean',
+    grandTreasurerName: 'text',
+    comments: 'text',
+  };
+
+  function ensureMoneyTransfersDefaultEmptyText() {
+    if (!moneyTransfersEmptyState) return;
+    if (moneyTransfersViewState.defaultEmptyText !== null) return;
+    moneyTransfersViewState.defaultEmptyText = moneyTransfersEmptyState.textContent || 'No money transfers yet.';
+  }
+
+  function getMoneyTransfersDisplayValueForColumn(row, colKey) {
+    if (!row) return '';
+    switch (colKey) {
+      case 'moneyTransferNo':
+        return row.moneyTransferNo || row.mtNo || row.no || '';
+      case 'mtDate':
+        return formatDate(normalizeMoneyTransferDate(row));
+      case 'grandSecretaryName':
+        return row.grandSecretaryName || row.gsName || '';
+      case 'gsVerified':
+        return row.gsVerified ? 'Yes' : '';
+      case 'grandTreasurerName':
+        return row.grandTreasurerName || row.gtName || '';
+      case 'gtVerified':
+        return row.gtVerified ? 'Yes' : '';
+      case 'comments':
+        return row.comments || row.comment || '';
+      default:
+        return '';
+    }
+  }
+
+  function filterMoneyTransfersForView(withIndexRows, globalFilter) {
+    const needle = normalizeTextForSearch(globalFilter);
+    if (!needle) return withIndexRows || [];
+
+    const cols = [
+      'moneyTransferNo',
+      'mtDate',
+      'grandSecretaryName',
+      'gsVerified',
+      'grandTreasurerName',
+      'gtVerified',
+      'comments',
+    ];
+
+    return (withIndexRows || []).filter(({ row }) => {
+      return cols.some((k) => normalizeTextForSearch(getMoneyTransfersDisplayValueForColumn(row, k)).includes(needle));
+    });
+  }
+
+  function getMoneyTransfersSortValueForColumn(row, colKey, colType) {
+    if (!row) return null;
+    if (colType === 'date') {
+      const raw = String(normalizeMoneyTransferDate(row) || '').trim();
+      return raw || null;
+    }
+    if (colType === 'boolean') {
+      if (colKey === 'gsVerified') return row.gsVerified ? 1 : 0;
+      if (colKey === 'gtVerified') return row.gtVerified ? 1 : 0;
+      return 0;
+    }
+    return normalizeTextForSearch(getMoneyTransfersDisplayValueForColumn(row, colKey));
+  }
+
+  function sortMoneyTransfersForView(withIndexRows, sortKey, sortDir) {
+    if (!sortKey) return withIndexRows || [];
+
+    const dir = sortDir === 'desc' ? -1 : 1;
+    const colType = MONEY_TRANSFERS_COL_TYPES[sortKey] || 'text';
+    const sorted = [...(withIndexRows || [])];
+
+    sorted.sort((a, b) => {
+      const av = getMoneyTransfersSortValueForColumn(a.row, sortKey, colType);
+      const bv = getMoneyTransfersSortValueForColumn(b.row, sortKey, colType);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'boolean') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+
+    return sorted;
+  }
+
+  function updateMoneyTransfersSortIndicators() {
+    if (!moneyTransfersTbody) return;
+    const table = moneyTransfersTbody.closest('table');
+    if (!table) return;
+
+    const sortKey = moneyTransfersViewState.sortKey;
+    const sortDir = moneyTransfersViewState.sortDir === 'desc' ? 'desc' : 'asc';
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) {
+        aria = sortDir === 'desc' ? 'descending' : 'ascending';
+      }
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initMoneyTransfersColumnSorting() {
+    if (!moneyTransfersTbody) return;
+    const table = moneyTransfersTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (moneyTransfersViewState.sortKey === colKey) {
+        moneyTransfersViewState.sortDir = moneyTransfersViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        moneyTransfersViewState.sortKey = colKey;
+        moneyTransfersViewState.sortDir = 'asc';
+      }
+      applyMoneyTransfersView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateMoneyTransfersSortIndicators();
+  }
+
+  function renderMoneyTransfersRows(withIndexRows) {
+    if (!moneyTransfersTbody) return;
+    const canVerify = Boolean(moneyTransfersViewState.canVerify);
+    const canWrite = Boolean(moneyTransfersViewState.canWrite);
+    const canDeleteRows = Boolean(moneyTransfersViewState.canDelete);
+    const writeDisabledAttr = '';
+    const writeAriaDisabled = canWrite ? 'false' : 'true';
+    const writeTooltipAttr = canWrite ? '' : ' data-tooltip="Read only access."';
+    const deleteDisabledAttr = '';
+    const deleteAriaDisabled = canDeleteRows ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteRows ? '' : ' data-tooltip="Requires Delete access for Money Transfers."';
+
+    const html = (withIndexRows || [])
+      .map(({ row, index }) => {
+        const mtId = escapeHtml(normalizeMoneyTransferId(row && row.id));
+        const mtNo = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'moneyTransferNo'));
+        const mtDate = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'mtDate'));
+        const gsName = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'grandSecretaryName'));
+        const gtName = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'grandTreasurerName'));
+        const comments = escapeHtml(getMoneyTransfersDisplayValueForColumn(row, 'comments'));
+
+        const gsChecked = row && row.gsVerified ? 'checked' : '';
+        const gtChecked = row && row.gtVerified ? 'checked' : '';
+        const verifyDisabled = canVerify ? '' : 'disabled';
+
+        return `
+          <tr data-mt-index="${escapeHtml(String(index))}">
+            <td>${mtNo}</td>
+            <td>${mtDate}</td>
+            <td class="num">
+              <input type="checkbox" data-mt-verify="1" data-verify-field="gsVerified" data-mt-index="${escapeHtml(String(index))}" aria-label="GS Verified" ${gsChecked} ${verifyDisabled} />
+            </td>
+            <td>${gsName}</td>
+            <td class="num">
+              <input type="checkbox" data-mt-verify="1" data-verify-field="gtVerified" data-mt-index="${escapeHtml(String(index))}" aria-label="GT Verified" ${gtChecked} ${verifyDisabled} />
+            </td>
+            <td>${gtName}</td>
+            <td>${comments}</td>
+            <td class="actions">
+              <button type="button" class="btn btn--viewGrey btn--viewIcon" data-mt-action="view" data-mt-id="${mtId}" title="View" aria-label="View">${VIEW_EYE_ICON_SVG}</button>
+              <button type="button" class="btn btn--editIcon" data-mt-action="edit" data-mt-id="${mtId}" title="${canWrite ? 'Edit' : 'Read only access.'}" aria-disabled="${writeAriaDisabled}"${writeDisabledAttr}${writeTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--x" data-mt-action="delete" data-mt-id="${mtId}" aria-label="Delete money transfer" title="${canDeleteRows ? 'Delete' : 'Requires Delete access for Money Transfers.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+            </td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    moneyTransfersTbody.innerHTML = html;
+  }
+
+  function applyMoneyTransfersView() {
+    if (!moneyTransfersTbody || !moneyTransfersEmptyState) return;
+    ensureMoneyTransfersDefaultEmptyText();
+
+    const year = getActiveBudgetYear();
+    const all = loadMoneyTransfers(year);
+    const totalCountEl = document.getElementById('moneyTransfersTotalCount');
+    if (totalCountEl) totalCountEl.textContent = String((all || []).length);
+    const withIndex = (all || []).map((row, index) => ({ row, index }));
+    const filtered = filterMoneyTransfersForView(withIndex, moneyTransfersViewState.globalFilter);
+    const sorted = sortMoneyTransfersForView(filtered, moneyTransfersViewState.sortKey, moneyTransfersViewState.sortDir);
+
+    if (normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
+      moneyTransfersEmptyState.textContent = 'No money transfers match your search.';
+    } else {
+      moneyTransfersEmptyState.textContent = moneyTransfersViewState.defaultEmptyText;
+    }
+
+    moneyTransfersEmptyState.hidden = sorted.length > 0;
+    renderMoneyTransfersRows(sorted);
+    updateMoneyTransfersSortIndicators();
+  }
+
+  function initMoneyTransfersListPage() {
+    if (!moneyTransfersTbody || !moneyTransfersEmptyState) return;
+
+    const year = getActiveBudgetYear();
+    const user = getCurrentUser();
+    moneyTransfersViewState.canVerify = Boolean(user && canWrite(user, 'ledger_money_transfers'));
+    moneyTransfersViewState.canWrite = Boolean(user && canWriteOrCreate(user, 'ledger_money_transfers'));
+    moneyTransfersViewState.canDelete = Boolean(user && canDelete(user, 'ledger_money_transfers'));
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'money_transfers.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(year));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    ensureMoneyTransfersListExistsForYear(year);
+    ensureMoneyTransfersHaveIdsForYear(year);
+    ensureBudgetMetaExistsForYear(year);
+
+    const titleEl = document.querySelector('[data-money-transfers-title]');
+    if (titleEl) titleEl.textContent = `${year} Money Transfers`;
+    const listTitleEl = document.querySelector('[data-money-transfers-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${year} Money Transfers`;
+    const subheadEl = document.querySelector('[data-money-transfers-subhead]');
+    if (subheadEl) subheadEl.textContent = `Money transfer tracking for ${year}.`;
+    applyAppTabTitle();
+    initMoneyTransfersColumnSorting();
+
+    const globalInput = document.getElementById('moneyTransfersGlobalSearch');
+    if (globalInput) {
+      globalInput.value = moneyTransfersViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        moneyTransfersViewState.globalFilter = globalInput.value;
+        if (moneyTransfersClearSearchBtn) {
+          const hasSearch = normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '';
+          moneyTransfersClearSearchBtn.hidden = !hasSearch;
+          moneyTransfersClearSearchBtn.disabled = !hasSearch;
+        }
+        applyMoneyTransfersView();
+      });
+    }
+
+    if (moneyTransfersClearSearchBtn && globalInput) {
+      const hasSearch = normalizeTextForSearch(moneyTransfersViewState.globalFilter) !== '';
+      moneyTransfersClearSearchBtn.hidden = !hasSearch;
+      moneyTransfersClearSearchBtn.disabled = !hasSearch;
+      if (!moneyTransfersClearSearchBtn.dataset.bound) {
+        moneyTransfersClearSearchBtn.dataset.bound = 'true';
+        moneyTransfersClearSearchBtn.addEventListener('click', () => {
+          globalInput.value = '';
+          moneyTransfersViewState.globalFilter = '';
+          moneyTransfersClearSearchBtn.hidden = true;
+          moneyTransfersClearSearchBtn.disabled = true;
+          applyMoneyTransfersView();
+          if (globalInput.focus) globalInput.focus();
+        });
+      }
+    }
+
+    if (!moneyTransfersTbody.dataset.verifiedBound) {
+      moneyTransfersTbody.dataset.verifiedBound = '1';
+      moneyTransfersTbody.addEventListener('change', (e) => {
+        const input = e.target && e.target.matches
+          ? (e.target.matches('input[type="checkbox"][data-mt-verify][data-verify-field][data-mt-index]') ? e.target : null)
+          : null;
+        if (!input) return;
+
+        if (!moneyTransfersViewState.canVerify) {
+          input.checked = !input.checked;
+          return;
+        }
+
+        if (!requireWriteAccess('ledger_money_transfers', 'Money Transfers are read only for your account.')) {
+          input.checked = !input.checked;
+          return;
+        }
+
+        const idx = Number(input.getAttribute('data-mt-index'));
+        const field = String(input.getAttribute('data-verify-field') || '').trim();
+        if (!Number.isInteger(idx) || (field !== 'gsVerified' && field !== 'gtVerified')) return;
+
+        const all = loadMoneyTransfers(year);
+        if (!Array.isArray(all) || idx < 0 || idx >= all.length) return;
+
+        const prev = all[idx] && typeof all[idx] === 'object' ? all[idx] : {};
+        all[idx] = { ...prev, [field]: Boolean(input.checked) };
+        saveMoneyTransfers(all, year);
+        if (field === 'gsVerified' && Boolean(input.checked)) {
+          const mt = all[idx] || {};
+          void fireNotificationEvent('mt_gt_verification', {
+            date: String(mt.date || ''),
+            description: String(mt.description || mt.receivedFromDisbursedTo || ''),
+            year: String(year),
+            directLink: String(window.location.href || ''),
+          });
+        }
+        applyMoneyTransfersView();
+      });
+    }
+
+    // Edit/Delete actions
+    if (!moneyTransfersTbody.dataset.actionsBound) {
+      moneyTransfersTbody.dataset.actionsBound = '1';
+      moneyTransfersTbody.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('button[data-mt-action][data-mt-id]') : null;
+        if (!btn) return;
+        const action = String(btn.getAttribute('data-mt-action') || '').trim();
+        const id = normalizeMoneyTransferId(btn.getAttribute('data-mt-id'));
+        if (!action || !id) return;
+
+        const all = ensureMoneyTransfersHaveIdsForYear(year);
+        const current = (all || []).find((t) => normalizeMoneyTransferId(t && t.id) === id) || null;
+
+        if (action === 'view') {
+          if (!current) return;
+          const viewParams = new URLSearchParams();
+          viewParams.set('year', String(year));
+          viewParams.set('mode', 'view');
+          viewParams.set('id', normalizeMoneyTransferId(current.id));
+          const vDate = normalizeMoneyTransferDate(current);
+          if (vDate) viewParams.set('mtDate', vDate);
+          window.location.href = withWpEmbedParams(`money_transfer.html?${viewParams.toString()}`);
+          return;
+        }
+
+        if (action === 'delete') {
+          if (!requireDeleteAccess('ledger_money_transfers', 'Delete access is required for Money Transfers.')) return;
+        } else if (!requireWriteAccess('ledger_money_transfers', 'Money Transfers are read only for your account.')) {
+          return;
+        }
+
+        if (action === 'delete') {
+          const ok = window.confirm('Delete this money transfer?');
+          if (!ok) return;
+          const next = (all || []).filter((t) => normalizeMoneyTransferId(t && t.id) !== id);
+          saveMoneyTransfers(next, year);
+          applyMoneyTransfersView();
+          return;
+        }
+
+        if (action === 'edit') {
+          if (!current) return;
+          const editParams = new URLSearchParams();
+          editParams.set('year', String(year));
+          editParams.set('id', normalizeMoneyTransferId(current.id));
+          const eDate = normalizeMoneyTransferDate(current);
+          if (eDate) editParams.set('mtDate', eDate);
+          window.location.href = withWpEmbedParams(`money_transfer.html?${editParams.toString()}`);
+        }
+      });
+    }
+
+    const newMtBtn = document.getElementById('newMtBtn');
+    if (newMtBtn) {
+      newMtBtn.disabled = !moneyTransfersViewState.canWrite;
+      if (!moneyTransfersViewState.canWrite) newMtBtn.setAttribute('data-tooltip', 'Read only access.');
+      else newMtBtn.removeAttribute('data-tooltip');
+
+      if (!newMtBtn.dataset.bound) {
+        newMtBtn.dataset.bound = '1';
+        newMtBtn.addEventListener('click', () => {
+          if (!requireCreateAccess('ledger_money_transfers', 'Create access is required for Money Transfers.')) return;
+          openMoneyTransferRangeModal({ year, mode: 'new' });
+        });
+      }
+    }
+
+    initMoneyTransferRangeModalBindings();
+
+    // Keep the list in sync across tabs/windows.
+    if (!moneyTransfersTbody.dataset.storageBound) {
+      moneyTransfersTbody.dataset.storageBound = '1';
+      window.addEventListener('storage', (e) => {
+        const key = e && typeof e.key === 'string' ? e.key : '';
+        if (!key) return;
+        if (key.startsWith('money_transfers_')) {
+          applyMoneyTransfersView();
+        }
+      });
+    }
+
+    applyMoneyTransfersView();
+  }
+
+  function initMoneyTransferRangeModalBindings() {
+    if (!mtRangeModal || !mtDateInput || !mtRangeSubmitBtn) return;
+    if (mtRangeModal.dataset.bound === '1') return;
+    mtRangeModal.dataset.bound = '1';
+
+    function close() {
+      mtRangeModal.classList.remove('is-open');
+      mtRangeModal.setAttribute('aria-hidden', 'true');
+      if (mtRangeErrorEl) mtRangeErrorEl.textContent = '';
+      mtRangeModal.removeAttribute('data-mode');
+      mtRangeModal.removeAttribute('data-edit-id');
+      mtRangeModal.removeAttribute('data-year');
+      mtRangeModal.removeAttribute('data-draft-no');
+      // Restore inputs and submit button in case they were hidden/disabled by view mode.
+      mtDateInput.disabled = false;
+      mtRangeSubmitBtn.hidden = false;
+    }
+
+    mtRangeModal.addEventListener('click', (e) => {
+      const closeTarget = e.target && e.target.closest ? e.target.closest('[data-mt-range-close]') : null;
+      if (closeTarget) close();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!mtRangeModal.classList.contains('is-open')) return;
+      close();
+    });
+
+    function updateValidation() {
+      if (!mtRangeSubmitBtn) return;
+      const year = Number(mtRangeModal.getAttribute('data-year'));
+      const mtDate = String(mtDateInput.value || '').trim();
+      const msg = validateMoneyTransferDate(year, mtDate);
+      if (mtRangeErrorEl) mtRangeErrorEl.textContent = msg;
+      mtRangeSubmitBtn.disabled = Boolean(msg);
+    }
+
+    mtDateInput.addEventListener('change', updateValidation);
+
+    mtRangeSubmitBtn.addEventListener('click', () => {
+      const year = Number(mtRangeModal.getAttribute('data-year'));
+      const mode = String(mtRangeModal.getAttribute('data-mode') || 'new');
+      const mtDate = String(mtDateInput.value || '').trim();
+      const msg = validateMoneyTransferDate(year, mtDate);
+      if (msg) {
+        if (mtRangeErrorEl) mtRangeErrorEl.textContent = msg;
+        return;
+      }
+
+      const params = new URLSearchParams();
+      params.set('year', String(year));
+      params.set('mtDate', mtDate);
+
+      if (mode === 'edit') {
+        const id = String(mtRangeModal.getAttribute('data-edit-id') || '').trim();
+        if (id) params.set('id', id);
+      } else {
+        const draftNo = String(mtRangeModal.getAttribute('data-draft-no') || '').trim();
+        if (draftNo) params.set('draftNo', draftNo);
+      }
+
+      close();
+      window.location.href = withWpEmbedParams(`money_transfer.html?${params.toString()}`);
+    });
+  }
+
+  function openMoneyTransferRangeModal({ year, mode, transfer } = {}) {
+    if (!mtRangeModal || !mtDateInput || !mtRangeSubmitBtn) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const m = mode === 'edit' ? 'edit' : (mode === 'view' ? 'view' : 'new');
+
+    const titleEl = mtRangeModal.querySelector('#mtRangeModalTitle');
+    const subheadEl = mtRangeModal.querySelector('#mtRangeModalSubhead');
+    const no = String(transfer && (transfer.moneyTransferNo || transfer.mtNo || transfer.no) ? (transfer.moneyTransferNo || transfer.mtNo || transfer.no) : '').trim();
+
+    if (m === 'view') {
+      if (titleEl) titleEl.textContent = `View ${spellOutMoneyTransferNo(no)}`;
+      if (subheadEl) subheadEl.textContent = 'Money Transfer details (read only).';
+      mtRangeModal.setAttribute('data-edit-id', normalizeMoneyTransferId(transfer && transfer.id));
+    } else if (m === 'edit') {
+      if (titleEl) titleEl.textContent = `Edit ${spellOutMoneyTransferNo(no)}`;
+      if (subheadEl) subheadEl.textContent = 'Update the Money Transfer date.';
+      mtRangeModal.setAttribute('data-edit-id', normalizeMoneyTransferId(transfer && transfer.id));
+    } else {
+      const draftNo = getNextMoneyTransferNo();
+      if (titleEl) titleEl.textContent = `New ${spellOutMoneyTransferNo(draftNo)}`;
+      if (subheadEl) subheadEl.textContent = 'Select the Money Transfer date.';
+      mtRangeModal.setAttribute('data-draft-no', draftNo);
+    }
+
+    mtRangeModal.setAttribute('data-mode', m);
+    mtRangeModal.setAttribute('data-year', String(y));
+
+    const budgetStart = getDerivedBudgetCreatedDateOnlyForYear(y);
+    const today = getTodayIsoDateOnly();
+    const defaultDate = m !== 'new'
+      ? normalizeMoneyTransferDate(transfer)
+      : (today && budgetStart && today < budgetStart ? budgetStart : today);
+
+    const viewOnly = m === 'view';
+    mtDateInput.disabled = viewOnly;
+    mtRangeSubmitBtn.hidden = viewOnly;
+
+    mtDateInput.min = budgetStart || '';
+    mtDateInput.value = defaultDate || budgetStart || '';
+
+    if (mtRangeErrorEl) mtRangeErrorEl.textContent = '';
+    if (!viewOnly) mtRangeSubmitBtn.disabled = true;
+
+    mtRangeModal.classList.add('is-open');
+    mtRangeModal.setAttribute('aria-hidden', 'false');
+
+    if (!viewOnly) {
+      // Trigger initial validation.
+      const evt = new Event('change');
+      mtDateInput.dispatchEvent(evt);
+    }
+  }
+
+  // ---- Money Transfer builder page ----
+
+  const mtBuilderViewState = {
+    globalFilter: '',
+    sortKey: null,
+    sortDir: 'asc',
+    defaultEmptyText: null,
+    year: null,
+    mtDate: '',
+    id: '',
+    draftNo: '',
+    selectedLedgerIds: [],
+    canWrite: false,
+  };
+
+  const MT_BUILDER_COL_TYPES = {
+    date: 'date',
+    budgetNumber: 'text',
+    source: 'text',
+    creditorDebtor: 'text',
+    euro: 'number',
+    usd: 'number',
+    details: 'text',
+  };
+
+  const mtEntrySelectViewState = {
+    sortKey: null,
+    sortDir: 'asc',
+  };
+
+  function ensureMtBuilderDefaultEmptyText() {
+    if (!mtBuilderEmptyState) return;
+    if (mtBuilderViewState.defaultEmptyText !== null) return;
+    mtBuilderViewState.defaultEmptyText = mtBuilderEmptyState.textContent || 'No selected income entries yet.';
+  }
+
+  function getMtBuilderDisplayValueForColumn(row, colKey) {
+    if (!row) return '';
+    switch (colKey) {
+      case 'date':
+      case 'budgetNumber':
+      case 'source':
+      case 'creditorDebtor':
+      case 'euro':
+      case 'usd':
+      case 'details':
+        return getGsLedgerDisplayValueForColumn(row, colKey);
+      default:
+        return '';
+    }
+  }
+
+  function filterMtBuilderRows(rows, globalFilter) {
+    const needle = normalizeTextForSearch(globalFilter);
+    if (!needle) return rows || [];
+    const cols = ['date', 'budgetNumber', 'source', 'creditorDebtor', 'euro', 'usd', 'details'];
+    return (rows || []).filter((r) => cols.some((k) => normalizeTextForSearch(getMtBuilderDisplayValueForColumn(r, k)).includes(needle)));
+  }
+
+  function getMtBuilderSortValueForColumn(row, colKey, colType) {
+    if (!row) return null;
+    if (colType === 'number') {
+      const raw = colKey === 'euro' ? row.euro : colKey === 'usd' ? row.usd : null;
+      const num = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+      return Number.isFinite(num) ? num : null;
+    }
+    if (colType === 'date') {
+      const raw = String(row.date || '').trim();
+      return raw || null;
+    }
+    return normalizeTextForSearch(getMtBuilderDisplayValueForColumn(row, colKey));
+  }
+
+  function sortMtRowsForView(rows, sortKey, sortDir) {
+    if (!sortKey) return rows || [];
+
+    const dir = sortDir === 'desc' ? -1 : 1;
+    const colType = MT_BUILDER_COL_TYPES[sortKey] || 'text';
+    const withIndex = (rows || []).map((row, index) => ({ row, index }));
+
+    withIndex.sort((a, b) => {
+      const av = getMtBuilderSortValueForColumn(a.row, sortKey, colType);
+      const bv = getMtBuilderSortValueForColumn(b.row, sortKey, colType);
+
+      if (av === null && bv === null) return a.index - b.index;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+
+      if (colType === 'number') {
+        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+      }
+
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp === 0 ? a.index - b.index : cmp * dir;
+    });
+
+    return withIndex.map((x) => x.row);
+  }
+
+  function updateMtSortIndicators(table, sortKey, sortDir) {
+    if (!table) return;
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    const dir = sortDir === 'desc' ? 'desc' : 'asc';
+    for (const th of ths) {
+      const colKey = th.getAttribute('data-sort-key');
+      let aria = 'none';
+      if (colKey && sortKey === colKey) aria = dir === 'desc' ? 'descending' : 'ascending';
+      th.setAttribute('aria-sort', aria);
+    }
+  }
+
+  function initMtBuilderColumnSorting() {
+    if (!mtBuilderTbody) return;
+    const table = mtBuilderTbody.closest('table');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (mtBuilderViewState.sortKey === colKey) mtBuilderViewState.sortDir = mtBuilderViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      else {
+        mtBuilderViewState.sortKey = colKey;
+        mtBuilderViewState.sortDir = 'asc';
+      }
+      applyMtBuilderView();
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateMtSortIndicators(table, mtBuilderViewState.sortKey, mtBuilderViewState.sortDir);
+  }
+
+  function initMtEntrySelectColumnSorting() {
+    const table = document.getElementById('mtEntrySelectTable');
+    if (!table) return;
+    if (table.dataset.sortBound === '1') return;
+
+    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
+    if (ths.length === 0) return;
+    table.dataset.sortBound = '1';
+
+    function applySortForKey(colKey) {
+      if (!colKey) return;
+      if (mtEntrySelectViewState.sortKey === colKey) mtEntrySelectViewState.sortDir = mtEntrySelectViewState.sortDir === 'asc' ? 'desc' : 'asc';
+      else {
+        mtEntrySelectViewState.sortKey = colKey;
+        mtEntrySelectViewState.sortDir = 'asc';
+      }
+
+      const y = Number.isInteger(Number(mtBuilderViewState.year)) ? Number(mtBuilderViewState.year) : getActiveBudgetYear();
+      const rows = getMtBuilderEligibleRows(y, {
+        excludeTransferId: mtBuilderViewState.id,
+        includeLedgerIds: mtBuilderViewState.selectedLedgerIds,
+      });
+      const sorted = sortMtRowsForView(rows, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+      renderMtEntrySelectRows(sorted, y, mtBuilderViewState.selectedLedgerIds);
+      updateMtSortIndicators(table, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+    }
+
+    for (const th of ths) {
+      th.classList.add('is-sortable');
+      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
+      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
+      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
+      th.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        applySortForKey(th.getAttribute('data-sort-key'));
+      });
+    }
+
+    updateMtSortIndicators(table, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+  }
+
+  function renderMtBuilderRows(rows, year) {
+    if (!mtBuilderTbody) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const html = (rows || [])
+      .map((r) => {
+        const date = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'date'));
+        const budgetCode = getGsLedgerDisplayValueForColumn(r, 'budgetNumber');
+        const code = extractInCodeFromBudgetNumberText(budgetCode);
+        const outMap = getOutDescMapForYear(y);
+        const inMap = getInDescMapForYear(y);
+        const desc = (code && outMap ? outMap.get(code) : '') || (code && inMap ? inMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(budgetCode);
+        const budgetNumber = renderBudgetNumberSpanHtml(code || budgetCode, desc);
+        const source = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'source'));
+        const creditorDebtor = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'creditorDebtor'));
+        const euro = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'euro'));
+        const usd = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'usd'));
+        const details = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'details'));
+
+        return `
+          <tr>
+            <td>${date}</td>
+            <td>${budgetNumber}</td>
+            <td>${source}</td>
+            <td>${creditorDebtor}</td>
+            <td class="num">${euro}</td>
+            <td class="num">${usd}</td>
+            <td>${details}</td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    mtBuilderTbody.innerHTML = html;
+  }
+
+  function getMtBuilderEligibleRows(year, { excludeTransferId, includeLedgerIds } = {}) {
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const includeSet = new Set((includeLedgerIds || []).map((x) => String(x || '').trim()).filter(Boolean));
+    const assignedSet = getAssignedMoneyTransferLedgerIdsForYear(y, { excludeTransferId });
+
+    return buildGsLedgerRowsForYear(y)
+      .filter((r) => {
+        if (!isMtEligibleLedgerIncomeRow(r)) return false;
+
+        const ledgerId = String(r && r.ledgerId ? r.ledgerId : '').trim();
+        if (!ledgerId) return false;
+        if (includeSet.has(ledgerId)) return true;
+        return !assignedSet.has(ledgerId);
+      })
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  }
+
+  function getMtBuilderRowsFromSelectedIds(year, selectedLedgerIds) {
+    const selectedSet = new Set((selectedLedgerIds || []).map((x) => String(x || '').trim()).filter(Boolean));
+    if (selectedSet.size === 0) return [];
+
+    return buildGsLedgerRowsForYear(year)
+      .filter((r) => selectedSet.has(String(r && r.ledgerId ? r.ledgerId : '').trim()))
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  }
+
+  function renderMtEntrySelectRows(rows, year, selectedLedgerIds) {
+    if (!mtEntrySelectTbody || !mtEntrySelectEmptyState) return;
+
+    const selectedSet = new Set((selectedLedgerIds || []).map((x) => String(x || '').trim()).filter(Boolean));
+
+    const html = (rows || [])
+      .map((r) => {
+        const ledgerId = String(r && r.ledgerId ? r.ledgerId : '').trim();
+        const checked = selectedSet.has(ledgerId);
+
+        const date = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'date'));
+        const budgetCode = getGsLedgerDisplayValueForColumn(r, 'budgetNumber');
+        const code = extractInCodeFromBudgetNumberText(budgetCode);
+        const outMap = getOutDescMapForYear(year);
+        const inMap = getInDescMapForYear(year);
+        const desc = (code && outMap ? outMap.get(code) : '') || (code && inMap ? inMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(budgetCode);
+        const budgetNumber = renderBudgetNumberSpanHtml(code || budgetCode, desc);
+        const source = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'source'));
+        const creditorDebtor = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'creditorDebtor'));
+        const euro = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'euro'));
+        const usd = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'usd'));
+        const details = escapeHtml(getGsLedgerDisplayValueForColumn(r, 'details'));
+
+        return `
+          <tr>
+            <td class="num">
+              <input type="checkbox" data-mt-entry-select="1" data-ledger-id="${escapeHtml(ledgerId)}" ${checked ? 'checked' : ''} />
+            </td>
+            <td>${date}</td>
+            <td>${budgetNumber}</td>
+            <td>${source}</td>
+            <td>${creditorDebtor}</td>
+            <td class="num">${euro}</td>
+            <td class="num">${usd}</td>
+            <td>${details}</td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    mtEntrySelectTbody.innerHTML = html;
+    mtEntrySelectEmptyState.hidden = (rows || []).length > 0;
+  }
+
+  function openMtEntrySelectModal({ year, excludeTransferId } = {}) {
+    if (!mtEntrySelectModal || !mtEntrySelectTbody || !mtEntrySelectAddBtn) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+
+    const rows = getMtBuilderEligibleRows(y, {
+      excludeTransferId,
+      includeLedgerIds: mtBuilderViewState.selectedLedgerIds,
+    });
+
+    const sorted = sortMtRowsForView(rows, mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+    renderMtEntrySelectRows(sorted, y, mtBuilderViewState.selectedLedgerIds);
+    mtEntrySelectModal.classList.add('is-open');
+    mtEntrySelectModal.setAttribute('aria-hidden', 'false');
+    updateMtSortIndicators(document.getElementById('mtEntrySelectTable'), mtEntrySelectViewState.sortKey, mtEntrySelectViewState.sortDir);
+  }
+
+  function closeMtEntrySelectModal() {
+    if (!mtEntrySelectModal) return;
+    mtEntrySelectModal.classList.remove('is-open');
+    mtEntrySelectModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function applyMtBuilderView() {
+    if (!mtBuilderTbody || !mtBuilderEmptyState) return;
+    ensureMtBuilderDefaultEmptyText();
+
+    const year = Number.isInteger(Number(mtBuilderViewState.year)) ? Number(mtBuilderViewState.year) : getActiveBudgetYear();
+    const all = getMtBuilderRowsFromSelectedIds(year, mtBuilderViewState.selectedLedgerIds);
+
+    const filtered = filterMtBuilderRows(all, mtBuilderViewState.globalFilter);
+    const sorted = sortMtRowsForView(filtered, mtBuilderViewState.sortKey, mtBuilderViewState.sortDir);
+
+    if (normalizeTextForSearch(mtBuilderViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
+      mtBuilderEmptyState.textContent = 'No entries match your search.';
+    } else {
+      mtBuilderEmptyState.textContent = mtBuilderViewState.defaultEmptyText;
+    }
+
+    mtBuilderEmptyState.hidden = sorted.length > 0;
+    renderMtBuilderRows(sorted, year);
+    updateMtBuilderTotals(sorted);
+    updateMtSortIndicators(mtBuilderTbody.closest('table'), mtBuilderViewState.sortKey, mtBuilderViewState.sortDir);
+  }
+
+  function updateMtBuilderTotals(rows) {
+    const euroEl = document.getElementById('mtBuilderTotalEuro');
+    const usdEl = document.getElementById('mtBuilderTotalUsd');
+    if (!euroEl && !usdEl) return;
+
+    let totalEuro = 0;
+    let totalUsd = 0;
+    for (const r of rows || []) {
+      const e = Number(r && r.euro);
+      const u = Number(r && r.usd);
+      if (Number.isFinite(e)) totalEuro += e;
+      if (Number.isFinite(u)) totalUsd += u;
+    }
+
+    if (euroEl) euroEl.textContent = formatCurrency(totalEuro, 'EUR');
+    if (usdEl) usdEl.textContent = formatCurrency(totalUsd, 'USD');
+  }
+
+  function initMoneyTransferBuilderPage() {
+    if (!mtBuilderTbody || !mtBuilderEmptyState) return;
+    initMtBuilderColumnSorting();
+    initMtEntrySelectColumnSorting();
+    const user = getCurrentUser();
+    mtBuilderViewState.canWrite = Boolean(user && canWrite(user, 'ledger'));
+
+    const commentsEl = document.getElementById('mtBuilderComments');
+    const saveBtn = document.getElementById('mtBuilderSaveBtn');
+    const cancelBtn = document.getElementById('mtBuilderCancelBtn');
+    const editBtn = document.getElementById('mtBuilderEditBtn');
+    const globalInput = document.getElementById('mtBuilderGlobalSearch');
+    const mtDateInputEl = mtBuilderDateInput;
+    const mtDateErrorEl = mtBuilderDateInlineError;
+
+    const year = getActiveBudgetYear();
+
+    const params = (() => {
+      try {
+        return new URLSearchParams(window.location.search);
+      } catch {
+        return new URLSearchParams();
+      }
+    })();
+
+    const isViewOnly = String(params.get('mode') || '').trim().toLowerCase() === 'view';
+    const canReadLedger = Boolean(user && hasPermission(user, 'ledger'));
+    const canWriteOrCreateLedger = Boolean(user && (canWrite(user, 'ledger') || canCreate(user, 'ledger')));
+
+    const fromUrlYear = Number(params.get('year'));
+    const resolvedYear = Number.isInteger(fromUrlYear) ? fromUrlYear : year;
+    mtBuilderViewState.year = resolvedYear;
+    mtBuilderViewState.mtDate = String(params.get('mtDate') || '').trim();
+    mtBuilderViewState.id = String(params.get('id') || '').trim();
+    mtBuilderViewState.draftNo = String(params.get('draftNo') || '').trim();
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'money_transfer.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(resolvedYear));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    ensureIncomeListExistsForYear(resolvedYear);
+    ensurePaymentOrdersListExistsForYear(resolvedYear);
+    ensureMoneyTransfersListExistsForYear(resolvedYear);
+    ensureGsLedgerVerifiedStoreExistsForYear(resolvedYear);
+    ensureBudgetMetaExistsForYear(resolvedYear);
+    ensureMoneyTransfersHaveIdsForYear(resolvedYear);
+
+    const allTransfers = ensureMoneyTransfersHaveIdsForYear(resolvedYear);
+    let existing = null;
+    if (mtBuilderViewState.id) {
+      existing = (allTransfers || []).find((t) => normalizeMoneyTransferId(t && t.id) === normalizeMoneyTransferId(mtBuilderViewState.id)) || null;
+      if (existing) {
+        if (!mtBuilderViewState.mtDate) mtBuilderViewState.mtDate = normalizeMoneyTransferDate(existing);
+        if (commentsEl) commentsEl.value = String(existing.comments || existing.comment || '');
+
+        const explicitIds = normalizeMoneyTransferEntryLedgerIds(existing);
+        mtBuilderViewState.selectedLedgerIds = explicitIds;
+      }
+    } else {
+      mtBuilderViewState.selectedLedgerIds = [];
+      if (!mtBuilderViewState.mtDate) {
+        const today = getTodayIsoDateOnly();
+        const budgetStart = getDerivedBudgetCreatedDateOnlyForYear(resolvedYear);
+        mtBuilderViewState.mtDate = today && budgetStart && today < budgetStart ? budgetStart : today;
+      }
+    }
+
+    const mtNo = (() => {
+      if (existing) return String(existing.moneyTransferNo || existing.mtNo || existing.no || '').trim();
+      return String(mtBuilderViewState.draftNo || getNextMoneyTransferNo()).trim();
+    })();
+
+    const titleText = spellOutMoneyTransferNo(mtNo);
+    const titleEl = document.querySelector('[data-mt-builder-title]');
+    if (titleEl) titleEl.textContent = titleText;
+    const listTitleEl = document.querySelector('[data-mt-builder-list-title]');
+    if (listTitleEl) listTitleEl.textContent = titleText;
+    const mtBackLink = document.getElementById('mtBuilderBackToTransfersLink');
+    if (mtBackLink) {
+      mtBackLink.href = `money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`;
+      mtBackLink.textContent = `← Back to ${resolvedYear} Money Transfers`;
+      mtBackLink.setAttribute('aria-label', `Back to ${resolvedYear} Money Transfers`);
+      mtBackLink.removeAttribute('title');
+    }
+    const subheadEl = document.querySelector('[data-mt-builder-subhead]');
+    function syncBuilderDateSubhead() {
+      if (!subheadEl) return;
+      const mtDate = String(mtBuilderViewState.mtDate || '').trim();
+      subheadEl.textContent = mtDate
+        ? `Money Transfer date: ${mtDate}.`
+        : 'Money Transfer date not set.';
+    }
+    syncBuilderDateSubhead();
+    applyAppTabTitle();
+
+    function syncBuilderDateControlAndValidation() {
+      const mtDate = String(mtBuilderViewState.mtDate || '').trim();
+
+      if (mtDateInputEl) {
+        mtDateInputEl.value = mtDate;
+        mtDateInputEl.min = getDerivedBudgetCreatedDateOnlyForYear(resolvedYear) || '';
+      }
+
+      const msg = validateMoneyTransferDate(resolvedYear, mtDate);
+      if (mtDateErrorEl) mtDateErrorEl.textContent = msg || '';
+
+      if (saveBtn && !isViewOnly) {
+        const baseDisabled = !mtBuilderViewState.canWrite;
+        saveBtn.disabled = baseDisabled || Boolean(msg);
+        if (baseDisabled) saveBtn.setAttribute('data-tooltip', 'Read only access.');
+        else if (msg) saveBtn.setAttribute('data-tooltip', msg);
+        else saveBtn.removeAttribute('data-tooltip');
+      }
+
+      syncBuilderDateSubhead();
+    }
+
+    if (mtDateInputEl) {
+      mtDateInputEl.disabled = isViewOnly;
+
+      if (!isViewOnly && !mtDateInputEl.dataset.bound) {
+        mtDateInputEl.dataset.bound = '1';
+        mtDateInputEl.addEventListener('change', () => {
+          mtBuilderViewState.mtDate = String(mtDateInputEl.value || '').trim();
+          syncBuilderDateControlAndValidation();
+        });
+      }
+    }
+
+    syncBuilderDateControlAndValidation();
+
+    if (globalInput) {
+      globalInput.value = mtBuilderViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        mtBuilderViewState.globalFilter = globalInput.value;
+        if (mtBuilderClearSearchBtn) {
+          const hasSearch = normalizeTextForSearch(mtBuilderViewState.globalFilter) !== '';
+          mtBuilderClearSearchBtn.hidden = !hasSearch;
+          mtBuilderClearSearchBtn.disabled = !hasSearch;
+        }
+        applyMtBuilderView();
+      });
+    }
+
+    if (mtBuilderClearSearchBtn && globalInput) {
+      const hasSearch = normalizeTextForSearch(mtBuilderViewState.globalFilter) !== '';
+      mtBuilderClearSearchBtn.hidden = !hasSearch;
+      mtBuilderClearSearchBtn.disabled = !hasSearch;
+      if (!mtBuilderClearSearchBtn.dataset.bound) {
+        mtBuilderClearSearchBtn.dataset.bound = 'true';
+        mtBuilderClearSearchBtn.addEventListener('click', () => {
+          globalInput.value = '';
+          mtBuilderViewState.globalFilter = '';
+          mtBuilderClearSearchBtn.hidden = true;
+          mtBuilderClearSearchBtn.disabled = true;
+          applyMtBuilderView();
+          if (globalInput.focus) globalInput.focus();
+        });
+      }
+    }
+
+    if (saveBtn) {
+      saveBtn.hidden = isViewOnly;
+      saveBtn.disabled = isViewOnly || !mtBuilderViewState.canWrite;
+      if (!isViewOnly && !mtBuilderViewState.canWrite) saveBtn.setAttribute('data-tooltip', 'Read only access.');
+      else saveBtn.removeAttribute('data-tooltip');
+
+      if (!isViewOnly && !saveBtn.dataset.bound) {
+        saveBtn.dataset.bound = '1';
+        saveBtn.addEventListener('click', async () => {
+          if (!requireWriteOrCreateAccess('ledger', 'Money Transfers are read only for your account.')) return;
+
+          const mtDate = String(mtBuilderViewState.mtDate || '').trim();
+          const selectedLedgerIds = Array.from(new Set((mtBuilderViewState.selectedLedgerIds || []).map((v) => String(v || '').trim()).filter(Boolean)));
+          if (selectedLedgerIds.length === 0) {
+            window.alert('Select at least one eligible income transaction first.');
+            return;
+          }
+
+          const selectedRows = getMtBuilderRowsFromSelectedIds(resolvedYear, selectedLedgerIds);
+          if (selectedRows.length === 0) {
+            window.alert('Selected transactions are no longer available. Please reselect from eligible transactions.');
+            return;
+          }
+
+          const msg = validateMoneyTransferDate(resolvedYear, mtDate);
+          if (msg) {
+            window.alert(msg);
+            return;
+          }
+
+          const gl = loadGrandLodgeInfo();
+          const nowIso = new Date().toISOString();
+          const comments = commentsEl ? String(commentsEl.value || '') : '';
+
+          const currentAll = ensureMoneyTransfersHaveIdsForYear(resolvedYear);
+          if (existing) {
+            const id = normalizeMoneyTransferId(existing.id);
+            const next = (currentAll || []).map((t) => {
+              if (normalizeMoneyTransferId(t && t.id) !== id) return t;
+              return {
+                ...t,
+                mtDate,
+                rangeStart: '',
+                rangeEnd: '',
+                entryLedgerIds: selectedLedgerIds,
+                comments,
+                grandSecretaryName: String(gl && gl.grandSecretary ? gl.grandSecretary : ''),
+                grandTreasurerName: String(gl && gl.grandTreasurer ? gl.grandTreasurer : ''),
+                updatedAt: nowIso,
+              };
+            });
+            saveMoneyTransfers(next, resolvedYear);
+          } else {
+            const id = (crypto?.randomUUID ? crypto.randomUUID() : `mt_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+            const mtNoFinal = mtNo || getNextMoneyTransferNo();
+            const record = {
+              id,
+              moneyTransferNo: mtNoFinal,
+              mtDate: mtDate || getTodayIsoDateOnly(),
+              grandSecretaryName: String(gl && gl.grandSecretary ? gl.grandSecretary : ''),
+              grandTreasurerName: String(gl && gl.grandTreasurer ? gl.grandTreasurer : ''),
+              gsVerified: false,
+              gtVerified: false,
+              comments,
+              entryLedgerIds: selectedLedgerIds,
+              rangeStart: '',
+              rangeEnd: '',
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            };
+            saveMoneyTransfers([record, ...(currentAll || [])], resolvedYear);
+            void fireNotificationEvent('mt_gs_verification', {
+              moneyTransferNo: String(record.moneyTransferNo || ''),
+              date: String(record.mtDate || ''),
+              comments: String(record.comments || ''),
+              year: String(resolvedYear),
+              directLink: String(window.location.href || ''),
+            });
+            advanceMoneyTransferSequence();
+          }
+
+          if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
+            try { await window.acglFmsWpFlushNow(); } catch { /* ignore */ }
+          }
+          window.location.href = withWpEmbedParams(`money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`);
+        });
+      }
+    }
+
+    syncBuilderDateControlAndValidation();
+
+    if (commentsEl) {
+      commentsEl.disabled = isViewOnly;
+    }
+
+    if (cancelBtn) {
+      cancelBtn.textContent = isViewOnly ? 'Close' : 'Cancel';
+      cancelBtn.setAttribute('aria-label', isViewOnly ? 'Close' : 'Cancel');
+      cancelBtn.title = isViewOnly ? 'Close' : 'Cancel';
+    }
+
+    if (cancelBtn && !cancelBtn.dataset.bound) {
+      cancelBtn.dataset.bound = '1';
+      cancelBtn.addEventListener('click', () => {
+        window.location.href = withWpEmbedParams(`money_transfers.html?year=${encodeURIComponent(String(resolvedYear))}`);
+      });
+    }
+
+    if (editBtn) {
+      const showEditBtn = isViewOnly && Boolean(existing) && canReadLedger;
+      editBtn.hidden = !showEditBtn;
+      editBtn.disabled = !canWriteOrCreateLedger;
+      if (canWriteOrCreateLedger) editBtn.removeAttribute('data-tooltip');
+      else editBtn.setAttribute('data-tooltip', 'Read only access.');
+
+      if (!editBtn.dataset.bound) {
+        editBtn.dataset.bound = '1';
+        editBtn.addEventListener('click', () => {
+          if (!canWriteOrCreateLedger) return;
+          if (!requireWriteOrCreateAccess('ledger', 'Money Transfers are read only for your account.')) return;
+
+          if (!existing) return;
+          const editParams = new URLSearchParams();
+          editParams.set('year', String(resolvedYear));
+          editParams.set('id', normalizeMoneyTransferId(existing.id));
+          const mtDate = String(mtBuilderViewState.mtDate || '').trim();
+          if (mtDate) editParams.set('mtDate', mtDate);
+          window.location.href = withWpEmbedParams(`money_transfer.html?${editParams.toString()}`);
+        });
+      }
+    }
+
+    if (mtBuilderSelectItemsBtn) {
+      mtBuilderSelectItemsBtn.hidden = isViewOnly;
+      mtBuilderSelectItemsBtn.disabled = isViewOnly || !mtBuilderViewState.canWrite;
+      if (!isViewOnly && !mtBuilderViewState.canWrite) mtBuilderSelectItemsBtn.setAttribute('data-tooltip', 'Read only access.');
+      else mtBuilderSelectItemsBtn.removeAttribute('data-tooltip');
+
+      if (!isViewOnly && !mtBuilderSelectItemsBtn.dataset.bound) {
+        mtBuilderSelectItemsBtn.dataset.bound = '1';
+        mtBuilderSelectItemsBtn.addEventListener('click', () => {
+          if (!requireWriteOrCreateAccess('ledger', 'Money Transfers are read only for your account.')) return;
+          openMtEntrySelectModal({
+            year: resolvedYear,
+            excludeTransferId: existing ? normalizeMoneyTransferId(existing.id) : '',
+          });
+        });
+      }
+    }
+
+    if (mtEntrySelectModal && !mtEntrySelectModal.dataset.bound) {
+      mtEntrySelectModal.dataset.bound = '1';
+      mtEntrySelectModal.addEventListener('click', (e) => {
+        const closeTarget = e.target && e.target.closest ? e.target.closest('[data-mt-entry-select-close]') : null;
+        if (closeTarget) closeMtEntrySelectModal();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (!mtEntrySelectModal.classList.contains('is-open')) return;
+        closeMtEntrySelectModal();
+      });
+
+      if (mtEntrySelectAddBtn) {
+        mtEntrySelectAddBtn.addEventListener('click', () => {
+          const checked = Array.from(mtEntrySelectTbody ? mtEntrySelectTbody.querySelectorAll('input[type="checkbox"][data-mt-entry-select][data-ledger-id]:checked') : [])
+            .map((el) => String(el.getAttribute('data-ledger-id') || '').trim())
+            .filter(Boolean);
+          mtBuilderViewState.selectedLedgerIds = Array.from(new Set(checked));
+          closeMtEntrySelectModal();
+          applyMtBuilderView();
+        });
+      }
+    }
+
+    applyMtBuilderView();
+
+    if (!isViewOnly && mtBuilderViewState.canWrite && !existing && mtBuilderViewState.selectedLedgerIds.length === 0) {
+      openMtEntrySelectModal({
+        year: resolvedYear,
+        excludeTransferId: '',
+      });
+    }
+  }
+
+  /** @returns {Array<Object>} */
+  function loadIncome(year) {
     const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
     const key = getIncomeKeyForYear(resolvedYear);
     if (!key) return [];
@@ -11611,7971 +13038,9 @@ function loadIncome(year) {
     }
   }
 
-  const INCOME_COL_TYPES = {
-    date: 'date',
-    remitter: 'text',
-    budgetNumber: 'text',
-    euro: 'number',
-    description: 'text',
-  };
-
-  const incomeViewState = {
-    globalFilter: '',
-    sortKey: 'date',
-    sortDir: 'desc',
-    defaultEmptyText: null,
-  };
-
-  function ensureIncomeDefaultEmptyText() {
-    if (!incomeEmptyState) return;
-    if (incomeViewState.defaultEmptyText !== null) return;
-    incomeViewState.defaultEmptyText = incomeEmptyState.textContent || 'No income entries yet.';
-  }
-
-  function getIncomeDisplayValueForColumn(entry, colKey, year) {
-    if (!entry) return '';
-    switch (colKey) {
-      case 'date':
-        return formatDate(entry.date);
-      case 'remitter':
-        return entry.remitter || '';
-      case 'budgetNumber':
-        return extractInCodeFromBudgetNumberText(entry.budgetNumber);
-      case 'euro':
-        return formatCurrency(entry.euro, 'EUR');
-      case 'description':
-        return entry.description || '';
-      default:
-        return '';
-    }
-  }
-
-  function getIncomeSortValueForColumn(entry, colKey, colType, year) {
-    if (!entry) return null;
-    if (colType === 'number') {
-      const raw = entry.euro;
-      const num = raw === null || raw === undefined || raw === '' ? null : Number(raw);
-      return Number.isFinite(num) ? num : null;
-    }
-    if (colType === 'date') {
-      const raw = String(entry.date || '').trim();
-      return raw ? raw : null;
-    }
-    return normalizeTextForSearch(getIncomeDisplayValueForColumn(entry, colKey, year));
-  }
-
-  function sortIncomeForView(entries, sortKey, sortDir, year) {
-    const dir = sortDir === 'desc' ? -1 : 1;
-    if (!sortKey) {
-      return [...(entries || [])].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    }
-
-    const colType = INCOME_COL_TYPES[sortKey] || 'text';
-    const withIndex = (entries || []).map((entry, index) => ({ entry, index }));
-    withIndex.sort((a, b) => {
-      const av = getIncomeSortValueForColumn(a.entry, sortKey, colType, year);
-      const bv = getIncomeSortValueForColumn(b.entry, sortKey, colType, year);
-
-      if (av === null && bv === null) return a.index - b.index;
-      if (av === null) return 1;
-      if (bv === null) return -1;
-
-      if (colType === 'number') {
-        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
-        return cmp === 0 ? a.index - b.index : cmp * dir;
-      }
-
-      const cmp = String(av).localeCompare(String(bv));
-      return cmp === 0 ? a.index - b.index : cmp * dir;
-    });
-    return withIndex.map((x) => x.entry);
-  }
-
-  function filterIncomeForView(entries, globalFilter, year) {
-    const needle = normalizeTextForSearch(globalFilter);
-    if (!needle) return entries || [];
-
-    const cols = Object.keys(INCOME_COL_TYPES);
-    return (entries || []).filter((e) => {
-      return cols.some((colKey) => normalizeTextForSearch(getIncomeDisplayValueForColumn(e, colKey, year)).includes(needle));
-    });
-  }
-
-  function renderIncomeRows(entries, year) {
-    if (!incomeTbody) return;
-
-    const currentUser = getCurrentUser();
-    const canEditIncome = Boolean(currentUser && canWriteOrCreate(currentUser, 'income_bankeur'));
-    const canDeleteIncome = Boolean(currentUser && canDelete(currentUser, 'income_bankeur'));
-    const editDisabledAttr = '';
-    const editAriaDisabled = canEditIncome ? 'false' : 'true';
-    const editTooltipAttr = canEditIncome ? '' : ' data-tooltip="Edit and create access required for Income."';
-    const deleteDisabledAttr = '';
-    const deleteAriaDisabled = canDeleteIncome ? 'false' : 'true';
-    const deleteTooltipAttr = canDeleteIncome ? '' : ' data-tooltip="Requires Delete access for Income."';
-
-    const ordersBySourceEntryId = new Map();
-    const ordersByPoCanon = new Map();
-    const orderIds = new Set();
-    {
-      const orders = loadOrders(year);
-      for (const o of orders || []) {
-        if (!o || typeof o !== 'object') continue;
-
-        const oid = String(o.id || '').trim();
-        if (oid) orderIds.add(oid);
-
-        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
-        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
-
-        const sourceEntryId = String(o.sourceEntryId || '').trim();
-        if (!sourceEntryId) continue;
-        if (!ordersBySourceEntryId.has(sourceEntryId)) {
-          ordersBySourceEntryId.set(sourceEntryId, o);
-          continue;
-        }
-        // Prefer an order that has a PO number assigned.
-        const existing = ordersBySourceEntryId.get(sourceEntryId);
-        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
-        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
-        if (!existingPoNo && nextPoNo) ordersBySourceEntryId.set(sourceEntryId, o);
-      }
-    }
-
-    const reconcileBySourceEntryId = new Map();
-    const reconcileByPoCanon = new Map();
-    {
-      const rec = loadReconciliationOrders(year);
-      for (const o of rec || []) {
-        if (!o || typeof o !== 'object') continue;
-        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
-        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
-
-        const sourceEntryId = String(o.sourceEntryId || '').trim();
-        if (!sourceEntryId) continue;
-        if (!reconcileBySourceEntryId.has(sourceEntryId)) reconcileBySourceEntryId.set(sourceEntryId, o);
-      }
-    }
-
-    const rowsHtml = (entries || [])
-      .map((e) => {
-        const id = escapeHtml(e.id);
-        const isMissingBudget = String(e && e.budgetNumber ? e.budgetNumber : '').trim() === '';
-        const rowClass = isMissingBudget ? ' class="incomeRow--missingBudget"' : '';
-        const date = escapeHtml(getIncomeDisplayValueForColumn(e, 'date', year));
-        const remitter = escapeHtml(getIncomeDisplayValueForColumn(e, 'remitter', year));
-        const budgetCode = getIncomeDisplayValueForColumn(e, 'budgetNumber', year);
-        const budget = renderInBudgetNumberHtml(budgetCode, year);
-        const euro = escapeHtml(getIncomeDisplayValueForColumn(e, 'euro', year));
-        const descRaw = String(e && e.description ? e.description : '');
-        const strippedDescRaw = descRaw
-          // Avoid duplicating legacy/free-typed converted markers.
-          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
-          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
-          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
-          .trim();
-        const descText = escapeHtml(strippedDescRaw);
-
-        const euroRaw = Number(e && e.euro);
-        const isNegative = Number.isFinite(euroRaw) && euroRaw < 0;
-        const srcEntryId = isNegative ? `inc:${String(e.id || '')}` : '';
-        const match = srcEntryId
-          ? (ordersBySourceEntryId.get(srcEntryId) || reconcileBySourceEntryId.get(srcEntryId))
-          : null;
-
-        // Determine the PO number to display/link.
-        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
-        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
-        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
-        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
-
-        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
-        const poCanon = canonicalizePaymentOrderNo(poCandidate);
-        const poOrder = poCanon
-          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
-          : null;
-
-        const orderForLink = match || poOrder;
-        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
-        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
-        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
-        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
-        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
-        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
-
-        const convertedHtml = (isNegative && isOnPaymentOrdersTable && poDisplay)
-          ? (orderIdForLink
-            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
-            : ` (converted to ${poDisplay})`)
-          : (isNegative && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
-
-        const desc = `${descText}${convertedHtml}`;
-
-        return `
-          <tr${rowClass} data-income-id="${id}">
-            <td>${date}</td>
-            <td>${remitter}</td>
-            <td>${budget}</td>
-            <td class="num">${euro}</td>
-            <td>${desc}</td>
-            <td class="actions">
-              <button type="button" class="btn btn--editIcon" data-income-action="edit" aria-label="Edit" title="${canEditIncome ? 'Edit' : 'Read-only access for Income.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn btn--x" data-income-action="delete" aria-label="Delete entry" title="${canDeleteIncome ? 'Delete' : 'Requires Delete access for Income.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L6 5a.5.5 0 0 1 .471-.53zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 0 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg></button>
-            </td>
-          </tr>
-        `.trim();
-      })
-      .join('');
-
-    incomeTbody.innerHTML = rowsHtml;
-  }
-
-  function updateIncomeSortIndicators() {
-    if (!incomeTbody) return;
-    const table = incomeTbody.closest('table');
-    if (!table) return;
-
-    const sortKey = incomeViewState.sortKey;
-    const sortDir = incomeViewState.sortDir === 'desc' ? 'desc' : 'asc';
-
-    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
-    for (const th of ths) {
-      const colKey = th.getAttribute('data-sort-key');
-      let aria = 'none';
-      if (colKey && sortKey === colKey) {
-        aria = sortDir === 'desc' ? 'descending' : 'ascending';
-      }
-      th.setAttribute('aria-sort', aria);
-    }
-  }
-
-  function initIncomeColumnSorting() {
-    if (!incomeTbody) return;
-    const table = incomeTbody.closest('table');
-    if (!table) return;
-    if (table.dataset.sortBound === '1') return;
-
-    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
-    if (ths.length === 0) return;
-    table.dataset.sortBound = '1';
-
-    function applySortForKey(colKey) {
-      if (!colKey) return;
-      if (incomeViewState.sortKey === colKey) {
-        incomeViewState.sortDir = incomeViewState.sortDir === 'asc' ? 'desc' : 'asc';
-      } else {
-        incomeViewState.sortKey = colKey;
-        incomeViewState.sortDir = 'asc';
-      }
-      applyIncomeView();
-    }
-
-    for (const th of ths) {
-      th.classList.add('is-sortable');
-      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
-      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
-
-      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
-      th.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        applySortForKey(th.getAttribute('data-sort-key'));
-      });
-    }
-
-    updateIncomeSortIndicators();
-  }
-
-  function populateIncomeBudgetSelect(select, year) {
-    if (!select) return;
-
-    const prev = String(select.value || '').trim();
-    select.innerHTML = '';
-
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.selected = true;
-    placeholder.textContent = 'Select a budget number (restricted)…';
-    select.appendChild(placeholder);
-
-    const inAccounts = readInAccountsFromBudgetYear(year);
-    if (inAccounts.length === 0) {
-      const none = document.createElement('option');
-      none.value = '__none__';
-      none.disabled = true;
-      none.textContent = 'No IN accounts found in the active budget';
-      select.appendChild(none);
-      return;
-    }
-
-    for (const item of inAccounts) {
-      const opt = document.createElement('option');
-      opt.value = item.inCode;
-      opt.textContent = item.desc ? `${item.inCode} - ${item.desc}` : item.inCode;
-      select.appendChild(opt);
-    }
-
-    if (prev && inAccounts.some((x) => x.inCode === prev)) {
-      select.value = prev;
-    }
-  }
-
-  let currentIncomeId = null;
-
-  function openIncomeModal(entry, year) {
-    if (!incomeModal || !incomeModalBody) return;
-    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
-    currentIncomeId = entry && entry.id ? entry.id : null;
-
-    // Backfill/persist an initial timeline entry for older records.
-    let entryForView = entry;
-    if (currentIncomeId && entryForView && (!Array.isArray(entryForView.timeline) || entryForView.timeline.length === 0)) {
-      const seeded = ensureIncomeTimeline(entryForView);
-      entryForView = { ...entryForView, timeline: seeded };
-      upsertIncomeEntry(entryForView, y);
-    }
-
-    const titleEl = incomeModal.querySelector('#incomeModalTitle');
-    const subheadEl = incomeModal.querySelector('#incomeModalSubhead');
-    if (titleEl) titleEl.textContent = currentIncomeId ? 'Income (Edit)' : 'Income (New)';
-    if (subheadEl) subheadEl.textContent = `${y} Income`;
-
-    const safeDate = escapeHtml(entryForView && entryForView.date ? entryForView.date : '');
-    const safeRemitter = escapeHtml(entryForView && entryForView.remitter ? entryForView.remitter : '');
-    const safeEuro =
-      entryForView && entryForView.euro !== null && entryForView.euro !== undefined && entryForView.euro !== '' ? escapeHtml(String(entryForView.euro)) : '';
-    const safeDesc = escapeHtml(entryForView && entryForView.description ? entryForView.description : '');
-    const safeBudget = escapeHtml(entryForView && entryForView.budgetNumber ? entryForView.budgetNumber : '');
-
-    const timelineHtml = currentIncomeId && entryForView ? renderIncomeTimelineGraph(entryForView) : '';
-
-    incomeModalBody.innerHTML = `
-      <form id="incomeModalForm" novalidate>
-        <div class="grid">
-          <div class="field">
-            <label for="incomeDate">Transaction Date<span class="req" aria-hidden="true">*</span></label>
-            <input id="incomeDate" name="incomeDate" type="date" required value="${safeDate}" />
-            <div class="error" id="error-incomeDate" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="incomeEuro">Euro (€)<span class="req" aria-hidden="true">*</span></label>
-            <input id="incomeEuro" name="incomeEuro" type="number" inputmode="decimal" step="0.01" required value="${safeEuro}" />
-            <div class="error" id="error-incomeEuro" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="incomeRemitter">Remitter<span class="req" aria-hidden="true">*</span></label>
-            <input id="incomeRemitter" name="incomeRemitter" type="text" autocomplete="off" required value="${safeRemitter}" />
-            <div class="error" id="error-incomeRemitter" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="incomeBudgetNumber">Budget Nr.</label>
-            <select id="incomeBudgetNumber" name="incomeBudgetNumber">
-              <option value="" selected>Select a budget number (restricted)…</option>
-            </select>
-            <div class="error" id="error-incomeBudgetNumber" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="incomeDescription">Description<span class="req" aria-hidden="true">*</span></label>
-            <textarea id="incomeDescription" name="incomeDescription" rows="3" required>${safeDesc}</textarea>
-            <div class="error" id="error-incomeDescription" role="alert" aria-live="polite"></div>
-          </div>
-        </div>
-      </form>
-      ${timelineHtml}
-    `.trim();
-
-    const select = incomeModalBody.querySelector('#incomeBudgetNumber');
-    if (select) {
-      populateIncomeBudgetSelect(select, y);
-      if (safeBudget) select.value = safeBudget;
-    }
-
-    incomeModal.classList.add('is-open');
-    incomeModal.setAttribute('aria-hidden', 'false');
-
-    const focusTarget = incomeModalBody.querySelector('#incomeDate');
-    if (focusTarget && focusTarget.focus) focusTarget.focus();
-  }
-
-  function closeIncomeModal() {
-    if (!incomeModal || !incomeModalBody) return;
-    incomeModal.classList.remove('is-open');
-    incomeModal.setAttribute('aria-hidden', 'true');
-    incomeModalBody.innerHTML = '';
-    currentIncomeId = null;
-  }
-
-  function clearIncomeModalErrors() {
-    if (!incomeModalBody) return;
-    const errors = Array.from(incomeModalBody.querySelectorAll('.error'));
-    for (const el of errors) el.textContent = '';
-  }
-
-  function showIncomeModalErrors(errors) {
-    if (!incomeModalBody || !errors) return;
-    const map = {
-      date: '#error-incomeDate',
-      euro: '#error-incomeEuro',
-      remitter: '#error-incomeRemitter',
-      budgetNumber: '#error-incomeBudgetNumber',
-      description: '#error-incomeDescription',
-    };
-    for (const [k, sel] of Object.entries(map)) {
-      const el = incomeModalBody.querySelector(sel);
-      if (el) el.textContent = errors[k] || '';
-    }
-  }
-
-  function validateIncomeModalValues() {
-    if (!incomeModalBody) return { ok: false };
-    const dateEl = incomeModalBody.querySelector('#incomeDate');
-    const euroEl = incomeModalBody.querySelector('#incomeEuro');
-    const remitterEl = incomeModalBody.querySelector('#incomeRemitter');
-    const budgetEl = incomeModalBody.querySelector('#incomeBudgetNumber');
-    const descEl = incomeModalBody.querySelector('#incomeDescription');
-
-    const values = {
-      date: dateEl ? String(dateEl.value || '').trim() : '',
-      euro: euroEl ? String(euroEl.value || '').trim() : '',
-      remitter: remitterEl ? String(remitterEl.value || '').trim() : '',
-      budgetNumber: budgetEl ? String(budgetEl.value || '').trim() : '',
-      description: descEl ? String(descEl.value || '').trim() : '',
-    };
-
-    const errors = {};
-    if (!values.date) errors.date = 'This field is required.';
-    if (!values.remitter) errors.remitter = 'This field is required.';
-    if (!values.description) errors.description = 'This field is required.';
-
-    const euroNum = Number(values.euro);
-    if (String(values.euro || '').trim() === '') errors.euro = 'This field is required.';
-    else if (!Number.isFinite(euroNum)) errors.euro = 'Enter a valid amount.';
-
-    if (Object.keys(errors).length > 0) return { ok: false, errors };
-    return {
-      ok: true,
-      values: {
-        date: values.date,
-        remitter: values.remitter,
-        budgetNumber: values.budgetNumber,
-        euro: euroNum,
-        description: values.description,
-      },
-    };
-  }
-
-  function applyIncomeView() {
-    if (!incomeTbody || !incomeEmptyState) return;
-    ensureIncomeDefaultEmptyText();
-
-    const year = getActiveBudgetYear();
-    const all = loadIncome(year);
-    const filtered = filterIncomeForView(all, incomeViewState.globalFilter, year);
-    const sorted = sortIncomeForView(filtered, incomeViewState.sortKey, incomeViewState.sortDir, year);
-
-    if (normalizeTextForSearch(incomeViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
-      incomeEmptyState.textContent = 'No income entries match your search.';
-    } else {
-      incomeEmptyState.textContent = incomeViewState.defaultEmptyText;
-    }
-
-    incomeEmptyState.hidden = sorted.length > 0;
-    renderIncomeRows(sorted, year);
-    updateIncomeTotals(sorted);
-    updateIncomeSortIndicators();
-  }
-
-  function updateIncomeTotals(entries) {
-    const totalEuroEl = document.getElementById('incomeTotalEuro');
-    if (!totalEuroEl) return;
-
-    let total = 0;
-    for (const e of entries || []) {
-      const n = Number(e && e.euro);
-      if (Number.isFinite(n)) total += n;
-    }
-    totalEuroEl.textContent = formatCurrency(total, 'EUR');
-  }
-
-  function initIncomeListPage() {
-    if (!incomeTbody || !incomeEmptyState) return;
-    const year = getActiveBudgetYear();
-
-    const currentUser = getCurrentUser();
-    const hasIncomeCreateAccess = Boolean(currentUser && canCreate(currentUser, 'income_bankeur'));
-
-    const incomeNewLink = document.getElementById('incomeNewLink');
-    const incomeExportCsvLink = document.getElementById('incomeExportCsvLink');
-    const incomeDownloadTemplateLink = document.getElementById('incomeDownloadTemplateLink');
-    const incomeImportCsvLink = document.getElementById('incomeImportCsvLink');
-    const incomeMenuBtn = document.getElementById('incomeActionsMenuBtn');
-    const incomeMenuPanel = document.getElementById('incomeActionsMenu');
-    const incomeBackToLedgerLink = document.getElementById('incomeBackToLedgerLink');
-
-    function setLinkDisabled(linkEl, disabled) {
-      if (!linkEl) return;
-      linkEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-      if (disabled) linkEl.setAttribute('tabindex', '-1');
-      else linkEl.removeAttribute('tabindex');
-    }
-
-    // Ensure the year is present in the URL for consistent nav highlighting.
-    const fromUrl = getBudgetYearFromUrl();
-    if (!fromUrl && getBasename(window.location.pathname) === 'income.html') {
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.set('year', String(year));
-        window.history.replaceState(null, '', url.toString());
-      } catch {
-        // ignore
-      }
-    }
-
-    ensureIncomeListExistsForYear(year);
-
-    const titleEl = document.querySelector('[data-income-title]');
-    const incomeTitle = `${year} BankEUR (Commerzbank)`;
-    if (titleEl) titleEl.textContent = incomeTitle;
-    const listTitleEl = document.querySelector('[data-income-list-title]');
-    if (listTitleEl) listTitleEl.textContent = incomeTitle;
-    if (incomeBackToLedgerLink) {
-      incomeBackToLedgerLink.href = `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`;
-      incomeBackToLedgerLink.textContent = `← Back to ${year} Ledger`;
-    }
-    applyAppTabTitle();
-
-    initIncomeColumnSorting();
-
-    // Partial access for Income = full access except New Income and Import CSV.
-    setLinkDisabled(incomeNewLink, !hasIncomeCreateAccess);
-    if (incomeNewLink && !hasIncomeCreateAccess) {
-      incomeNewLink.setAttribute(
-        'data-tooltip',
-        'Requires Create access for Income. Write access can edit existing entries, but cannot create new ones.'
-      );
-    }
-    setLinkDisabled(incomeImportCsvLink, !hasIncomeCreateAccess);
-    if (incomeImportCsvLink && !hasIncomeCreateAccess) {
-      incomeImportCsvLink.setAttribute(
-        'data-tooltip',
-        'Requires Create access for Income. Write access can edit existing entries, but cannot import new ones.'
-      );
-    }
-
-    const globalInput = document.getElementById('incomeGlobalSearch');
-    if (globalInput) {
-      globalInput.value = incomeViewState.globalFilter || '';
-      globalInput.addEventListener('input', () => {
-        incomeViewState.globalFilter = globalInput.value;
-        if (incomeClearSearchBtn) {
-          const hasSearch = normalizeTextForSearch(incomeViewState.globalFilter) !== '';
-          incomeClearSearchBtn.hidden = !hasSearch;
-          incomeClearSearchBtn.disabled = !hasSearch;
-        }
-        applyIncomeView();
-      });
-    }
-
-    if (incomeClearSearchBtn && globalInput) {
-      const hasSearch = normalizeTextForSearch(incomeViewState.globalFilter) !== '';
-      incomeClearSearchBtn.hidden = !hasSearch;
-      incomeClearSearchBtn.disabled = !hasSearch;
-      if (!incomeClearSearchBtn.dataset.bound) {
-        incomeClearSearchBtn.dataset.bound = 'true';
-        incomeClearSearchBtn.addEventListener('click', () => {
-          globalInput.value = '';
-          incomeViewState.globalFilter = '';
-          incomeClearSearchBtn.hidden = true;
-          incomeClearSearchBtn.disabled = true;
-          applyIncomeView();
-          if (globalInput.focus) globalInput.focus();
-        });
-      }
-    }
-
-    if (incomeNewLink) {
-      incomeNewLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (incomeNewLink.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(incomeNewLink);
-          return;
-        }
-        if (!requireCreateAccess('income_bankeur', 'Create access is required for Income.')) return;
-        openIncomeModal(null, year);
-        if (incomeMenuPanel && incomeMenuBtn) {
-          incomeMenuPanel.setAttribute('hidden', '');
-          incomeMenuBtn.setAttribute('aria-expanded', 'false');
-        }
-      });
-    }
-
-    if (incomeClearAllBtn) {
-      incomeClearAllBtn.addEventListener('click', () => {
-        if (!requireDeleteAccess('income_bankeur', 'Delete access is required for Income.')) return;
-        const all = loadIncome(year);
-        if (all.length === 0) return;
-        const ok = window.confirm('Clear all income entries? This cannot be undone.');
-        if (!ok) return;
-
-        saveIncome([], year);
-        applyIncomeView();
-      });
-    }
-
-    function escapeCsvValue(value) {
-      const s = String(value ?? '');
-      const normalized = s.replace(/\u00A0/g, ' ').replace(/\r\n|\r|\n/g, ' ').trim();
-      const mustQuote = /[",\n\r]/.test(normalized);
-      const escaped = normalized.replace(/"/g, '""');
-      return mustQuote ? `"${escaped}"` : escaped;
-    }
-
-    function downloadCsvFile(csvText, fileName) {
-      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function getTodayStamp() {
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    }
-
-    function exportIncomeToCsv() {
-      const header = ['Transaction Date', 'Remitter', 'Budget Nr.', 'Euro', 'Description'];
-      const entries = loadIncome(year);
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-
-      // Export sorted newest-first by date (stable if any missing date)
-      const sorted = sortIncomeForView(entries, 'date', 'desc', year);
-      for (const e of sorted) {
-        const values = [
-          String(e && e.date ? e.date : ''),
-          String(e && e.remitter ? e.remitter : ''),
-          String(e && e.budgetNumber ? e.budgetNumber : ''),
-          e && e.euro !== null && e.euro !== undefined && e.euro !== '' ? String(e.euro) : '',
-          String(e && e.description ? e.description : ''),
-        ];
-        lines.push(values.map(escapeCsvValue).join(','));
-      }
-
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, `income_${year}_${getTodayStamp()}.csv`);
-    }
-
-    function downloadIncomeCsvTemplate() {
-      const header = ['Transaction Date', 'Remitter', 'Budget Nr.', 'Euro', 'Description'];
-      // Include a valid ISO date example so imports succeed without guesswork.
-      const example = [getTodayStamp(), 'Example Remitter', '', '0.00', 'Example description'];
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-      lines.push(example.map(escapeCsvValue).join(','));
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, `income_template_${year}_${getTodayStamp()}.csv`);
-    }
-
-    function parseCsvText(text) {
-      const rows = [];
-      const s = String(text ?? '');
-      let row = [];
-      let field = '';
-      let inQuotes = false;
-
-      for (let i = 0; i < s.length; i += 1) {
-        const ch = s[i];
-
-        if (inQuotes) {
-          if (ch === '"') {
-            const next = s[i + 1];
-            if (next === '"') {
-              field += '"';
-              i += 1;
-            } else {
-              inQuotes = false;
-            }
-          } else {
-            field += ch;
-          }
-          continue;
-        }
-
-        if (ch === '"') {
-          inQuotes = true;
-          continue;
-        }
-
-        if (ch === ',') {
-          row.push(field);
-          field = '';
-          continue;
-        }
-
-        if (ch === '\n') {
-          row.push(field);
-          field = '';
-          rows.push(row);
-          row = [];
-          continue;
-        }
-
-        if (ch === '\r') {
-          continue;
-        }
-
-        field += ch;
-      }
-
-      row.push(field);
-      rows.push(row);
-
-      while (rows.length > 0) {
-        const last = rows[rows.length - 1];
-        const isEmpty = last.every((c) => String(c ?? '').trim() === '');
-        if (!isEmpty) break;
-        rows.pop();
-      }
-
-      return rows;
-    }
-
-    function normalizeHeaderName(name) {
-      return String(name ?? '')
-        .replace(/\uFEFF/g, '')
-        .replace(/\u00A0/g, ' ')
-        .trim()
-        .toLowerCase();
-    }
-
-    function normalizeCsvDate(raw) {
-      const s = String(raw ?? '').trim();
-      if (!s) return '';
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-      // Accept common US-style formats like M/D/YYYY or MM/DD/YYYY (also with '-' separators).
-      const mdy = s.match(/^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$/);
-      if (mdy) {
-        const mm = Number(mdy[1]);
-        const dd = Number(mdy[2]);
-        const yyyy = Number(mdy[3]);
-        if (!Number.isInteger(mm) || !Number.isInteger(dd) || !Number.isInteger(yyyy)) return '';
-        if (yyyy < 1000 || yyyy > 9999) return '';
-        if (mm < 1 || mm > 12) return '';
-        if (dd < 1 || dd > 31) return '';
-
-        // Validate actual calendar date.
-        const d = new Date(yyyy, mm - 1, dd);
-        if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return '';
-
-        const mmText = String(mm).padStart(2, '0');
-        const ddText = String(dd).padStart(2, '0');
-        return `${yyyy}-${mmText}-${ddText}`;
-      }
-
-      const ms = Date.parse(s);
-      if (!Number.isFinite(ms)) return '';
-      const d = new Date(ms);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    }
-
-    function parseEuroAmount(raw) {
-      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!s) return null;
-      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n) || n < 0) return null;
-      return n;
-    }
-
-    function parseSignedEuroAmount(raw) {
-      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!s) return null;
-      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n)) return null;
-      return n;
-    }
-
-    function findHeaderIndex(headerNames, candidates) {
-      const names = Array.isArray(headerNames) ? headerNames : [];
-      const cands = (Array.isArray(candidates) ? candidates : []).map(normalizeHeaderName).filter(Boolean);
-      if (cands.length === 0) return -1;
-
-      for (const c of cands) {
-        const exact = names.indexOf(c);
-        if (exact !== -1) return exact;
-      }
-
-      for (let i = 0; i < names.length; i += 1) {
-        const h = String(names[i] ?? '').trim();
-        if (!h) continue;
-        if (cands.some((c) => h === c || h.startsWith(`${c} `) || h.startsWith(`${c}(`) || h.startsWith(`${c}—`) || h.startsWith(`${c}-`) || h.startsWith(c))) {
-          return i;
-        }
-      }
-
-      return -1;
-    }
-
-    function importIncomeFromCsvText(csvText, fileName) {
-      const ok = window.confirm(
-        `Importing a CSV will add entries to the current income list for ${year}. Continue?\n\nFile: ${fileName || 'CSV'}`
-      );
-      if (!ok) return;
-
-      const rows = parseCsvText(csvText);
-      if (rows.length === 0) {
-        window.alert('CSV is empty.');
-        return;
-      }
-
-      const header = rows[0].map(normalizeHeaderName);
-      const dataRows = rows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
-
-      const idx = {
-        date: findHeaderIndex(header, ['transaction date', 'date']),
-        remitter: findHeaderIndex(header, ['remitter']),
-        budgetNumber: findHeaderIndex(header, ['budget number', 'budget']),
-        euro: findHeaderIndex(header, ['euro', 'eur', 'euro (€)', 'euro (eur)']),
-        description: findHeaderIndex(header, ['description', 'details', 'memo', 'reference']),
-      };
-
-      const hasHeaders = idx.remitter !== -1 && idx.euro !== -1 && idx.description !== -1 && idx.date !== -1;
-      if (!hasHeaders && header.length >= 3) {
-        // Allow headerless CSV by treating first row as data in the expected order.
-        dataRows.unshift(rows[0]);
-        idx.date = 0;
-        idx.remitter = 1;
-        idx.budgetNumber = 2;
-        idx.euro = 3;
-        idx.description = 4;
-      }
-
-      const nowIso = new Date().toISOString();
-      const timelineUser = getTimelineUsername();
-      const imported = [];
-      const createdReconciliationOrders = [];
-      const errors = [];
-
-      for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
-        const r = dataRows[rowIndex];
-        const get = (i) => (i >= 0 ? (r[i] ?? '') : '');
-
-        const date = normalizeCsvDate(get(idx.date));
-        const remitter = String(get(idx.remitter)).trim();
-        const budgetNumber = String(get(idx.budgetNumber)).trim();
-        const euroSigned = parseSignedEuroAmount(get(idx.euro));
-        const description = String(get(idx.description)).trim();
-
-        const rowNo = rowIndex + 2; // 1-based + header row
-        if (!date) errors.push(`Row ${rowNo}: invalid Transaction Date.`);
-        if (!remitter) errors.push(`Row ${rowNo}: Remitter is required.`);
-        if (euroSigned === null) errors.push(`Row ${rowNo}: Euro is required and must be a valid number.`);
-        if (!description) errors.push(`Row ${rowNo}: Description is required.`);
-        if (!date || !remitter || euroSigned === null || !description) continue;
-
-        // Negative amounts are expenditures: also create Payment Orders in Reconciliation.
-        if (euroSigned < 0) {
-          const absEuro = Math.abs(euroSigned);
-          const itemTitle = description || 'Imported from Income CSV';
-          const po = buildPaymentOrder({
-            source: 'Commerzbank',
-            paymentOrderNo: '',
-            date,
-            name: remitter,
-            euro: absEuro,
-            usd: null,
-            items: [
-              {
-                id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-                title: itemTitle,
-                euro: absEuro,
-                usd: null,
-              },
-            ],
-            address: '',
-            iban: '',
-            bic: '',
-            specialInstructions: '',
-            budgetNumber: '',
-            purpose: description,
-            with: 'Grand Secretary',
-            status: 'Submitted',
-          });
-
-          po.updatedAt = po.createdAt;
-
-          createdReconciliationOrders.push(po);
-        }
-
-        const inc = {
-          id: (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          date,
-          remitter,
-          budgetNumber,
-          euro: euroSigned,
-          description,
-        };
-
-        // Timeline: treat CSV import as a "Created" event by the importing user.
-        inc.timeline = [
-          {
-            at: nowIso,
-            user: timelineUser,
-            action: 'Created',
-            changes: computeIncomeAuditChanges(null, inc),
-          },
-        ];
-
-        imported.push(inc);
-      }
-
-      if (imported.length === 0 && createdReconciliationOrders.length === 0) {
-        window.alert(
-          errors.length
-            ? `No rows were imported or converted:\n\n${errors.slice(0, 15).join('\n')}`
-            : 'No rows were imported or converted.'
-        );
-        return;
-      }
-
-      if (errors.length > 0) {
-        const proceed = window.confirm(
-          `Some rows could not be processed. Continue with ${imported.length} income row(s) and ${createdReconciliationOrders.length} payment order(s) in Reconciliation?\n\n${errors
-            .slice(0, 15)
-            .join('\n')}${errors.length > 15 ? '\n…' : ''}`
-        );
-        if (!proceed) return;
-      }
-
-      if (createdReconciliationOrders.length > 0) {
-        ensurePaymentOrdersReconciliationListExistsForYear(year);
-        const existingOrders = loadReconciliationOrders(year);
-        const mergedOrders = [...createdReconciliationOrders, ...(Array.isArray(existingOrders) ? existingOrders : [])];
-        saveReconciliationOrders(mergedOrders, year);
-      }
-
-      if (imported.length > 0) {
-        const existing = loadIncome(year);
-        const merged = [...imported, ...(Array.isArray(existing) ? existing : [])];
-        saveIncome(merged, year);
-      }
-      applyIncomeView();
-
-      if (typeof showFlashToken === 'function') {
-        showFlashToken(
-          `Imported ${imported.length} income row(s). Added ${createdReconciliationOrders.length} payment order(s) to Reconciliation from negative amounts.`
-        );
-      }
-    }
-
-    if (incomeExportCsvLink) {
-      incomeExportCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        exportIncomeToCsv();
-      });
-    }
-    if (incomeDownloadTemplateLink) {
-      incomeDownloadTemplateLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        downloadIncomeCsvTemplate();
-      });
-    }
-    if (incomeImportCsvLink) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.csv,text/csv';
-      input.style.display = 'none';
-      document.body.appendChild(input);
-
-      incomeImportCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (incomeImportCsvLink.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(incomeImportCsvLink);
-          return;
-        }
-        if (!requireCreateAccess('income_bankeur', 'Create access is required for Income.')) return;
-        input.value = '';
-        input.click();
-      });
-
-      input.addEventListener('change', () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          importIncomeFromCsvText(reader.result, file.name);
-        };
-        reader.onerror = () => {
-          window.alert('Could not read CSV file.');
-        };
-        reader.readAsText(file);
-      });
-    }
-
-    if (incomeMenuBtn) {
-      const MENU_CLOSE_DELAY_MS = 250;
-      let menuCloseTimer = 0;
-
-      function isMenuOpen() {
-        return Boolean(incomeMenuPanel && !incomeMenuPanel.hasAttribute('hidden'));
-      }
-
-      function closeMenu() {
-        if (!incomeMenuPanel || !incomeMenuBtn) return;
-        incomeMenuPanel.setAttribute('hidden', '');
-        incomeMenuBtn.setAttribute('aria-expanded', 'false');
-      }
-
-      function openMenu() {
-        if (!incomeMenuPanel || !incomeMenuBtn) return;
-        incomeMenuPanel.removeAttribute('hidden');
-        incomeMenuBtn.setAttribute('aria-expanded', 'true');
-      }
-
-      function toggleMenu() {
-        if (isMenuOpen()) closeMenu();
-        else openMenu();
-      }
-
-      function cancelScheduledClose() {
-        if (!menuCloseTimer) return;
-        clearTimeout(menuCloseTimer);
-        menuCloseTimer = 0;
-      }
-
-      function scheduleClose() {
-        cancelScheduledClose();
-        if (!isMenuOpen()) return;
-        menuCloseTimer = window.setTimeout(() => {
-          closeMenu();
-          menuCloseTimer = 0;
-        }, MENU_CLOSE_DELAY_MS);
-      }
-
-      incomeMenuBtn.addEventListener('click', () => {
-        toggleMenu();
-      });
-
-      incomeMenuBtn.addEventListener('mouseenter', cancelScheduledClose);
-      incomeMenuBtn.addEventListener('mouseleave', scheduleClose);
-
-      if (incomeMenuPanel) {
-        incomeMenuPanel.addEventListener('mouseenter', cancelScheduledClose);
-        incomeMenuPanel.addEventListener('mouseleave', scheduleClose);
-      }
-
-      document.addEventListener('click', (e) => {
-        if (!isMenuOpen()) return;
-        const menuRoot = e.target?.closest ? e.target.closest('[data-income-menu]') : null;
-        if (menuRoot) return;
-        cancelScheduledClose();
-        closeMenu();
-      });
-
-      document.addEventListener('keydown', (e) => {
-        if (!isMenuOpen()) return;
-        if (e.key === 'Escape') {
-          cancelScheduledClose();
-          closeMenu();
-        }
-      });
-    }
-
-    incomeTbody.addEventListener('click', (e) => {
-      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
-      if (dl) {
-        e.preventDefault();
-        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
-        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
-        if (!orderId) return;
-
-        const order = scope === 'reconciliation'
-          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
-          : loadOrders(year).find((o) => o && String(o.id) === orderId);
-        if (!order) return;
-        if (hasOrderMissingRequiredValues(order)) {
-          window.alert('Complete all required fields before downloading a PDF.');
-          return;
-        }
-        generatePaymentOrderPdfFromTemplate({ order });
-        return;
-      }
-
-      const btn = e.target.closest('button[data-income-action]');
-      if (!btn) return;
-      const row = btn.closest('tr[data-income-id]');
-      if (!row) return;
-      const id = row.getAttribute('data-income-id');
-      const action = btn.getAttribute('data-income-action');
-
-      if (action === 'delete') {
-        if (!requireDeleteAccess('income_bankeur', 'Delete access is required for Income.')) return;
-        const ok = window.confirm('Delete this income entry?');
-        if (!ok) return;
-
-        deleteIncomeEntryById(id, year);
-        applyIncomeView();
-        return;
-      }
-
-      if (action === 'edit') {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        const all = loadIncome(year);
-        const entry = all.find((x) => x && x.id === id);
-        if (!entry) return;
-        openIncomeModal(entry, year);
-      }
-    });
-
-    if (incomeModal) {
-      incomeModal.addEventListener('click', (e) => {
-        const closeTarget = e.target.closest('[data-income-modal-close]');
-        if (closeTarget) closeIncomeModal();
-      });
-    }
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && incomeModal && incomeModal.classList.contains('is-open')) {
-        closeIncomeModal();
-      }
-    });
-
-    if (incomeSaveBtn) {
-      incomeSaveBtn.addEventListener('click', () => {
-        try {
-          if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-          if (!hasIncomeCreateAccess && !currentIncomeId) {
-            window.alert('Requires Full access for Income to create a new income entry.');
-            return;
-          }
-          clearIncomeModalErrors();
-          const res = validateIncomeModalValues();
-          if (!res.ok) {
-            showIncomeModalErrors(res.errors);
-            return;
-          }
-
-          const nowIso = new Date().toISOString();
-          const timelineUser = getTimelineUsername();
-          const id =
-            currentIncomeId ||
-            (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-          const existing = currentIncomeId ? loadIncome(year).find((x) => x && x.id === currentIncomeId) : null;
-
-          const entry = {
-            id,
-            createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
-            updatedAt: nowIso,
-            ...res.values,
-            idTrack: existing && existing.idTrack ? existing.idTrack : '',
-          };
-
-          // Timeline
-          if (existing) {
-            entry.timeline = appendIncomeTimelineEvent(existing, {
-              at: nowIso,
-              user: timelineUser,
-              action: 'Edited',
-              changes: computeIncomeAuditChanges(existing, entry),
-            });
-          } else {
-            entry.timeline = [
-              {
-                at: nowIso,
-                user: timelineUser,
-                action: 'Created',
-                changes: computeIncomeAuditChanges(null, entry),
-              },
-            ];
-          }
-
-          upsertIncomeEntry(entry, year);
-
-          if (!existing) {
-            void fireNotificationEvent('new_bank_eur', {
-              date: String(entry.date || ''),
-              description: String(entry.description || ''),
-              amount: String(entry.euro || ''),
-              year: String(year),
-              directLink: String(window.location.href || ''),
-            });
-          }
-
-          // Keep negative BankEUR entries in sync with Reconciliation.
-          // Negative amounts are expenditures: create/update a reconciliation order while still displaying the entry.
-          const euroNum = Number(entry.euro);
-          const sourceEntryId = `inc:${String(id)}`;
-          if (Number.isFinite(euroNum) && euroNum < 0) {
-            ensurePaymentOrdersReconciliationListExistsForYear(year);
-            const absEuro = Math.abs(euroNum);
-            const itemTitle = String(entry.description || '').trim() || 'Imported from BankEUR';
-            const po = {
-              id: (crypto?.randomUUID ? crypto.randomUUID() : `po_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-              createdAt: nowIso,
-              updatedAt: nowIso,
-              source: 'Commerzbank',
-              sourceEntryId,
-              paymentOrderNo: '',
-              date: String(entry.date || '').trim(),
-              name: String(entry.remitter || '').trim(),
-              euro: absEuro,
-              usd: null,
-              items: [
-                {
-                  id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-                  title: itemTitle,
-                  euro: absEuro,
-                  usd: null,
-                },
-              ],
-              address: '',
-              iban: '',
-              bic: '',
-              specialInstructions: '',
-              budgetNumber: String(entry.budgetNumber || '').trim(),
-              purpose: String(entry.description || '').trim(),
-              with: 'Grand Secretary',
-              status: 'Submitted',
-            };
-            upsertReconciliationOrderBySource(po, year);
-          } else {
-            removeReconciliationOrderBySource('Commerzbank', sourceEntryId, year);
-          }
-
-          closeIncomeModal();
-          applyIncomeView();
-        } catch (err) {
-          console.error('[Income Save] Failed', err);
-          window.alert(`Unable to save Income entry. ${err && err.message ? err.message : 'Check console for details.'}`);
-        }
-      });
-    }
-
-    window.addEventListener('storage', (e) => {
-      const key = e && typeof e.key === 'string' ? e.key : '';
-      if (key === ACTIVE_BUDGET_YEAR_KEY || key === BUDGET_YEARS_KEY || key.startsWith('payment_order_budget_table_html_')) {
-        applyIncomeView();
-      }
-    });
-
-    applyIncomeView();
-  }
-
-  // ---- wiseEUR (year-scoped) ----
-
-  const WISE_EUR_COL_TYPES = {
-    budgetNo: 'text',
-    datePL: 'date',
-    idTrack: 'text',
-    receivedFromDisbursedTo: 'text',
-    receipts: 'number',
-    disburse: 'number',
-    description: 'text',
-    issuanceDateBank: 'date',
-    verified: 'number',
-    checksum: 'number',
-    bankStatements: 'text',
-    remarks: 'text',
-  };
-
-  const wiseEurViewState = {
-    globalFilter: '',
-    sortKey: 'datePL',
-    sortDir: 'asc',
-    defaultEmptyText: null,
-    canVerify: false,
-    canDelete: false,
-  };
-
-  function ensureWiseEurDefaultEmptyText() {
-    if (!wiseEurEmptyState) return;
-    if (wiseEurViewState.defaultEmptyText !== null) return;
-    wiseEurViewState.defaultEmptyText = wiseEurEmptyState.textContent || 'No wiseEUR entries yet.';
-  }
-
-  function getWiseEurReceipts(entry) {
-    const n = Number(entry && entry.receipts);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-
-  function getWiseEurDisburse(entry) {
-    const n = Number(entry && entry.disburse);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-
-  function getWiseEurVerified(entry) {
-    if (!entry) return false;
-    if (typeof entry.verified === 'boolean') return entry.verified;
-    const raw = entry.verified !== undefined ? entry.verified : entry.checkedByGTREAS;
-    if (raw === null || raw === undefined) return false;
-    const s = String(raw).trim().toLowerCase();
-    if (!s) return false;
-    if (s === '0' || s === 'false' || s === 'no' || s === 'n' || s === 'off') return false;
-    return true;
-  }
-
-  function computeWiseEurNet(entry) {
-    return getWiseEurReceipts(entry) - getWiseEurDisburse(entry);
-  }
-
-  function hasWiseEurMissingRequiredValues(entry) {
-    if (!entry) return true;
-    const date = String(entry.datePL || entry.date || '').trim();
-    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
-    const description = String(entry.description || entry.reference || '').trim();
-
-    const receipts = getWiseEurReceipts(entry);
-    const disburse = getWiseEurDisburse(entry);
-    const hasReceipts = Number.isFinite(receipts) && receipts > 0;
-    const hasDisburse = Number.isFinite(disburse) && disburse > 0;
-    const hasOneAmount = (hasReceipts && !hasDisburse) || (!hasReceipts && hasDisburse);
-
-    const rawBudgetNo = String(entry.budgetNo || '').trim();
-    const hasBudget = Boolean(extractInCodeFromBudgetNumberText(rawBudgetNo) || extractOutCodeFromBudgetNumberText(rawBudgetNo));
-
-    if (!date) return true;
-    if (!party) return true;
-    if (!description) return true;
-    if (!hasOneAmount) return true;
-    if (!hasBudget) return true;
-    return false;
-  }
-
-  function buildReconciliationOrderFromWiseEurEntry(entry, year) {
-    if (!entry || !entry.id) return null;
-    const absEuro = getWiseEurDisburse(entry);
-    if (!(Number.isFinite(absEuro) && absEuro > 0)) return null;
-
-    const date = String(entry.datePL || entry.date || '').trim();
-    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
-    const purpose = String(entry.description || entry.reference || '').trim() || 'wiseEUR disbursement';
-    const budgetNumber = String(entry.budgetNo || '').trim();
-    const itemTitle = purpose;
-
-    const po = buildPaymentOrder({
-      source: 'wiseEUR',
-      sourceEntryId: entry.id,
-      sourceEntryYear: year,
-      paymentOrderNo: '',
-      date,
-      name: party,
-      euro: absEuro,
-      usd: null,
-      items: [
-        {
-          id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-          title: itemTitle,
-          euro: absEuro,
-          usd: null,
-        },
-      ],
-      address: '',
-      iban: '',
-      bic: '',
-      specialInstructions: '',
-      budgetNumber,
-      purpose,
-      with: 'Grand Secretary',
-      status: 'Submitted',
-    });
-    po.updatedAt = po.createdAt;
-    return po;
-  }
-
-  function getWiseEurDisplayValueForColumn(entry, colKey) {
-    if (!entry) return '';
-    switch (colKey) {
-      case 'budgetNo':
-        return entry.budgetNo || '';
-      case 'datePL':
-        return formatDate(entry.datePL || entry.date);
-      case 'idTrack':
-        return entry.idTrack ? formatPaymentOrderNoForDisplay(entry.idTrack) : '';
-      case 'receivedFromDisbursedTo':
-        return entry.receivedFromDisbursedTo || entry.party || '';
-      case 'receipts': {
-        const n = getWiseEurReceipts(entry);
-        return n ? formatCurrency(n, 'EUR') : '';
-      }
-      case 'disburse': {
-        const n = getWiseEurDisburse(entry);
-        return n ? formatCurrency(n, 'EUR') : '';
-      }
-      case 'description':
-        return entry.description || entry.reference || '';
-      case 'issuanceDateBank':
-        return entry.issuanceDateBank ? formatDate(entry.issuanceDateBank) : '';
-      case 'verified':
-        return getWiseEurVerified(entry) ? 'Yes' : '';
-      case 'checksum': {
-        const n = Number(entry && entry.checksum);
-        return Number.isFinite(n) ? formatCurrency(n, 'EUR') : entry.checksum || '';
-      }
-      case 'bankStatements':
-        return entry.bankStatements || '';
-      case 'remarks':
-        return entry.remarks || '';
-      default:
-        return '';
-    }
-  }
-
-  function getWiseEurSortValueForColumn(entry, colKey, colType) {
-    if (!entry) return null;
-    if (colType === 'number') {
-      if (colKey === 'receipts') return getWiseEurReceipts(entry);
-      if (colKey === 'disburse') return getWiseEurDisburse(entry);
-      if (colKey === 'verified') return getWiseEurVerified(entry) ? 1 : 0;
-      if (colKey === 'checksum') {
-        const n = Number(entry && entry.checksum);
-        return Number.isFinite(n) ? n : null;
-      }
-      return null;
-    }
-    if (colType === 'date') {
-      const raw =
-        colKey === 'datePL'
-          ? String(entry.datePL || entry.date || '').trim()
-          : colKey === 'issuanceDateBank'
-            ? String(entry.issuanceDateBank || '').trim()
-            : '';
-      return raw ? raw : null;
-    }
-    return normalizeTextForSearch(getWiseEurDisplayValueForColumn(entry, colKey));
-  }
-
-  function filterWiseEurForView(entries, globalFilter) {
-    const needle = normalizeTextForSearch(globalFilter);
-    if (!needle) return entries || [];
-
-    const cols = Object.keys(WISE_EUR_COL_TYPES);
-    return (entries || []).filter((e) => cols.some((k) => normalizeTextForSearch(getWiseEurDisplayValueForColumn(e, k)).includes(needle)));
-  }
-
-  function sortWiseEurForView(entries, sortKey, sortDir) {
-    const dir = sortDir === 'desc' ? -1 : 1;
-    const key = sortKey || 'datePL';
-    const colType = WISE_EUR_COL_TYPES[key] || 'text';
-    const withIndex = (entries || []).map((entry, index) => ({ entry, index }));
-    withIndex.sort((a, b) => {
-      const av = getWiseEurSortValueForColumn(a.entry, key, colType);
-      const bv = getWiseEurSortValueForColumn(b.entry, key, colType);
-
-      if (av === null && bv === null) return a.index - b.index;
-      if (av === null) return 1;
-      if (bv === null) return -1;
-
-      if (colType === 'number') {
-        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
-        return cmp === 0 ? a.index - b.index : cmp * dir;
-      }
-
-      const cmp = String(av).localeCompare(String(bv));
-      return cmp === 0 ? a.index - b.index : cmp * dir;
-    });
-    return withIndex.map((x) => x.entry);
-  }
-
-  function renderWiseEurRows(entries) {
-    if (!wiseEurTbody) return;
-    const canVerify = Boolean(wiseEurViewState.canVerify);
-    const canDeleteRows = Boolean(wiseEurViewState.canDelete);
-    const deleteAriaDisabled = canDeleteRows ? 'false' : 'true';
-    const deleteTooltipAttr = canDeleteRows ? '' : ' data-tooltip="Requires Delete access for wiseEUR."';
-    const year = getActiveBudgetYear();
-    const activeYear = getActiveBudgetYear();
-    const inMap = getInDescMapForYear(activeYear);
-    const outMap = getOutDescMapForYear(activeYear);
-    const ordersBySourceEntryKey = new Map();
-    const reconcileBySourceEntryKey = new Map();
-    const ordersByPoCanon = new Map();
-    const reconcileByPoCanon = new Map();
-    const orderIds = new Set();
-    const sourceEntryKey = (sourceRaw, sourceEntryIdRaw) => {
-      const source = String(sourceRaw || '').trim().toLowerCase();
-      const sourceEntryId = String(sourceEntryIdRaw || '').trim();
-      if (!source || !sourceEntryId) return '';
-      return `${source}::${sourceEntryId}`;
-    };
-    {
-      const orders = loadOrders(year);
-      for (const o of orders || []) {
-        if (!o || typeof o !== 'object') continue;
-
-        const oid = String(o.id || '').trim();
-        if (oid) orderIds.add(oid);
-
-        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
-        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
-
-        const key = sourceEntryKey(o.source, o.sourceEntryId);
-        if (!key) continue;
-        if (!ordersBySourceEntryKey.has(key)) {
-          ordersBySourceEntryKey.set(key, o);
-          continue;
-        }
-        // Prefer an order that has a PO number assigned.
-        const existing = ordersBySourceEntryKey.get(key);
-        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
-        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
-        if (!existingPoNo && nextPoNo) ordersBySourceEntryKey.set(key, o);
-      }
-    }
-    {
-      const rec = loadReconciliationOrders(year);
-      for (const o of rec || []) {
-        if (!o || typeof o !== 'object') continue;
-        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
-        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
-
-        const key = sourceEntryKey(o.source, o.sourceEntryId);
-        if (!key) continue;
-        if (!reconcileBySourceEntryKey.has(key)) reconcileBySourceEntryKey.set(key, o);
-      }
-    }
-    const html = (entries || [])
-      .map((e) => {
-        const id = escapeHtml(e.id);
-        const isMissingRequired = hasWiseEurMissingRequiredValues(e);
-        const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
-        const rawBudgetNo = getWiseEurDisplayValueForColumn(e, 'budgetNo');
-        const receiptsAmt = getWiseEurReceipts(e);
-        const disburseAmt = getWiseEurDisburse(e);
-        let budgetNo = '';
-        if (receiptsAmt > 0 && disburseAmt <= 0) {
-          const code = extractInCodeFromBudgetNumberText(rawBudgetNo) || String(rawBudgetNo || '').trim();
-          const desc = (code && inMap ? inMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(rawBudgetNo);
-          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
-        } else if (disburseAmt > 0 && receiptsAmt <= 0) {
-          const code = extractOutCodeFromBudgetNumberText(rawBudgetNo) || String(rawBudgetNo || '').trim();
-          const desc = (code && outMap ? outMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(rawBudgetNo);
-          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
-        } else {
-          const code =
-            extractInCodeFromBudgetNumberText(rawBudgetNo) ||
-            extractOutCodeFromBudgetNumberText(rawBudgetNo) ||
-            String(rawBudgetNo || '').trim();
-          const desc =
-            (code && outMap ? outMap.get(code) : '') ||
-            (code && inMap ? inMap.get(code) : '') ||
-            (code ? BUDGET_DESC_BY_CODE.get(code) : '') ||
-            inferDescFromBudgetNumberText(rawBudgetNo);
-          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
-        }
-        const datePL = escapeHtml(getWiseEurDisplayValueForColumn(e, 'datePL'));
-        const idTrack = escapeHtml(getWiseEurDisplayValueForColumn(e, 'idTrack'));
-        const receivedFromDisbursedTo = escapeHtml(getWiseEurDisplayValueForColumn(e, 'receivedFromDisbursedTo'));
-        const receipts = escapeHtml(getWiseEurDisplayValueForColumn(e, 'receipts'));
-        const disburse = escapeHtml(getWiseEurDisplayValueForColumn(e, 'disburse'));
-        const descRaw = String(getWiseEurDisplayValueForColumn(e, 'description') || '');
-        const strippedDescRaw = descRaw
-          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
-          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
-          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
-          .trim();
-        const descText = escapeHtml(strippedDescRaw);
-
-        const isDisbursement = Number.isFinite(disburseAmt) && disburseAmt > 0;
-        const srcKey = isDisbursement ? sourceEntryKey('wiseEUR', e.id) : '';
-        const match = srcKey
-          ? (ordersBySourceEntryKey.get(srcKey) || reconcileBySourceEntryKey.get(srcKey))
-          : null;
-
-        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
-        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
-        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
-        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
-
-        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
-        const poCanon = canonicalizePaymentOrderNo(poCandidate);
-        const poOrder = poCanon
-          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
-          : null;
-
-        const orderForLink = match || poOrder;
-        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
-        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
-        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
-        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
-        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
-        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
-
-        const convertedHtml = (isDisbursement && isOnPaymentOrdersTable && poDisplay)
-          ? (orderIdForLink
-            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
-            : ` (converted to ${poDisplay})`)
-          : (isDisbursement && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
-        const description = `${descText}${convertedHtml}`;
-        const issuanceDateBank = escapeHtml(getWiseEurDisplayValueForColumn(e, 'issuanceDateBank'));
-        const verifiedChecked = getWiseEurVerified(e) ? 'checked' : '';
-        const verifyDisabled = canVerify ? '' : 'disabled';
-        const checksum = escapeHtml(getWiseEurDisplayValueForColumn(e, 'checksum'));
-        const bankStatements = escapeHtml(getWiseEurDisplayValueForColumn(e, 'bankStatements'));
-
-        return `
-          <tr data-wise-eur-id="${id}"${rowClass}>
-            <td>${budgetNo}</td>
-            <td>${datePL}</td>
-            <td>${idTrack}</td>
-            <td class="wiseEurCol--receivedFrom">${receivedFromDisbursedTo}</td>
-            <td class="num">${receipts}</td>
-            <td class="num">${disburse}</td>
-            <td>${description}</td>
-            <td>${issuanceDateBank}</td>
-            <td class="num">
-              <input type="checkbox" data-wise-eur-verify="1" data-wise-eur-id="${id}" aria-label="Verified" ${verifiedChecked} ${verifyDisabled} />
-            </td>
-            <td class="num">${checksum}</td>
-            <td>${bankStatements}</td>
-            <td class="actions">
-              <button type="button" class="btn btn--editIcon" data-wise-eur-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn btn--x" data-wise-eur-action="delete" aria-label="Delete entry" title="${canDeleteRows ? 'Delete' : 'Requires Delete access for wiseEUR.'}" aria-disabled="${deleteAriaDisabled}"${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
-            </td>
-          </tr>
-        `.trim();
-      })
-      .join('');
-
-    wiseEurTbody.innerHTML = html;
-  }
-
-  function updateWiseEurTotals(entries) {
-    const receiptsEl = document.getElementById('wiseEurTotalReceipts');
-    const disburseEl = document.getElementById('wiseEurTotalDisburse');
-    const netEl = document.getElementById('wiseEurTotalReceiptsMinusDisburse');
-
-    if (!receiptsEl && !disburseEl && !netEl) return;
-
-    let totalReceipts = 0;
-    let totalDisburse = 0;
-    for (const e of entries || []) {
-      totalReceipts += getWiseEurReceipts(e);
-      totalDisburse += getWiseEurDisburse(e);
-    }
-
-    const net = totalReceipts - totalDisburse;
-
-    if (receiptsEl) receiptsEl.textContent = formatCurrency(totalReceipts, 'EUR');
-    if (disburseEl) disburseEl.textContent = formatCurrency(totalDisburse, 'EUR');
-    if (netEl) {
-      netEl.textContent = formatCurrency(net, 'EUR');
-      netEl.classList.toggle('is-negative', net < 0);
-    }
-  }
-
-  function updateWiseEurSortIndicators() {
-    if (!wiseEurTbody) return;
-    const table = wiseEurTbody.closest('table');
-    if (!table) return;
-
-    const sortKey = wiseEurViewState.sortKey;
-    const sortDir = wiseEurViewState.sortDir === 'desc' ? 'desc' : 'asc';
-
-    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
-    for (const th of ths) {
-      const colKey = th.getAttribute('data-sort-key');
-      let aria = 'none';
-      if (colKey && sortKey === colKey) {
-        aria = sortDir === 'desc' ? 'descending' : 'ascending';
-      }
-      th.setAttribute('aria-sort', aria);
-    }
-  }
-
-  function initWiseEurColumnSorting() {
-    if (!wiseEurTbody) return;
-    const table = wiseEurTbody.closest('table');
-    if (!table) return;
-    if (table.dataset.sortBound === '1') return;
-
-    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
-    if (ths.length === 0) return;
-    table.dataset.sortBound = '1';
-
-    function applySortForKey(colKey) {
-      if (!colKey) return;
-      if (wiseEurViewState.sortKey === colKey) {
-        wiseEurViewState.sortDir = wiseEurViewState.sortDir === 'asc' ? 'desc' : 'asc';
-      } else {
-        wiseEurViewState.sortKey = colKey;
-        wiseEurViewState.sortDir = 'asc';
-      }
-      applyWiseEurView();
-    }
-
-    for (const th of ths) {
-      th.classList.add('is-sortable');
-      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
-      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
-
-      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
-      th.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        applySortForKey(th.getAttribute('data-sort-key'));
-      });
-    }
-
-    updateWiseEurSortIndicators();
-  }
-
-  let currentWiseEurId = null;
-
-  function getWiseEurBudgetFlowKindFromAmountStrings(receiptsRaw, disburseRaw) {
-    const r = String(receiptsRaw || '').trim();
-    const d = String(disburseRaw || '').trim();
-    const receiptsNum = r === '' ? null : Number(r);
-    const disburseNum = d === '' ? null : Number(d);
-
-    const receiptsHas = Number.isFinite(receiptsNum) && receiptsNum > 0;
-    const disburseHas = Number.isFinite(disburseNum) && disburseNum > 0;
-
-    if (receiptsHas && !disburseHas) return 'in';
-    if (disburseHas && !receiptsHas) return 'out';
-    if (!receiptsHas && !disburseHas) return null;
-    return 'both';
-  }
-
-  function syncWiseEurBudgetNoSelect(selectEl, receiptsEl, disburseEl, initialBudgetNo) {
-    if (!selectEl) return;
-
-    const kind = getWiseEurBudgetFlowKindFromAmountStrings(receiptsEl && receiptsEl.value, disburseEl && disburseEl.value);
-    const activeYear = getActiveBudgetYear();
-
-    // Preserve current selection when possible.
-    const prevValue = String(selectEl.value || '').trim();
-    const preferred = prevValue || String(initialBudgetNo || '').trim();
-
-    // Reset options.
-    selectEl.innerHTML = '';
-
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-
-    if (kind === 'both') {
-      placeholder.textContent = 'Enter only one: Receipts or Disburse';
-      placeholder.disabled = true;
-      placeholder.selected = true;
-      selectEl.appendChild(placeholder);
-      selectEl.disabled = true;
-      return;
-    }
-
-    if (!kind) {
-      placeholder.textContent = 'Enter Receipts or Disburse first';
-      placeholder.disabled = true;
-      placeholder.selected = true;
-      selectEl.appendChild(placeholder);
-      selectEl.disabled = true;
-      return;
-    }
-
-    placeholder.textContent = 'Select a Budget #';
-    selectEl.appendChild(placeholder);
-    selectEl.disabled = false;
-
-    const accounts = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
-    const items = Array.isArray(accounts) ? accounts : [];
-
-    if (items.length === 0) {
-      const none = document.createElement('option');
-      none.value = '__none__';
-      none.disabled = true;
-      none.textContent = kind === 'in' ? 'No IN accounts found in the active budget' : 'No OUT accounts found in the active budget';
-      selectEl.appendChild(none);
-      selectEl.value = '';
-      return;
-    }
-
-    const codes = [];
-    for (const item of items) {
-      const code = String(kind === 'in' ? item && item.inCode : item && item.outCode).trim();
-      if (!/^\d{4}$/.test(code)) continue;
-      const desc = String(item && item.desc ? item.desc : '').trim();
-      codes.push({ code, desc });
-    }
-
-    codes.sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true, sensitivity: 'base' }));
-
-    const allowed = new Set();
-    for (const { code, desc } of codes) {
-      allowed.add(code);
-      const opt = document.createElement('option');
-      opt.value = code;
-      opt.textContent = desc ? `${code} - ${desc}` : code;
-      selectEl.appendChild(opt);
-    }
-
-    if (preferred && allowed.has(preferred)) selectEl.value = preferred;
-    else selectEl.value = '';
-  }
-
-  function openWiseEurModal(entry, year) {
-    if (!wiseEurModal || !wiseEurModalBody) return;
-    const y = Number.isInteger(Number(year)) ? Number(year) : getWiseEurYear();
-    currentWiseEurId = entry && entry.id ? entry.id : null;
-
-    const titleEl = wiseEurModal.querySelector('#wiseEurModalTitle');
-    const subheadEl = wiseEurModal.querySelector('#wiseEurModalSubhead');
-    if (titleEl) titleEl.textContent = currentWiseEurId ? 'wiseEUR (Edit)' : 'wiseEUR (New)';
-    if (subheadEl) subheadEl.textContent = `${y} wiseEUR`;
-
-    const budgetNoRaw = entry && entry.budgetNo ? String(entry.budgetNo).trim() : '';
-    const safeDatePL = escapeHtml(entry && (entry.datePL || entry.date) ? (entry.datePL || entry.date) : '');
-    const safeReceivedFrom = escapeHtml(entry && (entry.receivedFromDisbursedTo || entry.party) ? (entry.receivedFromDisbursedTo || entry.party) : '');
-    const safeDescription = escapeHtml(entry && (entry.description || entry.reference) ? (entry.description || entry.reference) : '');
-    const safeIssuanceDateBank = escapeHtml(entry && entry.issuanceDateBank ? entry.issuanceDateBank : '');
-    const canVerify = canIncomeEdit(getCurrentUser());
-    const verifiedChecked = getWiseEurVerified(entry) ? 'checked' : '';
-    const verifiedDisabled = canVerify ? '' : 'disabled';
-
-    const checksum = entry && entry.checksum !== null && entry.checksum !== undefined && entry.checksum !== '' ? Number(entry.checksum) : null;
-    const safeChecksum = Number.isFinite(checksum) ? escapeHtml(String(checksum)) : '';
-
-    const safeBankStatements = escapeHtml(entry && entry.bankStatements ? entry.bankStatements : '');
-    const safeRemarks = escapeHtml(entry && entry.remarks ? entry.remarks : '');
-
-    const receipts = entry && entry.receipts !== null && entry.receipts !== undefined && entry.receipts !== '' ? Number(entry.receipts) : null;
-    const disburse = entry && entry.disburse !== null && entry.disburse !== undefined && entry.disburse !== '' ? Number(entry.disburse) : null;
-    const safeReceipts = Number.isFinite(receipts) && receipts > 0 ? escapeHtml(String(receipts)) : '';
-    const safeDisburse = Number.isFinite(disburse) && disburse > 0 ? escapeHtml(String(disburse)) : '';
-
-    wiseEurModalBody.innerHTML = `
-      <form id="wiseEurModalForm" novalidate>
-        <div class="grid">
-          <div class="field">
-            <label for="wiseEurBudgetNo">Budget #</label>
-            <select id="wiseEurBudgetNo" name="wiseEurBudgetNo"></select>
-            <div class="error" id="error-wiseEurBudgetNo" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseEurDatePL">ACTION DATE<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseEurDatePL" name="wiseEurDatePL" type="date" required value="${safeDatePL}" />
-            <div class="error" id="error-wiseEurDatePL" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="wiseEurReceivedFrom">RECEIVED FROM - DISBURSED TO:<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseEurReceivedFrom" name="wiseEurReceivedFrom" type="text" autocomplete="off" required value="${safeReceivedFrom}" />
-            <div class="error" id="error-wiseEurReceivedFrom" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseEurReceipts">RECEIPTS €<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseEurReceipts" name="wiseEurReceipts" type="number" inputmode="decimal" step="0.01" min="0" value="${safeReceipts}" />
-            <div class="error" id="error-wiseEurReceipts" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseEurDisburse">DISBURSE €<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseEurDisburse" name="wiseEurDisburse" type="number" inputmode="decimal" step="0.01" min="0" value="${safeDisburse}" />
-            <div class="error" id="error-wiseEurDisburse" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="wiseEurDescription">DESCRIPTION<span class="req" aria-hidden="true">*</span></label>
-            <textarea id="wiseEurDescription" name="wiseEurDescription" rows="3" required>${safeDescription}</textarea>
-            <div class="error" id="error-wiseEurDescription" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseEurIssuanceDateBank">Issuance Date Bank</label>
-            <input id="wiseEurIssuanceDateBank" name="wiseEurIssuanceDateBank" type="date" value="${safeIssuanceDateBank}" />
-            <div class="error" id="error-wiseEurIssuanceDateBank" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseEurVerified">Verified</label>
-            <div>
-              <input id="wiseEurVerified" name="wiseEurVerified" type="checkbox" ${verifiedChecked} ${verifiedDisabled} />
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="wiseEurChecksum">Checksum</label>
-            <input id="wiseEurChecksum" name="wiseEurChecksum" type="number" inputmode="decimal" step="0.01" value="${safeChecksum}" />
-            <div class="error" id="error-wiseEurChecksum" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseEurBankStatements">Bank Statements</label>
-            <input id="wiseEurBankStatements" name="wiseEurBankStatements" type="text" autocomplete="off" value="${safeBankStatements}" />
-            <div class="error" id="error-wiseEurBankStatements" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="wiseEurRemarks">Remarks</label>
-            <textarea id="wiseEurRemarks" name="wiseEurRemarks" rows="2">${safeRemarks}</textarea>
-            <div class="error" id="error-wiseEurRemarks" role="alert" aria-live="polite"></div>
-          </div>
-        </div>
-      </form>
-    `.trim();
-
-    wiseEurModal.classList.add('is-open');
-    wiseEurModal.setAttribute('aria-hidden', 'false');
-
-    const budgetNoEl = wiseEurModalBody.querySelector('#wiseEurBudgetNo');
-    const receiptsEl = wiseEurModalBody.querySelector('#wiseEurReceipts');
-    const disburseEl = wiseEurModalBody.querySelector('#wiseEurDisburse');
-    syncWiseEurBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw);
-    if (receiptsEl) receiptsEl.addEventListener('input', () => syncWiseEurBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw));
-    if (disburseEl) disburseEl.addEventListener('input', () => syncWiseEurBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw));
-
-    const focusTarget = wiseEurModalBody.querySelector('#wiseEurDatePL');
-    if (focusTarget && focusTarget.focus) focusTarget.focus();
-  }
-
-  function closeWiseEurModal() {
-    if (!wiseEurModal || !wiseEurModalBody) return;
-    wiseEurModal.classList.remove('is-open');
-    wiseEurModal.setAttribute('aria-hidden', 'true');
-    wiseEurModalBody.innerHTML = '';
-    currentWiseEurId = null;
-  }
-
-  function clearWiseEurModalErrors() {
-    if (!wiseEurModalBody) return;
-    const errors = Array.from(wiseEurModalBody.querySelectorAll('.error'));
-    for (const el of errors) el.textContent = '';
-  }
-
-  function showWiseEurModalErrors(errors) {
-    if (!wiseEurModalBody || !errors) return;
-    const map = {
-      budgetNo: '#error-wiseEurBudgetNo',
-      datePL: '#error-wiseEurDatePL',
-      receivedFromDisbursedTo: '#error-wiseEurReceivedFrom',
-      receipts: '#error-wiseEurReceipts',
-      disburse: '#error-wiseEurDisburse',
-      description: '#error-wiseEurDescription',
-      issuanceDateBank: '#error-wiseEurIssuanceDateBank',
-      checksum: '#error-wiseEurChecksum',
-      bankStatements: '#error-wiseEurBankStatements',
-      remarks: '#error-wiseEurRemarks',
-    };
-    for (const [k, sel] of Object.entries(map)) {
-      const el = wiseEurModalBody.querySelector(sel);
-      if (el) el.textContent = errors[k] || '';
-    }
-  }
-
-  function validateWiseEurModalValues() {
-    if (!wiseEurModalBody) return { ok: false };
-    const budgetNoEl = wiseEurModalBody.querySelector('#wiseEurBudgetNo');
-    const datePLEl = wiseEurModalBody.querySelector('#wiseEurDatePL');
-    const receivedFromEl = wiseEurModalBody.querySelector('#wiseEurReceivedFrom');
-    const receiptsEl = wiseEurModalBody.querySelector('#wiseEurReceipts');
-    const disburseEl = wiseEurModalBody.querySelector('#wiseEurDisburse');
-    const descriptionEl = wiseEurModalBody.querySelector('#wiseEurDescription');
-    const issuanceDateBankEl = wiseEurModalBody.querySelector('#wiseEurIssuanceDateBank');
-    const verifiedEl = wiseEurModalBody.querySelector('#wiseEurVerified');
-    const checksumEl = wiseEurModalBody.querySelector('#wiseEurChecksum');
-    const bankStatementsEl = wiseEurModalBody.querySelector('#wiseEurBankStatements');
-    const remarksEl = wiseEurModalBody.querySelector('#wiseEurRemarks');
-
-    const values = {
-      budgetNo: budgetNoEl ? String(budgetNoEl.value || '').trim() : '',
-      datePL: datePLEl ? String(datePLEl.value || '').trim() : '',
-      receivedFromDisbursedTo: receivedFromEl ? String(receivedFromEl.value || '').trim() : '',
-      receipts: receiptsEl ? String(receiptsEl.value || '').trim() : '',
-      disburse: disburseEl ? String(disburseEl.value || '').trim() : '',
-      description: descriptionEl ? String(descriptionEl.value || '').trim() : '',
-      issuanceDateBank: issuanceDateBankEl ? String(issuanceDateBankEl.value || '').trim() : '',
-      verified: verifiedEl ? Boolean(verifiedEl.checked) : false,
-      checksum: checksumEl ? String(checksumEl.value || '').trim() : '',
-      bankStatements: bankStatementsEl ? String(bankStatementsEl.value || '').trim() : '',
-      remarks: remarksEl ? String(remarksEl.value || '').trim() : '',
-    };
-
-    const errors = {};
-    if (!values.datePL) errors.datePL = 'This field is required.';
-    if (!values.receivedFromDisbursedTo) errors.receivedFromDisbursedTo = 'This field is required.';
-    if (!values.description) errors.description = 'This field is required.';
-
-    const receiptsNum = values.receipts === '' ? null : Number(values.receipts);
-    const disburseNum = values.disburse === '' ? null : Number(values.disburse);
-    const checksumNum = values.checksum === '' ? null : Number(values.checksum);
-
-    if (receiptsNum !== null && (!Number.isFinite(receiptsNum) || receiptsNum < 0)) errors.receipts = 'Enter a valid amount.';
-    if (disburseNum !== null && (!Number.isFinite(disburseNum) || disburseNum < 0)) errors.disburse = 'Enter a valid amount.';
-    if (checksumNum !== null && !Number.isFinite(checksumNum)) errors.checksum = 'Enter a valid amount.';
-
-    const receiptsHas = Number.isFinite(receiptsNum) && receiptsNum > 0;
-    const disburseHas = Number.isFinite(disburseNum) && disburseNum > 0;
-    if (!receiptsHas && !disburseHas) {
-      errors.receipts = 'Enter a Receipts or Disburse amount.';
-      errors.disburse = 'Enter a Receipts or Disburse amount.';
-    }
-    if (receiptsHas && disburseHas) {
-      errors.receipts = 'Enter only one: Receipts or Disburse.';
-      errors.disburse = 'Enter only one: Receipts or Disburse.';
-    }
-
-    const kind = receiptsHas && !disburseHas ? 'in' : disburseHas && !receiptsHas ? 'out' : null;
-    if (kind && values.budgetNo) {
-      const activeYear = getActiveBudgetYear();
-      const allowed = new Set();
-      const items = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
-      for (const item of items || []) {
-        const code = String(kind === 'in' ? item && item.inCode : item && item.outCode).trim();
-        if (/^\d{4}$/.test(code)) allowed.add(code);
-      }
-
-      if (!/^\d{4}$/.test(values.budgetNo)) {
-        errors.budgetNo = 'Select a valid budget number.';
-      } else if (allowed.size > 0 && !allowed.has(values.budgetNo)) {
-        errors.budgetNo = kind === 'in' ? 'Select an IN budget number from the active budget.' : 'Select an OUT budget number from the active budget.';
-      }
-    }
-
-    if (Object.keys(errors).length > 0) return { ok: false, errors };
-    return {
-      ok: true,
-      values: {
-        budgetNo: values.budgetNo,
-        datePL: values.datePL,
-        receivedFromDisbursedTo: values.receivedFromDisbursedTo,
-        receipts: receiptsHas ? receiptsNum : null,
-        disburse: disburseHas ? disburseNum : null,
-        description: values.description,
-        issuanceDateBank: values.issuanceDateBank,
-        verified: values.verified ? 1 : 0,
-        checksum: checksumNum,
-        bankStatements: values.bankStatements,
-        remarks: values.remarks,
-      },
-    };
-  }
-
-  function applyWiseEurView() {
-    if (!wiseEurTbody || !wiseEurEmptyState) return;
-    ensureWiseEurDefaultEmptyText();
-
-    const year = getWiseEurYear();
-    const all = loadWiseEur(year);
-    const filtered = filterWiseEurForView(all, wiseEurViewState.globalFilter);
-    const sorted = sortWiseEurForView(filtered, wiseEurViewState.sortKey, wiseEurViewState.sortDir);
-
-    if (normalizeTextForSearch(wiseEurViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
-      wiseEurEmptyState.textContent = 'No wiseEUR entries match your search.';
-    } else {
-      wiseEurEmptyState.textContent = wiseEurViewState.defaultEmptyText;
-    }
-
-    wiseEurEmptyState.hidden = sorted.length > 0;
-    renderWiseEurRows(sorted);
-    updateWiseEurTotals(sorted);
-    updateWiseEurSortIndicators();
-  }
-
-  function normalizeWiseMatchValue(value) {
-    return normalizeTextForSearch(String(value ?? '').trim());
-  }
-
-  function wiseAmountsMatch(aRaw, bRaw) {
-    const a = Number(aRaw);
-    const b = Number(bRaw);
-    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
-    return Math.abs(a - b) < 0.005;
-  }
-
-  function findUniqueWiseOrderMatch(orders, target) {
-    const dateNeed = normalizeWiseMatchValue(target.date);
-    const partyNeed = normalizeWiseMatchValue(target.party);
-    const amountNeed = target.amount;
-    if (!dateNeed || !partyNeed || !Number.isFinite(Number(amountNeed))) return null;
-
-    const matches = (orders || []).filter((order) => {
-      const orderDate = normalizeWiseMatchValue(order && order.date);
-      const orderParty = normalizeWiseMatchValue(order && order.name);
-      const orderAmount = order && order.amount;
-      if (!wiseAmountsMatch(amountNeed, orderAmount)) return false;
-      if (orderDate !== dateNeed) return false;
-      if (orderParty !== partyNeed) return false;
-      return true;
-    });
-
-    return matches.length === 1 ? matches[0] : null;
-  }
-
-  function findUniqueWiseEntryMatch(entries, target, kind) {
-    const dateNeed = normalizeWiseMatchValue(target.date);
-    const partyNeed = normalizeWiseMatchValue(target.party);
-    const amountNeed = target.amount;
-    if (!dateNeed || !partyNeed || !Number.isFinite(Number(amountNeed))) return null;
-
-    const matches = (entries || []).filter((entry) => {
-      const entryDate = normalizeWiseMatchValue(entry && (entry.datePL || entry.date));
-      const entryParty = normalizeWiseMatchValue(entry && (entry.receivedFromDisbursedTo || entry.party));
-      const entryAmount = kind === 'usd' ? getWiseUsdDisburse(entry) : getWiseEurDisburse(entry);
-      if (!wiseAmountsMatch(amountNeed, entryAmount)) return false;
-      if (entryDate !== dateNeed) return false;
-      if (entryParty !== partyNeed) return false;
-      return true;
-    });
-
-    return matches.length === 1 ? matches[0] : null;
-  }
-
-  function backfillWiseEurIdTrackFromOrders(year) {
-    const flagKey = `payment_order_wise_eur_idtrack_backfill_${year}_v1`;
-    if (localStorage.getItem(flagKey) === '1') return false;
-
-    ensurePaymentOrdersListExistsForYear(year);
-    const orders = (loadOrders(year) || [])
-      .filter((o) => o && String(o.source || '').trim() === 'wiseEUR')
-      .map((o) => ({
-        id: o.id,
-        paymentOrderNo: o.paymentOrderNo,
-        date: o.date,
-        name: o.name,
-        amount: o.euro,
-      }));
-
-    const entries = loadWiseEur(year);
-    let updated = false;
-    const nowIso = new Date().toISOString();
-
-    for (const entry of entries || []) {
-      if (!entry || String(entry.idTrack || '').trim()) continue;
-      const amount = getWiseEurDisburse(entry);
-      const match = findUniqueWiseOrderMatch(orders, {
-        date: entry.datePL || entry.date,
-        party: entry.receivedFromDisbursedTo || entry.party,
-        amount,
-      });
-      if (!match || !String(match.paymentOrderNo || '').trim()) continue;
-      entry.idTrack = String(match.paymentOrderNo).trim();
-      entry.updatedAt = nowIso;
-      upsertWiseEurEntry(entry, year);
-      updated = true;
-    }
-
-    localStorage.setItem(flagKey, '1');
-    return updated;
-  }
-
-  function backfillWiseEurBudgetNoFromOrders(year) {
-    const flagKey = `payment_order_wise_eur_budget_backfill_${year}_v1`;
-    if (localStorage.getItem(flagKey) === '1') return false;
-
-    ensurePaymentOrdersListExistsForYear(year);
-    const orders = (loadOrders(year) || [])
-      .filter((o) => o && String(o.source || '').trim() === 'wiseEUR')
-      .map((o) => ({
-        id: o.id,
-        budgetNumber: o.budgetNumber,
-        date: o.date,
-        name: o.name,
-        amount: o.euro,
-      }));
-
-    const entries = loadWiseEur(year);
-    let updated = false;
-    const nowIso = new Date().toISOString();
-
-    for (const entry of entries || []) {
-      if (!entry || String(entry.budgetNo || '').trim()) continue;
-      const amount = getWiseEurDisburse(entry);
-      const match = findUniqueWiseOrderMatch(orders, {
-        date: entry.datePL || entry.date,
-        party: entry.receivedFromDisbursedTo || entry.party,
-        amount,
-      });
-      if (!match || !String(match.budgetNumber || '').trim()) continue;
-      entry.budgetNo = String(match.budgetNumber).trim();
-      entry.updatedAt = nowIso;
-      upsertWiseEurEntry(entry, year);
-      updated = true;
-    }
-
-    localStorage.setItem(flagKey, '1');
-    return updated;
-  }
-
-  function backfillWiseUsdIdTrackFromOrders(year) {
-    const flagKey = `payment_order_wise_usd_idtrack_backfill_${year}_v1`;
-    if (localStorage.getItem(flagKey) === '1') return false;
-
-    ensurePaymentOrdersListExistsForYear(year);
-    const orders = (loadOrders(year) || [])
-      .filter((o) => o && String(o.source || '').trim() === 'wiseUSD')
-      .map((o) => ({
-        id: o.id,
-        paymentOrderNo: o.paymentOrderNo,
-        date: o.date,
-        name: o.name,
-        amount: o.usd,
-      }));
-
-    const entries = loadWiseUsd(year);
-    let updated = false;
-    const nowIso = new Date().toISOString();
-
-    for (const entry of entries || []) {
-      if (!entry || String(entry.idTrack || '').trim()) continue;
-      const amount = getWiseUsdDisburse(entry);
-      const match = findUniqueWiseOrderMatch(orders, {
-        date: entry.datePL || entry.date,
-        party: entry.receivedFromDisbursedTo || entry.party,
-        amount,
-      });
-      if (!match || !String(match.paymentOrderNo || '').trim()) continue;
-      entry.idTrack = String(match.paymentOrderNo).trim();
-      entry.updatedAt = nowIso;
-      upsertWiseUsdEntry(entry, year);
-      updated = true;
-    }
-
-    localStorage.setItem(flagKey, '1');
-    return updated;
-  }
-
-  function backfillWiseUsdBudgetNoFromOrders(year) {
-    const flagKey = `payment_order_wise_usd_budget_backfill_${year}_v1`;
-    if (localStorage.getItem(flagKey) === '1') return false;
-
-    ensurePaymentOrdersListExistsForYear(year);
-    const orders = (loadOrders(year) || [])
-      .filter((o) => o && String(o.source || '').trim() === 'wiseUSD')
-      .map((o) => ({
-        id: o.id,
-        budgetNumber: o.budgetNumber,
-        date: o.date,
-        name: o.name,
-        amount: o.usd,
-      }));
-
-    const entries = loadWiseUsd(year);
-    let updated = false;
-    const nowIso = new Date().toISOString();
-
-    for (const entry of entries || []) {
-      if (!entry || String(entry.budgetNo || '').trim()) continue;
-      const amount = getWiseUsdDisburse(entry);
-      const match = findUniqueWiseOrderMatch(orders, {
-        date: entry.datePL || entry.date,
-        party: entry.receivedFromDisbursedTo || entry.party,
-        amount,
-      });
-      if (!match || !String(match.budgetNumber || '').trim()) continue;
-      entry.budgetNo = String(match.budgetNumber).trim();
-      entry.updatedAt = nowIso;
-      upsertWiseUsdEntry(entry, year);
-      updated = true;
-    }
-
-    localStorage.setItem(flagKey, '1');
-    return updated;
-  }
-
-  function initWiseEurListPage() {
-    if (!wiseEurTbody || !wiseEurEmptyState) return;
-    const year = getWiseEurYear();
-
-    const currentUser = getCurrentUser();
-    const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income_bankeur') : false;
-
-    // Verified checkbox should be editable for Income Write/Partial.
-    wiseEurViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
-    wiseEurViewState.canDelete = currentUser ? canDelete(currentUser, 'income_wise_eur') : false;
-
-    const wiseEurNewLink = document.getElementById('wiseEurNewLink');
-    const wiseEurExportCsvLink = document.getElementById('wiseEurExportCsvLink');
-    const wiseEurDownloadTemplateLink = document.getElementById('wiseEurDownloadTemplateLink');
-    const wiseEurImportCsvLink = document.getElementById('wiseEurImportCsvLink');
-    const wiseEurMenuBtn = document.getElementById('wiseEurActionsMenuBtn');
-    const wiseEurMenuPanel = document.getElementById('wiseEurActionsMenu');
-    const wiseEurBackToIncomeLink = document.getElementById('wiseEurBackToIncomeLink');
-
-    function setLinkDisabled(linkEl, disabled) {
-      if (!linkEl) return;
-      linkEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-      if (disabled) linkEl.setAttribute('tabindex', '-1');
-      else linkEl.removeAttribute('tabindex');
-    }
-
-    // Ensure the year is present in the URL for consistent nav highlighting.
-    const fromUrl = getWiseEurYearFromUrl();
-    if (!fromUrl && getBasename(window.location.pathname) === 'wise_eur.html') {
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.set('year', String(year));
-        window.history.replaceState(null, '', url.toString());
-      } catch {
-        // ignore
-      }
-    }
-
-    ensureWiseEurListExistsForYear(year);
-    backfillWiseEurIdTrackFromOrders(year);
-    backfillWiseEurBudgetNoFromOrders(year);
-
-    const titleEl = document.querySelector('[data-wise-eur-title]');
-    if (titleEl) titleEl.textContent = `${year} wiseEUR`;
-    const listTitleEl = document.querySelector('[data-wise-eur-list-title]');
-    if (listTitleEl) listTitleEl.textContent = `${year} wiseEUR`;
-    if (wiseEurBackToIncomeLink) {
-      wiseEurBackToIncomeLink.href = `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`;
-      wiseEurBackToIncomeLink.textContent = `← Back to ${year} Ledger`;
-    }
-    applyAppTabTitle();
-
-    initWiseEurColumnSorting();
-
-    // Partial access for Income = full access except New Income and Import CSV.
-    setLinkDisabled(wiseEurNewLink, !hasIncomeFullAccess);
-    if (wiseEurNewLink && !hasIncomeFullAccess) {
-      wiseEurNewLink.setAttribute(
-        'data-tooltip',
-        'Requires Full access for Income. Partial access can edit existing wiseEUR entries, but cannot create New Income entries.'
-      );
-    }
-    setLinkDisabled(wiseEurImportCsvLink, !hasIncomeFullAccess);
-    if (wiseEurImportCsvLink && !hasIncomeFullAccess) {
-      wiseEurImportCsvLink.setAttribute(
-        'data-tooltip',
-        'Requires Full access for Income. Partial access can edit existing wiseEUR entries, but cannot Import CSV.'
-      );
-    }
-
-    const globalInput = document.getElementById('wiseEurGlobalSearch');
-    if (globalInput) {
-      globalInput.value = wiseEurViewState.globalFilter || '';
-      globalInput.addEventListener('input', () => {
-        wiseEurViewState.globalFilter = globalInput.value;
-        if (wiseEurClearSearchBtn) {
-          const hasSearch = normalizeTextForSearch(wiseEurViewState.globalFilter) !== '';
-          wiseEurClearSearchBtn.hidden = !hasSearch;
-          wiseEurClearSearchBtn.disabled = !hasSearch;
-        }
-        applyWiseEurView();
-      });
-    }
-
-    if (wiseEurClearSearchBtn && globalInput) {
-      const hasSearch = normalizeTextForSearch(wiseEurViewState.globalFilter) !== '';
-      wiseEurClearSearchBtn.hidden = !hasSearch;
-      wiseEurClearSearchBtn.disabled = !hasSearch;
-      if (!wiseEurClearSearchBtn.dataset.bound) {
-        wiseEurClearSearchBtn.dataset.bound = 'true';
-        wiseEurClearSearchBtn.addEventListener('click', () => {
-          globalInput.value = '';
-          wiseEurViewState.globalFilter = '';
-          wiseEurClearSearchBtn.hidden = true;
-          wiseEurClearSearchBtn.disabled = true;
-          applyWiseEurView();
-          if (globalInput.focus) globalInput.focus();
-        });
-      }
-    }
-
-    if (wiseEurNewLink) {
-      wiseEurNewLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (wiseEurNewLink.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(wiseEurNewLink);
-          return;
-        }
-        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
-        openWiseEurModal(null, year);
-        if (wiseEurMenuPanel && wiseEurMenuBtn) {
-          wiseEurMenuPanel.setAttribute('hidden', '');
-          wiseEurMenuBtn.setAttribute('aria-expanded', 'false');
-        }
-      });
-    }
-
-    function escapeCsvValue(value) {
-      const s = String(value ?? '');
-      const normalized = s.replace(/\u00A0/g, ' ').replace(/\r\n|\r|\n/g, ' ').trim();
-      const mustQuote = /[",\n\r]/.test(normalized);
-      const escaped = normalized.replace(/"/g, '""');
-      return mustQuote ? `"${escaped}"` : escaped;
-    }
-
-    function downloadCsvFile(csvText, fileName) {
-      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function getTodayStamp() {
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    }
-
-    function exportWiseEurToCsv() {
-      const header = [
-        'Budget #',
-        'ACTION DATE',
-        '# ID-TRACK',
-        'RECEIVED FROM - DISBURSED TO:',
-        'RECEIPTS €',
-        'DISBURSE €',
-        'DESCRIPTION',
-        'Issuance Date Bank',
-        'Verified',
-        'Checksum',
-        'Bank Statements',
-        'Remarks',
-      ];
-      const entries = loadWiseEur(year);
-      const sorted = sortWiseEurForView(entries, 'datePL', 'asc');
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-      for (const e of sorted) {
-        const receipts = getWiseEurReceipts(e);
-        const disburse = getWiseEurDisburse(e);
-        const checksumVal = e && e.checksum !== null && e.checksum !== undefined && String(e.checksum).trim() !== '' ? e.checksum : '';
-        const values = [
-          String(e && e.budgetNo ? e.budgetNo : ''),
-          String(e && (e.datePL || e.date) ? (e.datePL || e.date) : ''),
-          String(e && e.idTrack ? e.idTrack : ''),
-          String(e && (e.receivedFromDisbursedTo || e.party) ? (e.receivedFromDisbursedTo || e.party) : ''),
-          receipts ? String(receipts) : '',
-          disburse ? String(disburse) : '',
-          String(e && (e.description || e.reference) ? (e.description || e.reference) : ''),
-          String(e && e.issuanceDateBank ? e.issuanceDateBank : ''),
-          getWiseEurVerified(e) ? '1' : '',
-          String(checksumVal),
-          String(e && e.bankStatements ? e.bankStatements : ''),
-          String(e && e.remarks ? e.remarks : ''),
-        ];
-        lines.push(values.map(escapeCsvValue).join(','));
-      }
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, `wise_eur_${year}_${getTodayStamp()}.csv`);
-    }
-
-    function downloadWiseEurCsvTemplate() {
-      const header = [
-        'Budget #',
-        'ACTION DATE',
-        '# ID-TRACK',
-        'RECEIVED FROM - DISBURSED TO:',
-        'RECEIPTS €',
-        'DISBURSE €',
-        'DESCRIPTION',
-        'Issuance Date Bank',
-        'Verified',
-        'Checksum',
-        'Bank Statements',
-        'Remarks',
-      ];
-      const example = ['', getTodayStamp(), '', 'Example Party', '100.00', '', 'Example description', '', '1', '', '', ''];
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-      lines.push(example.map(escapeCsvValue).join(','));
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, `wise_eur_template_${year}_${getTodayStamp()}.csv`);
-    }
-
-    function parseCsvText(text) {
-      const rows = [];
-      const s = String(text ?? '');
-      let row = [];
-      let field = '';
-      let inQuotes = false;
-
-      for (let i = 0; i < s.length; i += 1) {
-        const ch = s[i];
-        if (inQuotes) {
-          if (ch === '"') {
-            const next = s[i + 1];
-            if (next === '"') {
-              field += '"';
-              i += 1;
-            } else {
-              inQuotes = false;
-            }
-          } else {
-            field += ch;
-          }
-          continue;
-        }
-
-        if (ch === '"') {
-          inQuotes = true;
-          continue;
-        }
-
-        if (ch === ',') {
-          row.push(field);
-          field = '';
-          continue;
-        }
-
-        if (ch === '\n') {
-          row.push(field);
-          field = '';
-          rows.push(row);
-          row = [];
-          continue;
-        }
-
-        if (ch === '\r') continue;
-        field += ch;
-      }
-
-      row.push(field);
-      rows.push(row);
-
-      while (rows.length > 0) {
-        const last = rows[rows.length - 1];
-        const isEmpty = last.every((c) => String(c ?? '').trim() === '');
-        if (!isEmpty) break;
-        rows.pop();
-      }
-
-      return rows;
-    }
-
-    function normalizeHeaderName(name) {
-      return String(name ?? '')
-        .replace(/\uFEFF/g, '')
-        .replace(/\u00A0/g, ' ')
-        .trim()
-        .toLowerCase();
-    }
-
-    function normalizeCsvDate(raw) {
-      const s = String(raw ?? '').trim();
-      if (!s) return '';
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-      const mdy = s.match(/^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$/);
-      if (mdy) {
-        const mm = Number(mdy[1]);
-        const dd = Number(mdy[2]);
-        const yyyy = Number(mdy[3]);
-        if (!Number.isInteger(mm) || !Number.isInteger(dd) || !Number.isInteger(yyyy)) return '';
-        if (yyyy < 1000 || yyyy > 9999) return '';
-        if (mm < 1 || mm > 12) return '';
-        if (dd < 1 || dd > 31) return '';
-        const d = new Date(yyyy, mm - 1, dd);
-        if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return '';
-        return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-      }
-
-      const ms = Date.parse(s);
-      if (!Number.isFinite(ms)) return '';
-      const d = new Date(ms);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    }
-
-    function parseNonNegativeAmount(raw) {
-      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!s) return null;
-      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n) || n < 0) return null;
-      return n;
-    }
-
-    function parseSignedAmount(raw) {
-      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!s) return null;
-      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n)) return null;
-      return n;
-    }
-
-    function findHeaderIndex(headerNames, candidates) {
-      const names = Array.isArray(headerNames) ? headerNames : [];
-      const cands = (Array.isArray(candidates) ? candidates : []).map(normalizeHeaderName).filter(Boolean);
-      if (cands.length === 0) return -1;
-      for (const c of cands) {
-        const exact = names.indexOf(c);
-        if (exact !== -1) return exact;
-      }
-      for (let i = 0; i < names.length; i += 1) {
-        const h = String(names[i] ?? '').trim();
-        if (!h) continue;
-        if (cands.some((c) => h === c || h.startsWith(`${c} `) || h.startsWith(`${c}(`) || h.startsWith(`${c}—`) || h.startsWith(`${c}-`) || h.startsWith(c))) {
-          return i;
-        }
-      }
-      return -1;
-    }
-
-    function parseWiseEurCsvTextToEntries(csvText, options) {
-      const opts = options && typeof options === 'object' ? options : {};
-      const relaxRequired = !!opts.relaxRequired;
-
-      function parseCsvBooleanish(value) {
-        const s = String(value ?? '').trim().toLowerCase();
-        if (!s) return false;
-        if (s === '1' || s === 'true' || s === 'yes' || s === 'y' || s === 'on' || s === 'checked' || s === 'x') return true;
-        if (s === '0' || s === 'false' || s === 'no' || s === 'n' || s === 'off') return false;
-        // Legacy Checked-by text (e.g., initials) should count as verified.
-        return true;
-      }
-
-      const rows = parseCsvText(csvText);
-      if (rows.length === 0) {
-        return { isEmpty: true, imported: [], errors: [] };
-      }
-
-      const header = rows[0].map(normalizeHeaderName);
-      const dataRows = rows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
-
-      const idx = {
-        budgetNo: findHeaderIndex(header, ['budget #', 'budget', 'budget no', 'budget number']),
-        datePL: findHeaderIndex(header, ['action date', 'date p-l', 'date pl', 'date']),
-        idTrack: findHeaderIndex(header, ['# id-track', 'id-track', 'id track', 'track', 'tracking']),
-        receivedFromDisbursedTo: findHeaderIndex(header, [
-          'received from - disbursed to:',
-          'received from - disbursed to',
-          'received from',
-          'disbursed to',
-          'party',
-          'payee',
-          'remitter',
-          'name',
-          'merchant',
-        ]),
-        receipts: findHeaderIndex(header, ['receipts €', 'receipts', 'receipt', 'credit', 'received', 'in']),
-        disburse: findHeaderIndex(header, ['disburse €', 'disburse', 'disbursement', 'debit', 'paid', 'payment', 'out', 'sent']),
-        description: findHeaderIndex(header, ['description', 'reference', 'details', 'memo', 'note']),
-        issuanceDateBank: findHeaderIndex(header, ['issuance date bank', 'issuance date', 'bank issuance date']),
-        verified: findHeaderIndex(header, ['verified', 'checked by gtreas', 'checked by', 'gtreas']),
-        checksum: findHeaderIndex(header, ['checksum', 'balance']),
-        bankStatements: findHeaderIndex(header, ['bank statements', 'bank statement']),
-        remarks: findHeaderIndex(header, ['remarks', 'remark']),
-        amount: findHeaderIndex(header, ['amount', 'euro', 'eur', 'value']),
-        currency: findHeaderIndex(header, ['currency', 'ccy']),
-      };
-
-      const hasHeaders =
-        idx.datePL !== -1 &&
-        (idx.receivedFromDisbursedTo !== -1 || idx.description !== -1) &&
-        (idx.receipts !== -1 || idx.disburse !== -1 || idx.amount !== -1);
-
-      if (!hasHeaders && header.length >= 3) {
-        // Allow headerless CSV: DATE P-L, RECEIVED FROM - DISBURSED TO, DESCRIPTION, RECEIPTS, DISBURSE
-        dataRows.unshift(rows[0]);
-        idx.datePL = 0;
-        idx.receivedFromDisbursedTo = 1;
-        idx.description = 2;
-        idx.receipts = 3;
-        idx.disburse = 4;
-        idx.amount = 5;
-      }
-
-      const nowIso = new Date().toISOString();
-      const imported = [];
-      const errors = [];
-
-      for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
-        const r = dataRows[rowIndex];
-        const get = (i) => (i >= 0 ? (r[i] ?? '') : '');
-
-        const rowNo = rowIndex + 2;
-        const budgetNo = String(get(idx.budgetNo)).trim();
-        const datePL = normalizeCsvDate(get(idx.datePL));
-        const idTrack = String(get(idx.idTrack)).trim();
-        const receivedFromDisbursedTo = String(get(idx.receivedFromDisbursedTo)).trim();
-        const description = String(get(idx.description)).trim();
-        const issuanceDateBank = normalizeCsvDate(get(idx.issuanceDateBank));
-        const verifiedRaw = String(get(idx.verified)).trim();
-        const verified = parseCsvBooleanish(verifiedRaw);
-        const bankStatements = String(get(idx.bankStatements)).trim();
-        const remarks = String(get(idx.remarks)).trim();
-
-        const hasAnyText =
-          !!budgetNo ||
-          !!datePL ||
-          !!idTrack ||
-          !!receivedFromDisbursedTo ||
-          !!description ||
-          !!issuanceDateBank ||
-          !!verifiedRaw ||
-          !!bankStatements ||
-          !!remarks;
-
-        const checksumRaw = String(get(idx.checksum)).trim();
-        const checksumNum = parseSignedAmount(checksumRaw);
-        const checksum = checksumNum === null ? checksumRaw : checksumNum;
-
-        const currency = idx.currency !== -1 ? String(get(idx.currency)).trim().toUpperCase() : '';
-        if (currency && currency !== 'EUR' && currency !== '€') {
-          errors.push(`Row ${rowNo}: currency is not EUR.`);
-          continue;
-        }
-
-        const receiptsRaw = String(get(idx.receipts)).trim();
-        const disburseRaw = String(get(idx.disburse)).trim();
-        let receipts = parseNonNegativeAmount(receiptsRaw);
-        let disburse = parseNonNegativeAmount(disburseRaw);
-
-        if (receipts === null && disburse === null) {
-          const amount = parseSignedAmount(get(idx.amount));
-          if (amount === null) {
-            if (!relaxRequired && (receiptsRaw || disburseRaw || String(get(idx.amount)).trim())) {
-              errors.push(`Row ${rowNo}: missing amount.`);
-            }
-          } else if (amount > 0) {
-            receipts = amount;
-            disburse = null;
-          } else if (amount < 0) {
-            receipts = null;
-            disburse = Math.abs(amount);
-          } else {
-            receipts = null;
-            disburse = null;
-            if (!relaxRequired) errors.push(`Row ${rowNo}: amount is 0.`);
-          }
-        }
-
-        const receiptsHas = Number.isFinite(receipts) && receipts > 0;
-        const disburseHas = Number.isFinite(disburse) && disburse > 0;
-
-        // If the row is completely blank (no meaningful text, no amounts, no checksum), skip silently.
-        const hasAnyAmount = receiptsHas || disburseHas || (checksumRaw && String(checksumRaw).trim() !== '');
-        if (!hasAnyText && !hasAnyAmount) continue;
-
-        if (!relaxRequired) {
-          if (!datePL) errors.push(`Row ${rowNo}: invalid Action Date.`);
-          if (!receivedFromDisbursedTo) errors.push(`Row ${rowNo}: Received From - Disbursed To is required.`);
-          if (!receiptsHas && !disburseHas) errors.push(`Row ${rowNo}: enter a Receipts or Disburse amount.`);
-          if (receiptsHas && disburseHas) errors.push(`Row ${rowNo}: enter only one: Receipts or Disburse.`);
-
-          // Description is optional for import.
-          if (!datePL || !receivedFromDisbursedTo || (!receiptsHas && !disburseHas) || (receiptsHas && disburseHas)) continue;
-        } else {
-          if (receiptsHas && disburseHas) {
-            errors.push(`Row ${rowNo}: enter only one: Receipts or Disburse.`);
-            continue;
-          }
-        }
-
-        imported.push({
-          id: (crypto?.randomUUID ? crypto.randomUUID() : `we_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          budgetNo,
-          datePL,
-          idTrack,
-          receivedFromDisbursedTo,
-          receipts: receiptsHas ? receipts : null,
-          disburse: disburseHas ? disburse : null,
-          description,
-          issuanceDateBank,
-          verified: verified ? 1 : 0,
-          checksum,
-          bankStatements,
-          remarks,
-        });
-      }
-
-      return { isEmpty: false, imported, errors };
-    }
-
-    function importWiseEurFromCsvText(csvText, fileName) {
-      const ok = window.confirm(
-        `Importing a CSV will add entries to the wiseEUR list for ${year}. Continue?\n\nFile: ${fileName || 'CSV'}`
-      );
-      if (!ok) return;
-
-      const existingBefore = loadWiseEur(year);
-      const relaxRequired = !Array.isArray(existingBefore) || existingBefore.length === 0;
-      const parsed = parseWiseEurCsvTextToEntries(csvText, { relaxRequired });
-      if (parsed.isEmpty) {
-        window.alert('CSV is empty.');
-        return;
-      }
-
-      const imported = parsed.imported;
-      const errors = parsed.errors;
-
-      if (imported.length === 0) {
-        window.alert(errors.length ? `No rows were imported:\n\n${errors.slice(0, 15).join('\n')}` : 'No rows were imported.');
-        return;
-      }
-
-      if (errors.length > 0) {
-        const proceed = window.confirm(
-          `Some rows could not be processed. Continue with ${imported.length} imported row(s)?\n\n${errors
-            .slice(0, 15)
-            .join('\n')}${errors.length > 15 ? '\n…' : ''}`
-        );
-        if (!proceed) return;
-      }
-
-      const positiveImported = imported.filter((e) => computeWiseEurNet(e) > 0);
-      const negativeImported = imported.filter((e) => computeWiseEurNet(e) < 0);
-
-      if (negativeImported.length > 0) {
-        ensurePaymentOrdersReconciliationListExistsForYear(year);
-        for (const e of negativeImported) {
-          const po = buildReconciliationOrderFromWiseEurEntry(e, year);
-          if (po) upsertReconciliationOrderBySource(po, year);
-        }
-      }
-
-      const existing = existingBefore;
-      const merged = [...positiveImported, ...(Array.isArray(existing) ? existing : [])];
-      saveWiseEur(merged, year);
-      applyWiseEurView();
-
-      if (typeof showFlashToken === 'function') {
-        showFlashToken(`Imported ${positiveImported.length} wiseEUR row(s). Moved ${negativeImported.length} row(s) to Reconciliation.`);
-      }
-    }
-
-    async function tryAutoSeedWiseEurFromCsvFile() {
-      if (Number(year) !== 2026) return false;
-
-      const seedFlagKey = `payment_order_wise_eur_seeded_${year}_v1`;
-      if (localStorage.getItem(seedFlagKey) === '1') return false;
-
-      const existing = loadWiseEur(year);
-      if (Array.isArray(existing) && existing.length > 0) return false;
-
-      let resp;
-      try {
-        resp = await fetch('wise_eur_2026_seed.csv', { cache: 'no-store' });
-      } catch (e) {
-        return false;
-      }
-
-      if (!resp || !resp.ok) return false;
-
-      const text = await resp.text();
-      const parsed = parseWiseEurCsvTextToEntries(text, { relaxRequired: true });
-      if (parsed.isEmpty || !Array.isArray(parsed.imported) || parsed.imported.length === 0) return false;
-
-      saveWiseEur(parsed.imported, year);
-      localStorage.setItem(seedFlagKey, '1');
-
-      if (typeof showFlashToken === 'function') {
-        showFlashToken(`Seeded ${parsed.imported.length} wiseEUR row(s) for ${year}.`);
-      }
-
-      return true;
-    }
-
-    if (wiseEurExportCsvLink) {
-      wiseEurExportCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        exportWiseEurToCsv();
-      });
-    }
-    if (wiseEurDownloadTemplateLink) {
-      wiseEurDownloadTemplateLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        downloadWiseEurCsvTemplate();
-      });
-    }
-    if (wiseEurImportCsvLink) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.csv,text/csv';
-      input.style.display = 'none';
-      document.body.appendChild(input);
-
-      wiseEurImportCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (wiseEurImportCsvLink.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(wiseEurImportCsvLink);
-          return;
-        }
-        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
-        input.value = '';
-        input.click();
-      });
-
-      input.addEventListener('change', () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          importWiseEurFromCsvText(reader.result, file.name);
-        };
-        reader.onerror = () => {
-          window.alert('Could not read CSV file.');
-        };
-        reader.readAsText(file);
-      });
-    }
-
-    if (wiseEurMenuBtn) {
-      const MENU_CLOSE_DELAY_MS = 250;
-      let menuCloseTimer = 0;
-
-      function isMenuOpen() {
-        return Boolean(wiseEurMenuPanel && !wiseEurMenuPanel.hasAttribute('hidden'));
-      }
-
-      function closeMenu() {
-        if (!wiseEurMenuPanel || !wiseEurMenuBtn) return;
-        wiseEurMenuPanel.setAttribute('hidden', '');
-        wiseEurMenuBtn.setAttribute('aria-expanded', 'false');
-      }
-
-      function openMenu() {
-        if (!wiseEurMenuPanel || !wiseEurMenuBtn) return;
-        wiseEurMenuPanel.removeAttribute('hidden');
-        wiseEurMenuBtn.setAttribute('aria-expanded', 'true');
-      }
-
-      function toggleMenu() {
-        if (isMenuOpen()) closeMenu();
-        else openMenu();
-      }
-
-      function cancelScheduledClose() {
-        if (!menuCloseTimer) return;
-        clearTimeout(menuCloseTimer);
-        menuCloseTimer = 0;
-      }
-
-      function scheduleClose() {
-        cancelScheduledClose();
-        if (!isMenuOpen()) return;
-        menuCloseTimer = window.setTimeout(() => {
-          closeMenu();
-          menuCloseTimer = 0;
-        }, MENU_CLOSE_DELAY_MS);
-      }
-
-      wiseEurMenuBtn.addEventListener('click', () => {
-        toggleMenu();
-      });
-
-      wiseEurMenuBtn.addEventListener('mouseenter', cancelScheduledClose);
-      wiseEurMenuBtn.addEventListener('mouseleave', scheduleClose);
-
-      if (wiseEurMenuPanel) {
-        wiseEurMenuPanel.addEventListener('mouseenter', cancelScheduledClose);
-        wiseEurMenuPanel.addEventListener('mouseleave', scheduleClose);
-      }
-
-      document.addEventListener('click', (e) => {
-        if (!isMenuOpen()) return;
-        const menuRoot = e.target?.closest ? e.target.closest('[data-wise-eur-menu]') : null;
-        if (menuRoot) return;
-        cancelScheduledClose();
-        closeMenu();
-      });
-
-      document.addEventListener('keydown', (e) => {
-        if (!isMenuOpen()) return;
-        if (e.key === 'Escape') {
-          cancelScheduledClose();
-          closeMenu();
-        }
-      });
-    }
-
-    wiseEurTbody.addEventListener('click', (e) => {
-      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
-      if (dl) {
-        e.preventDefault();
-        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
-        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
-        if (!orderId) return;
-
-        const order = scope === 'reconciliation'
-          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
-          : loadOrders(year).find((o) => o && String(o.id) === orderId);
-        if (!order) return;
-        if (hasOrderMissingRequiredValues(order)) {
-          window.alert('Complete all required fields before downloading a PDF.');
-          return;
-        }
-        generatePaymentOrderPdfFromTemplate({ order });
-        return;
-      }
-
-      const btn = e.target.closest('button[data-wise-eur-action]');
-      if (!btn) return;
-      const row = btn.closest('tr[data-wise-eur-id]');
-      if (!row) return;
-      const id = row.getAttribute('data-wise-eur-id');
-      const action = btn.getAttribute('data-wise-eur-action');
-
-      if (action === 'delete') {
-        if (btn.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(btn, 'Requires Delete access for wiseEUR.');
-          return;
-        }
-        if (!requireDeleteAccess('income_wise_eur', 'Delete access is required for wiseEUR.')) return;
-        const ok = window.confirm('Delete this wiseEUR entry?');
-        if (!ok) return;
-        deleteWiseEurEntryById(id, year);
-        applyWiseEurView();
-        return;
-      }
-
-      if (action === 'edit') {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        const all = loadWiseEur(year);
-        const entry = all.find((x) => x && x.id === id);
-        if (!entry) return;
-        openWiseEurModal(entry, year);
-      }
-    });
-
-    // Persist Verified checkbox state per wiseEUR entry.
-    if (!wiseEurTbody.dataset.verifiedBound) {
-      wiseEurTbody.dataset.verifiedBound = '1';
-      wiseEurTbody.addEventListener('change', (e) => {
-        const input =
-          e.target && e.target.matches
-            ? e.target.matches('input[type="checkbox"][data-wise-eur-verify]')
-              ? e.target
-              : null
-            : null;
-        if (!input) return;
-
-        if (!wiseEurViewState.canVerify) {
-          input.checked = !input.checked;
-          return;
-        }
-
-        if (!requireIncomeEditAccess('Income is read only for your account.')) {
-          input.checked = !input.checked;
-          return;
-        }
-
-        const id = String(input.getAttribute('data-wise-eur-id') || '').trim();
-        if (!id) return;
-        const all = loadWiseEur(year);
-        const entry = all.find((x) => x && x.id === id);
-        if (!entry) return;
-
-        entry.verified = input.checked ? 1 : 0;
-        if ('checkedByGTREAS' in entry) delete entry.checkedByGTREAS;
-        entry.updatedAt = new Date().toISOString();
-        upsertWiseEurEntry(entry, year);
-
-        // Keep sort/search values consistent.
-        applyWiseEurView();
-      });
-    }
-
-    if (wiseEurModal && !wiseEurModal.dataset.bound) {
-      wiseEurModal.dataset.bound = '1';
-      wiseEurModal.addEventListener('click', (e) => {
-        const closeTarget = e.target.closest('[data-wise-eur-modal-close]');
-        if (closeTarget) closeWiseEurModal();
-      });
-    }
-
-    if (!document.body.dataset.wiseEurEscBound) {
-      document.body.dataset.wiseEurEscBound = '1';
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && wiseEurModal && wiseEurModal.classList.contains('is-open')) {
-          closeWiseEurModal();
-        }
-      });
-    }
-
-    if (wiseEurSaveBtn && !wiseEurSaveBtn.dataset.bound) {
-      wiseEurSaveBtn.dataset.bound = '1';
-      wiseEurSaveBtn.addEventListener('click', () => {
-        try {
-          if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-          if (!hasIncomeFullAccess && !currentWiseEurId) {
-            window.alert('Requires Full access for Income to create a new wiseEUR entry.');
-            return;
-          }
-          clearWiseEurModalErrors();
-          const res = validateWiseEurModalValues();
-          if (!res.ok) {
-            showWiseEurModalErrors(res.errors);
-            return;
-          }
-
-          const nowIso = new Date().toISOString();
-          const id =
-            currentWiseEurId ||
-            (crypto?.randomUUID ? crypto.randomUUID() : `we_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-          const existing = currentWiseEurId ? loadWiseEur(year).find((x) => x && x.id === currentWiseEurId) : null;
-
-          const entry = {
-            id,
-            createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
-            updatedAt: nowIso,
-            ...res.values,
-            idTrack: existing && existing.idTrack ? existing.idTrack : '',
-          };
-
-          const net = computeWiseEurNet(entry);
-          if (net < 0) {
-            const po = buildReconciliationOrderFromWiseEurEntry(entry, year);
-            if (po) {
-              ensurePaymentOrdersReconciliationListExistsForYear(year);
-              upsertReconciliationOrderBySource(po, year);
-            }
-            if (existing) deleteWiseEurEntryById(entry.id, year);
-          } else {
-            removeReconciliationOrderBySource('wiseEUR', entry.id, year);
-            upsertWiseEurEntry(entry, year);
-            if (!existing) {
-              void fireNotificationEvent('new_wise_eur', {
-                date: String(entry.date || ''),
-                party: String(entry.receivedFromDisbursedTo || ''),
-                amount: String(entry.totalAmountInEuro || entry.euroAmount || ''),
-                year: String(year),
-                directLink: String(window.location.href || ''),
-              });
-            }
-          }
-          closeWiseEurModal();
-          applyWiseEurView();
-        } catch (err) {
-          console.error('[WiseEUR Save] Failed', err);
-          window.alert(`Unable to save wiseEUR entry. ${err && err.message ? err.message : 'Check console for details.'}`);
-        }
-      });
-    }
-
-    if (!wiseEurTbody.dataset.storageBound) {
-      wiseEurTbody.dataset.storageBound = '1';
-      window.addEventListener('storage', (e) => {
-        const key = e && typeof e.key === 'string' ? e.key : '';
-        if (!key) return;
-        if (key.startsWith('payment_order_wise_eur_')) {
-          applyWiseEurView();
-        }
-      });
-    }
-
-    tryAutoSeedWiseEurFromCsvFile()
-      .then((didSeed) => {
-        if (didSeed) applyWiseEurView();
-      })
-      .catch(() => {});
-
-    applyWiseEurView();
-  }
-
-  // ---- wiseUSD (year-scoped) ----
-
-  const WISE_USD_COL_TYPES = {
-    budgetNo: 'text',
-    datePL: 'date',
-    idTrack: 'text',
-    receivedFromDisbursedTo: 'text',
-    receipts: 'number',
-    disburse: 'number',
-    description: 'text',
-    issuanceDateBank: 'date',
-    verified: 'number',
-    checksum: 'number',
-    bankStatements: 'text',
-    remarks: 'text',
-  };
-
-  const wiseUsdViewState = {
-    globalFilter: '',
-    sortKey: 'datePL',
-    sortDir: 'asc',
-    defaultEmptyText: null,
-    canVerify: false,
-    canDelete: false,
-  };
-
-  function ensureWiseUsdDefaultEmptyText() {
-    if (!wiseUsdEmptyState) return;
-    if (wiseUsdViewState.defaultEmptyText !== null) return;
-    wiseUsdViewState.defaultEmptyText = wiseUsdEmptyState.textContent || 'No wiseUSD entries yet.';
-  }
-
-  function getWiseUsdReceipts(entry) {
-    const n = Number(entry && entry.receipts);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-
-  function getWiseUsdDisburse(entry) {
-    const n = Number(entry && entry.disburse);
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  }
-
-  function getWiseUsdVerified(entry) {
-    if (!entry) return false;
-    if (typeof entry.verified === 'boolean') return entry.verified;
-    const raw = entry.verified !== undefined ? entry.verified : entry.checkedByGTREAS;
-    if (raw === null || raw === undefined) return false;
-    const s = String(raw).trim().toLowerCase();
-    if (!s) return false;
-    if (s === '0' || s === 'false' || s === 'no' || s === 'n' || s === 'off') return false;
-    return true;
-  }
-
-  function computeWiseUsdNet(entry) {
-    return getWiseUsdReceipts(entry) - getWiseUsdDisburse(entry);
-  }
-
-  function hasWiseUsdMissingRequiredValues(entry) {
-    if (!entry) return true;
-    const date = String(entry.datePL || entry.date || '').trim();
-    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
-    const description = String(entry.description || entry.reference || '').trim();
-
-    const receipts = getWiseUsdReceipts(entry);
-    const disburse = getWiseUsdDisburse(entry);
-    const hasReceipts = Number.isFinite(receipts) && receipts > 0;
-    const hasDisburse = Number.isFinite(disburse) && disburse > 0;
-    const hasOneAmount = (hasReceipts && !hasDisburse) || (!hasReceipts && hasDisburse);
-
-    const rawBudgetNo = String(entry.budgetNo || '').trim();
-    const hasBudget = Boolean(extractInCodeFromBudgetNumberText(rawBudgetNo) || extractOutCodeFromBudgetNumberText(rawBudgetNo));
-
-    if (!date) return true;
-    if (!party) return true;
-    if (!description) return true;
-    if (!hasOneAmount) return true;
-    if (!hasBudget) return true;
-    return false;
-  }
-
-  function buildReconciliationOrderFromWiseUsdEntry(entry, year) {
-    if (!entry || !entry.id) return null;
-    const absUsd = getWiseUsdDisburse(entry);
-    if (!(Number.isFinite(absUsd) && absUsd > 0)) return null;
-
-    const date = String(entry.datePL || entry.date || '').trim();
-    const party = String(entry.receivedFromDisbursedTo || entry.party || '').trim();
-    const purpose = String(entry.description || entry.reference || '').trim() || 'wiseUSD disbursement';
-    const budgetNumber = String(entry.budgetNo || '').trim();
-    const itemTitle = purpose;
-
-    const po = buildPaymentOrder({
-      source: 'wiseUSD',
-      sourceEntryId: entry.id,
-      sourceEntryYear: year,
-      paymentOrderNo: '',
-      date,
-      name: party,
-      euro: null,
-      usd: absUsd,
-      items: [
-        {
-          id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-          title: itemTitle,
-          euro: null,
-          usd: absUsd,
-        },
-      ],
-      address: '',
-      iban: '',
-      bic: '',
-      specialInstructions: '',
-      budgetNumber,
-      purpose,
-      with: 'Grand Secretary',
-      status: 'Submitted',
-    });
-    po.updatedAt = po.createdAt;
-    return po;
-  }
-
-  function getWiseUsdDisplayValueForColumn(entry, colKey) {
-    if (!entry) return '';
-    switch (colKey) {
-      case 'budgetNo':
-        return entry.budgetNo || '';
-      case 'datePL':
-        return formatDate(entry.datePL || entry.date);
-      case 'idTrack':
-        return entry.idTrack ? formatPaymentOrderNoForDisplay(entry.idTrack) : '';
-      case 'receivedFromDisbursedTo':
-        return entry.receivedFromDisbursedTo || entry.party || '';
-      case 'receipts': {
-        const n = getWiseUsdReceipts(entry);
-        return n ? formatCurrency(n, 'USD') : '';
-      }
-      case 'disburse': {
-        const n = getWiseUsdDisburse(entry);
-        return n ? formatCurrency(n, 'USD') : '';
-      }
-      case 'description':
-        return entry.description || entry.reference || '';
-      case 'issuanceDateBank':
-        return entry.issuanceDateBank ? formatDate(entry.issuanceDateBank) : '';
-      case 'verified':
-        return getWiseUsdVerified(entry) ? 'Yes' : '';
-      case 'checksum': {
-        const n = Number(entry && entry.checksum);
-        return Number.isFinite(n) ? formatCurrency(n, 'USD') : entry.checksum || '';
-      }
-      case 'bankStatements':
-        return entry.bankStatements || '';
-      case 'remarks':
-        return entry.remarks || '';
-      default:
-        return '';
-    }
-  }
-
-  function getWiseUsdSortValueForColumn(entry, colKey, colType) {
-    if (!entry) return null;
-    if (colType === 'number') {
-      if (colKey === 'receipts') return getWiseUsdReceipts(entry);
-      if (colKey === 'disburse') return getWiseUsdDisburse(entry);
-      if (colKey === 'verified') return getWiseUsdVerified(entry) ? 1 : 0;
-      if (colKey === 'checksum') {
-        const n = Number(entry && entry.checksum);
-        return Number.isFinite(n) ? n : null;
-      }
-      return null;
-    }
-    if (colType === 'date') {
-      const raw =
-        colKey === 'datePL'
-          ? String(entry.datePL || entry.date || '').trim()
-          : colKey === 'issuanceDateBank'
-            ? String(entry.issuanceDateBank || '').trim()
-            : '';
-      return raw ? raw : null;
-    }
-    return normalizeTextForSearch(getWiseUsdDisplayValueForColumn(entry, colKey));
-  }
-
-  function filterWiseUsdForView(entries, globalFilter) {
-    const needle = normalizeTextForSearch(globalFilter);
-    if (!needle) return entries || [];
-
-    const cols = Object.keys(WISE_USD_COL_TYPES);
-    return (entries || []).filter((e) => cols.some((k) => normalizeTextForSearch(getWiseUsdDisplayValueForColumn(e, k)).includes(needle)));
-  }
-
-  function sortWiseUsdForView(entries, sortKey, sortDir) {
-    const dir = sortDir === 'desc' ? -1 : 1;
-    const key = sortKey || 'datePL';
-    const colType = WISE_USD_COL_TYPES[key] || 'text';
-    const withIndex = (entries || []).map((entry, index) => ({ entry, index }));
-    withIndex.sort((a, b) => {
-      const av = getWiseUsdSortValueForColumn(a.entry, key, colType);
-      const bv = getWiseUsdSortValueForColumn(b.entry, key, colType);
-
-      if (av === null && bv === null) return a.index - b.index;
-      if (av === null) return 1;
-      if (bv === null) return -1;
-
-      if (colType === 'number') {
-        const cmp = av === bv ? 0 : av < bv ? -1 : 1;
-        return cmp === 0 ? a.index - b.index : cmp * dir;
-      }
-
-      const cmp = String(av).localeCompare(String(bv));
-      return cmp === 0 ? a.index - b.index : cmp * dir;
-    });
-    return withIndex.map((x) => x.entry);
-  }
-
-  function renderWiseUsdRows(entries) {
-    if (!wiseUsdTbody) return;
-    const canVerify = Boolean(wiseUsdViewState.canVerify);
-    const canDeleteRows = Boolean(wiseUsdViewState.canDelete);
-    const deleteAriaDisabled = canDeleteRows ? 'false' : 'true';
-    const deleteTooltipAttr = canDeleteRows ? '' : ' data-tooltip="Requires Delete access for wiseUSD."';
-    const year = getActiveBudgetYear();
-    const activeYear = getActiveBudgetYear();
-    const inMap = getInDescMapForYear(activeYear);
-    const outMap = getOutDescMapForYear(activeYear);
-    const ordersBySourceEntryKey = new Map();
-    const reconcileBySourceEntryKey = new Map();
-    const ordersByPoCanon = new Map();
-    const reconcileByPoCanon = new Map();
-    const orderIds = new Set();
-    const sourceEntryKey = (sourceRaw, sourceEntryIdRaw) => {
-      const source = String(sourceRaw || '').trim().toLowerCase();
-      const sourceEntryId = String(sourceEntryIdRaw || '').trim();
-      if (!source || !sourceEntryId) return '';
-      return `${source}::${sourceEntryId}`;
-    };
-    {
-      const orders = loadOrders(year);
-      for (const o of orders || []) {
-        if (!o || typeof o !== 'object') continue;
-
-        const oid = String(o.id || '').trim();
-        if (oid) orderIds.add(oid);
-
-        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
-        if (poCanon && !ordersByPoCanon.has(poCanon)) ordersByPoCanon.set(poCanon, o);
-
-        const key = sourceEntryKey(o.source, o.sourceEntryId);
-        if (!key) continue;
-        if (!ordersBySourceEntryKey.has(key)) {
-          ordersBySourceEntryKey.set(key, o);
-          continue;
-        }
-        // Prefer an order that has a PO number assigned.
-        const existing = ordersBySourceEntryKey.get(key);
-        const existingPoNo = String(existing && existing.paymentOrderNo ? existing.paymentOrderNo : '').trim();
-        const nextPoNo = String(o && o.paymentOrderNo ? o.paymentOrderNo : '').trim();
-        if (!existingPoNo && nextPoNo) ordersBySourceEntryKey.set(key, o);
-      }
-    }
-    {
-      const rec = loadReconciliationOrders(year);
-      for (const o of rec || []) {
-        if (!o || typeof o !== 'object') continue;
-        const poCanon = canonicalizePaymentOrderNo(o.paymentOrderNo);
-        if (poCanon && !reconcileByPoCanon.has(poCanon)) reconcileByPoCanon.set(poCanon, o);
-
-        const key = sourceEntryKey(o.source, o.sourceEntryId);
-        if (!key) continue;
-        if (!reconcileBySourceEntryKey.has(key)) reconcileBySourceEntryKey.set(key, o);
-      }
-    }
-    const html = (entries || [])
-      .map((e) => {
-        const id = escapeHtml(e.id);
-        const isMissingRequired = hasWiseUsdMissingRequiredValues(e);
-        const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
-        const rawBudgetNo = getWiseUsdDisplayValueForColumn(e, 'budgetNo');
-        const receiptsAmt = getWiseUsdReceipts(e);
-        const disburseAmt = getWiseUsdDisburse(e);
-        let budgetNo = '';
-        if (receiptsAmt > 0 && disburseAmt <= 0) {
-          const code = extractInCodeFromBudgetNumberText(rawBudgetNo) || String(rawBudgetNo || '').trim();
-          const desc = (code && inMap ? inMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(rawBudgetNo);
-          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
-        } else if (disburseAmt > 0 && receiptsAmt <= 0) {
-          const code = extractOutCodeFromBudgetNumberText(rawBudgetNo) || String(rawBudgetNo || '').trim();
-          const desc = (code && outMap ? outMap.get(code) : '') || (code ? BUDGET_DESC_BY_CODE.get(code) : '') || inferDescFromBudgetNumberText(rawBudgetNo);
-          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
-        } else {
-          const code =
-            extractInCodeFromBudgetNumberText(rawBudgetNo) ||
-            extractOutCodeFromBudgetNumberText(rawBudgetNo) ||
-            String(rawBudgetNo || '').trim();
-          const desc =
-            (code && outMap ? outMap.get(code) : '') ||
-            (code && inMap ? inMap.get(code) : '') ||
-            (code ? BUDGET_DESC_BY_CODE.get(code) : '') ||
-            inferDescFromBudgetNumberText(rawBudgetNo);
-          budgetNo = renderBudgetNumberSpanHtml(code || rawBudgetNo, desc);
-        }
-        const datePL = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'datePL'));
-        const idTrack = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'idTrack'));
-        const receivedFromDisbursedTo = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receivedFromDisbursedTo'));
-        const receipts = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'receipts'));
-        const disburse = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'disburse'));
-        const descRaw = String(getWiseUsdDisplayValueForColumn(e, 'description') || '');
-        const strippedDescRaw = descRaw
-          .replace(/\s*\(\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\)\s*\.?\s*$/i, '')
-          .replace(/\s*converted\s+to\s+PO\s+\d{2}\s*-\s*\d{1,3}\s*\.?\s*$/i, '')
-          .replace(/\s*\(\s*pending\s+Payment\s+Order\s+Reconciliation\s*\)\s*\.?\s*$/i, '')
-          .trim();
-        const descText = escapeHtml(strippedDescRaw);
-
-        const isDisbursement = Number.isFinite(disburseAmt) && disburseAmt > 0;
-        const srcKey = isDisbursement ? sourceEntryKey('wiseUSD', e.id) : '';
-        const match = srcKey
-          ? (ordersBySourceEntryKey.get(srcKey) || reconcileBySourceEntryKey.get(srcKey))
-          : null;
-
-        const poFromMatch = String(match && match.paymentOrderNo ? match.paymentOrderNo : '').trim();
-        const poFromIdTrack = String(e && e.idTrack ? e.idTrack : '').trim();
-        const poFromDescMatch = descRaw.match(/\bPO\s*\d{2}\s*-\s*\d{1,3}\b/i);
-        const poFromDesc = poFromDescMatch ? String(poFromDescMatch[0] || '').trim() : '';
-
-        const poCandidate = poFromMatch || poFromIdTrack || poFromDesc;
-        const poCanon = canonicalizePaymentOrderNo(poCandidate);
-        const poOrder = poCanon
-          ? (ordersByPoCanon.get(poCanon) || reconcileByPoCanon.get(poCanon))
-          : null;
-
-        const orderForLink = match || poOrder;
-        const isOnPaymentOrdersTable = Boolean(orderForLink && orderForLink.id && orderIds.has(String(orderForLink.id)));
-        const isOnReconciliationTable = Boolean(orderForLink && orderForLink.id && !isOnPaymentOrdersTable);
-        const orderIdForLink = orderForLink && orderForLink.id ? escapeHtml(String(orderForLink.id)) : '';
-        const orderScopeForLink = isOnPaymentOrdersTable ? 'orders' : 'reconciliation';
-        const poDisplayRaw = formatPaymentOrderNoForDisplay(orderForLink && orderForLink.paymentOrderNo ? orderForLink.paymentOrderNo : poCandidate);
-        const poDisplay = poDisplayRaw ? escapeHtml(poDisplayRaw) : '';
-
-        const convertedHtml = (isDisbursement && isOnPaymentOrdersTable && poDisplay)
-          ? (orderIdForLink
-            ? ` (converted to <a href="#" class="poNoDownloadLink" data-action="downloadPdf" data-order-id="${orderIdForLink}" data-order-scope="${escapeHtml(orderScopeForLink)}" title="Download PDF">${poDisplay}</a>)`
-            : ` (converted to ${poDisplay})`)
-          : (isDisbursement && isOnReconciliationTable ? ' (pending Payment Order Reconciliation).' : '');
-        const description = `${descText}${convertedHtml}`;
-        const issuanceDateBank = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'issuanceDateBank'));
-        const verifiedChecked = getWiseUsdVerified(e) ? 'checked' : '';
-        const verifyDisabled = canVerify ? '' : 'disabled';
-        const checksum = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'checksum'));
-        const bankStatements = escapeHtml(getWiseUsdDisplayValueForColumn(e, 'bankStatements'));
-
-        return `
-          <tr data-wise-usd-id="${id}"${rowClass}>
-            <td>${budgetNo}</td>
-            <td>${datePL}</td>
-            <td>${idTrack}</td>
-            <td class="wiseUsdCol--receivedFrom">${receivedFromDisbursedTo}</td>
-            <td class="num">${receipts}</td>
-            <td class="num">${disburse}</td>
-            <td>${description}</td>
-            <td>${issuanceDateBank}</td>
-            <td class="num">
-              <input type="checkbox" data-wise-usd-verify="1" data-wise-usd-id="${id}" aria-label="Verified" ${verifiedChecked} ${verifyDisabled} />
-            </td>
-            <td class="num">${checksum}</td>
-            <td>${bankStatements}</td>
-            <td class="actions">
-              <button type="button" class="btn btn--editIcon" data-wise-usd-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
-              <button type="button" class="btn btn--x" data-wise-usd-action="delete" aria-label="Delete entry" title="${canDeleteRows ? 'Delete' : 'Requires Delete access for wiseUSD.'}" aria-disabled="${deleteAriaDisabled}"${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
-            </td>
-          </tr>
-        `.trim();
-      })
-      .join('');
-
-    wiseUsdTbody.innerHTML = html;
-  }
-
-  function updateWiseUsdTotals(entries) {
-    const receiptsEl = document.getElementById('wiseUsdTotalReceipts');
-    const disburseEl = document.getElementById('wiseUsdTotalDisburse');
-    const netEl = document.getElementById('wiseUsdTotalReceiptsMinusDisburse');
-
-    if (!receiptsEl && !disburseEl && !netEl) return;
-
-    let totalReceipts = 0;
-    let totalDisburse = 0;
-    for (const e of entries || []) {
-      totalReceipts += getWiseUsdReceipts(e);
-      totalDisburse += getWiseUsdDisburse(e);
-    }
-
-    const net = totalReceipts - totalDisburse;
-
-    if (receiptsEl) receiptsEl.textContent = formatCurrency(totalReceipts, 'USD');
-    if (disburseEl) disburseEl.textContent = formatCurrency(totalDisburse, 'USD');
-    if (netEl) {
-      netEl.textContent = formatCurrency(net, 'USD');
-      netEl.classList.toggle('is-negative', net < 0);
-    }
-  }
-
-  function updateWiseUsdSortIndicators() {
-    if (!wiseUsdTbody) return;
-    const table = wiseUsdTbody.closest('table');
-    if (!table) return;
-
-    const sortKey = wiseUsdViewState.sortKey;
-    const sortDir = wiseUsdViewState.sortDir === 'desc' ? 'desc' : 'asc';
-
-    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
-    for (const th of ths) {
-      const colKey = th.getAttribute('data-sort-key');
-      let aria = 'none';
-      if (colKey && sortKey === colKey) {
-        aria = sortDir === 'desc' ? 'descending' : 'ascending';
-      }
-      th.setAttribute('aria-sort', aria);
-    }
-  }
-
-  function initWiseUsdColumnSorting() {
-    if (!wiseUsdTbody) return;
-    const table = wiseUsdTbody.closest('table');
-    if (!table) return;
-    if (table.dataset.sortBound === '1') return;
-
-    const ths = Array.from(table.querySelectorAll('thead th[data-sort-key]'));
-    if (ths.length === 0) return;
-    table.dataset.sortBound = '1';
-
-    function applySortForKey(colKey) {
-      if (!colKey) return;
-      if (wiseUsdViewState.sortKey === colKey) {
-        wiseUsdViewState.sortDir = wiseUsdViewState.sortDir === 'asc' ? 'desc' : 'asc';
-      } else {
-        wiseUsdViewState.sortKey = colKey;
-        wiseUsdViewState.sortDir = 'asc';
-      }
-      applyWiseUsdView();
-    }
-
-    for (const th of ths) {
-      th.classList.add('is-sortable');
-      if (!th.hasAttribute('tabindex')) th.setAttribute('tabindex', '0');
-      if (!th.hasAttribute('aria-sort')) th.setAttribute('aria-sort', 'none');
-
-      th.addEventListener('click', () => applySortForKey(th.getAttribute('data-sort-key')));
-      th.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        applySortForKey(th.getAttribute('data-sort-key'));
-      });
-    }
-
-    updateWiseUsdSortIndicators();
-  }
-
-  let currentWiseUsdId = null;
-
-  function getWiseUsdBudgetFlowKindFromAmountStrings(receiptsRaw, disburseRaw) {
-    const r = String(receiptsRaw || '').trim();
-    const d = String(disburseRaw || '').trim();
-    const receiptsNum = r === '' ? null : Number(r);
-    const disburseNum = d === '' ? null : Number(d);
-
-    const receiptsHas = Number.isFinite(receiptsNum) && receiptsNum > 0;
-    const disburseHas = Number.isFinite(disburseNum) && disburseNum > 0;
-
-    if (receiptsHas && !disburseHas) return 'in';
-    if (disburseHas && !receiptsHas) return 'out';
-    if (!receiptsHas && !disburseHas) return null;
-    return 'both';
-  }
-
-  function syncWiseUsdBudgetNoSelect(selectEl, receiptsEl, disburseEl, initialBudgetNo) {
-    if (!selectEl) return;
-
-    const kind = getWiseUsdBudgetFlowKindFromAmountStrings(receiptsEl && receiptsEl.value, disburseEl && disburseEl.value);
-    const activeYear = getActiveBudgetYear();
-
-    // Preserve current selection when possible.
-    const prevValue = String(selectEl.value || '').trim();
-    const preferred = prevValue || String(initialBudgetNo || '').trim();
-
-    // Reset options.
-    selectEl.innerHTML = '';
-
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-
-    if (kind === 'both') {
-      placeholder.textContent = 'Enter only one: Receipts or Disburse';
-      placeholder.disabled = true;
-      placeholder.selected = true;
-      selectEl.appendChild(placeholder);
-      selectEl.disabled = true;
-      return;
-    }
-
-    if (!kind) {
-      placeholder.textContent = 'Enter Receipts or Disburse first';
-      placeholder.disabled = true;
-      placeholder.selected = true;
-      selectEl.appendChild(placeholder);
-      selectEl.disabled = true;
-      return;
-    }
-
-    placeholder.textContent = 'Select a Budget #';
-    selectEl.appendChild(placeholder);
-    selectEl.disabled = false;
-
-    const accounts = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
-    const items = Array.isArray(accounts) ? accounts : [];
-
-    if (items.length === 0) {
-      const none = document.createElement('option');
-      none.value = '__none__';
-      none.disabled = true;
-      none.textContent = kind === 'in' ? 'No IN accounts found in the active budget' : 'No OUT accounts found in the active budget';
-      selectEl.appendChild(none);
-      selectEl.value = '';
-      return;
-    }
-
-    const codes = [];
-    for (const item of items) {
-      const code = String(kind === 'in' ? item && item.inCode : item && item.outCode).trim();
-      if (!/^\d{4}$/.test(code)) continue;
-      const desc = String(item && item.desc ? item.desc : '').trim();
-      codes.push({ code, desc });
-    }
-
-    codes.sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true, sensitivity: 'base' }));
-
-    const allowed = new Set();
-    for (const { code, desc } of codes) {
-      allowed.add(code);
-      const opt = document.createElement('option');
-      opt.value = code;
-      opt.textContent = desc ? `${code} - ${desc}` : code;
-      selectEl.appendChild(opt);
-    }
-
-    if (preferred && allowed.has(preferred)) selectEl.value = preferred;
-    else selectEl.value = '';
-  }
-
-  function openWiseUsdModal(entry, year) {
-    if (!wiseUsdModal || !wiseUsdModalBody) return;
-    const y = Number.isInteger(Number(year)) ? Number(year) : getWiseUsdYear();
-    currentWiseUsdId = entry && entry.id ? entry.id : null;
-
-    const titleEl = wiseUsdModal.querySelector('#wiseUsdModalTitle');
-    const subheadEl = wiseUsdModal.querySelector('#wiseUsdModalSubhead');
-    if (titleEl) titleEl.textContent = currentWiseUsdId ? 'wiseUSD (Edit)' : 'wiseUSD (New)';
-    if (subheadEl) subheadEl.textContent = `${y} wiseUSD`;
-
-    const budgetNoRaw = entry && entry.budgetNo ? String(entry.budgetNo).trim() : '';
-    const safeDatePL = escapeHtml(entry && (entry.datePL || entry.date) ? (entry.datePL || entry.date) : '');
-    const safeReceivedFrom = escapeHtml(entry && (entry.receivedFromDisbursedTo || entry.party) ? (entry.receivedFromDisbursedTo || entry.party) : '');
-    const safeDescription = escapeHtml(entry && (entry.description || entry.reference) ? (entry.description || entry.reference) : '');
-    const safeIssuanceDateBank = escapeHtml(entry && entry.issuanceDateBank ? entry.issuanceDateBank : '');
-    const canVerify = canIncomeEdit(getCurrentUser());
-    const verifiedChecked = getWiseUsdVerified(entry) ? 'checked' : '';
-    const verifiedDisabled = canVerify ? '' : 'disabled';
-
-    const checksum = entry && entry.checksum !== null && entry.checksum !== undefined && entry.checksum !== '' ? Number(entry.checksum) : null;
-    const safeChecksum = Number.isFinite(checksum) ? escapeHtml(String(checksum)) : '';
-
-    const safeBankStatements = escapeHtml(entry && entry.bankStatements ? entry.bankStatements : '');
-    const safeRemarks = escapeHtml(entry && entry.remarks ? entry.remarks : '');
-
-    const receipts = entry && entry.receipts !== null && entry.receipts !== undefined && entry.receipts !== '' ? Number(entry.receipts) : null;
-    const disburse = entry && entry.disburse !== null && entry.disburse !== undefined && entry.disburse !== '' ? Number(entry.disburse) : null;
-    const safeReceipts = Number.isFinite(receipts) && receipts > 0 ? escapeHtml(String(receipts)) : '';
-    const safeDisburse = Number.isFinite(disburse) && disburse > 0 ? escapeHtml(String(disburse)) : '';
-
-    wiseUsdModalBody.innerHTML = `
-      <form id="wiseUsdModalForm" novalidate>
-        <div class="grid">
-          <div class="field">
-            <label for="wiseUsdBudgetNo">Budget #</label>
-            <select id="wiseUsdBudgetNo" name="wiseUsdBudgetNo"></select>
-            <div class="error" id="error-wiseUsdBudgetNo" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseUsdDatePL">ACTION DATE<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseUsdDatePL" name="wiseUsdDatePL" type="date" required value="${safeDatePL}" />
-            <div class="error" id="error-wiseUsdDatePL" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="wiseUsdReceivedFrom">RECEIVED FROM - DISBURSED TO:<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseUsdReceivedFrom" name="wiseUsdReceivedFrom" type="text" autocomplete="off" required value="${safeReceivedFrom}" />
-            <div class="error" id="error-wiseUsdReceivedFrom" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseUsdReceipts">RECEIPTS $<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseUsdReceipts" name="wiseUsdReceipts" type="number" inputmode="decimal" step="0.01" min="0" value="${safeReceipts}" />
-            <div class="error" id="error-wiseUsdReceipts" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseUsdDisburse">DISBURSE $<span class="req" aria-hidden="true">*</span></label>
-            <input id="wiseUsdDisburse" name="wiseUsdDisburse" type="number" inputmode="decimal" step="0.01" min="0" value="${safeDisburse}" />
-            <div class="error" id="error-wiseUsdDisburse" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="wiseUsdDescription">DESCRIPTION<span class="req" aria-hidden="true">*</span></label>
-            <textarea id="wiseUsdDescription" name="wiseUsdDescription" rows="3" required>${safeDescription}</textarea>
-            <div class="error" id="error-wiseUsdDescription" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseUsdIssuanceDateBank">Issuance Date Bank</label>
-            <input id="wiseUsdIssuanceDateBank" name="wiseUsdIssuanceDateBank" type="date" value="${safeIssuanceDateBank}" />
-            <div class="error" id="error-wiseUsdIssuanceDateBank" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseUsdVerified">Verified</label>
-            <div>
-              <input id="wiseUsdVerified" name="wiseUsdVerified" type="checkbox" ${verifiedChecked} ${verifiedDisabled} />
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="wiseUsdChecksum">Checksum</label>
-            <input id="wiseUsdChecksum" name="wiseUsdChecksum" type="number" inputmode="decimal" step="0.01" value="${safeChecksum}" />
-            <div class="error" id="error-wiseUsdChecksum" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field">
-            <label for="wiseUsdBankStatements">Bank Statements</label>
-            <input id="wiseUsdBankStatements" name="wiseUsdBankStatements" type="text" autocomplete="off" value="${safeBankStatements}" />
-            <div class="error" id="error-wiseUsdBankStatements" role="alert" aria-live="polite"></div>
-          </div>
-
-          <div class="field field--span2">
-            <label for="wiseUsdRemarks">Remarks</label>
-            <textarea id="wiseUsdRemarks" name="wiseUsdRemarks" rows="2">${safeRemarks}</textarea>
-            <div class="error" id="error-wiseUsdRemarks" role="alert" aria-live="polite"></div>
-          </div>
-        </div>
-      </form>
-    `.trim();
-
-    wiseUsdModal.classList.add('is-open');
-    wiseUsdModal.setAttribute('aria-hidden', 'false');
-
-    const budgetNoEl = wiseUsdModalBody.querySelector('#wiseUsdBudgetNo');
-    const receiptsEl = wiseUsdModalBody.querySelector('#wiseUsdReceipts');
-    const disburseEl = wiseUsdModalBody.querySelector('#wiseUsdDisburse');
-    syncWiseUsdBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw);
-    if (receiptsEl) receiptsEl.addEventListener('input', () => syncWiseUsdBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw));
-    if (disburseEl) disburseEl.addEventListener('input', () => syncWiseUsdBudgetNoSelect(budgetNoEl, receiptsEl, disburseEl, budgetNoRaw));
-
-    const focusTarget = wiseUsdModalBody.querySelector('#wiseUsdDatePL');
-    if (focusTarget && focusTarget.focus) focusTarget.focus();
-  }
-
-  function closeWiseUsdModal() {
-    if (!wiseUsdModal || !wiseUsdModalBody) return;
-    wiseUsdModal.classList.remove('is-open');
-    wiseUsdModal.setAttribute('aria-hidden', 'true');
-    wiseUsdModalBody.innerHTML = '';
-    currentWiseUsdId = null;
-  }
-
-  function clearWiseUsdModalErrors() {
-    if (!wiseUsdModalBody) return;
-    const errors = Array.from(wiseUsdModalBody.querySelectorAll('.error'));
-    for (const el of errors) el.textContent = '';
-  }
-
-  function showWiseUsdModalErrors(errors) {
-    if (!wiseUsdModalBody || !errors) return;
-    const map = {
-      budgetNo: '#error-wiseUsdBudgetNo',
-      datePL: '#error-wiseUsdDatePL',
-      receivedFromDisbursedTo: '#error-wiseUsdReceivedFrom',
-      receipts: '#error-wiseUsdReceipts',
-      disburse: '#error-wiseUsdDisburse',
-      description: '#error-wiseUsdDescription',
-      issuanceDateBank: '#error-wiseUsdIssuanceDateBank',
-      checksum: '#error-wiseUsdChecksum',
-      bankStatements: '#error-wiseUsdBankStatements',
-      remarks: '#error-wiseUsdRemarks',
-    };
-    for (const [k, sel] of Object.entries(map)) {
-      const el = wiseUsdModalBody.querySelector(sel);
-      if (el) el.textContent = errors[k] || '';
-    }
-  }
-
-  function validateWiseUsdModalValues() {
-    if (!wiseUsdModalBody) return { ok: false };
-    const budgetNoEl = wiseUsdModalBody.querySelector('#wiseUsdBudgetNo');
-    const datePLEl = wiseUsdModalBody.querySelector('#wiseUsdDatePL');
-    const receivedFromEl = wiseUsdModalBody.querySelector('#wiseUsdReceivedFrom');
-    const receiptsEl = wiseUsdModalBody.querySelector('#wiseUsdReceipts');
-    const disburseEl = wiseUsdModalBody.querySelector('#wiseUsdDisburse');
-    const descriptionEl = wiseUsdModalBody.querySelector('#wiseUsdDescription');
-    const issuanceDateBankEl = wiseUsdModalBody.querySelector('#wiseUsdIssuanceDateBank');
-    const verifiedEl = wiseUsdModalBody.querySelector('#wiseUsdVerified');
-    const checksumEl = wiseUsdModalBody.querySelector('#wiseUsdChecksum');
-    const bankStatementsEl = wiseUsdModalBody.querySelector('#wiseUsdBankStatements');
-    const remarksEl = wiseUsdModalBody.querySelector('#wiseUsdRemarks');
-
-    const values = {
-      budgetNo: budgetNoEl ? String(budgetNoEl.value || '').trim() : '',
-      datePL: datePLEl ? String(datePLEl.value || '').trim() : '',
-      receivedFromDisbursedTo: receivedFromEl ? String(receivedFromEl.value || '').trim() : '',
-      receipts: receiptsEl ? String(receiptsEl.value || '').trim() : '',
-      disburse: disburseEl ? String(disburseEl.value || '').trim() : '',
-      description: descriptionEl ? String(descriptionEl.value || '').trim() : '',
-      issuanceDateBank: issuanceDateBankEl ? String(issuanceDateBankEl.value || '').trim() : '',
-      verified: verifiedEl ? Boolean(verifiedEl.checked) : false,
-      checksum: checksumEl ? String(checksumEl.value || '').trim() : '',
-      bankStatements: bankStatementsEl ? String(bankStatementsEl.value || '').trim() : '',
-      remarks: remarksEl ? String(remarksEl.value || '').trim() : '',
-    };
-
-    const errors = {};
-    if (!values.datePL) errors.datePL = 'This field is required.';
-    if (!values.receivedFromDisbursedTo) errors.receivedFromDisbursedTo = 'This field is required.';
-    if (!values.description) errors.description = 'This field is required.';
-
-    const receiptsNum = values.receipts === '' ? null : Number(values.receipts);
-    const disburseNum = values.disburse === '' ? null : Number(values.disburse);
-    const checksumNum = values.checksum === '' ? null : Number(values.checksum);
-
-    if (receiptsNum !== null && (!Number.isFinite(receiptsNum) || receiptsNum < 0)) errors.receipts = 'Enter a valid amount.';
-    if (disburseNum !== null && (!Number.isFinite(disburseNum) || disburseNum < 0)) errors.disburse = 'Enter a valid amount.';
-    if (checksumNum !== null && !Number.isFinite(checksumNum)) errors.checksum = 'Enter a valid amount.';
-
-    const receiptsHas = Number.isFinite(receiptsNum) && receiptsNum > 0;
-    const disburseHas = Number.isFinite(disburseNum) && disburseNum > 0;
-    if (!receiptsHas && !disburseHas) {
-      errors.receipts = 'Enter a Receipts or Disburse amount.';
-      errors.disburse = 'Enter a Receipts or Disburse amount.';
-    }
-    if (receiptsHas && disburseHas) {
-      errors.receipts = 'Enter only one: Receipts or Disburse.';
-      errors.disburse = 'Enter only one: Receipts or Disburse.';
-    }
-
-    const kind = receiptsHas && !disburseHas ? 'in' : disburseHas && !receiptsHas ? 'out' : null;
-    if (kind && values.budgetNo) {
-      const activeYear = getActiveBudgetYear();
-      const allowed = new Set();
-      const items = kind === 'in' ? readInAccountsFromBudgetYear(activeYear) : readOutAccountsFromBudgetYear(activeYear);
-      for (const item of items || []) {
-        const code = String(kind === 'in' ? item && item.inCode : item && item.outCode).trim();
-        if (/^\d{4}$/.test(code)) allowed.add(code);
-      }
-
-      if (!/^\d{4}$/.test(values.budgetNo)) {
-        errors.budgetNo = 'Select a valid budget number.';
-      } else if (allowed.size > 0 && !allowed.has(values.budgetNo)) {
-        errors.budgetNo = kind === 'in' ? 'Select an IN budget number from the active budget.' : 'Select an OUT budget number from the active budget.';
-      }
-    }
-
-    if (Object.keys(errors).length > 0) return { ok: false, errors };
-    return {
-      ok: true,
-      values: {
-        budgetNo: values.budgetNo,
-        datePL: values.datePL,
-        receivedFromDisbursedTo: values.receivedFromDisbursedTo,
-        receipts: receiptsHas ? receiptsNum : null,
-        disburse: disburseHas ? disburseNum : null,
-        description: values.description,
-        issuanceDateBank: values.issuanceDateBank,
-        verified: values.verified ? 1 : 0,
-        checksum: checksumNum,
-        bankStatements: values.bankStatements,
-        remarks: values.remarks,
-      },
-    };
-  }
-
-  function applyWiseUsdView() {
-    if (!wiseUsdTbody || !wiseUsdEmptyState) return;
-    ensureWiseUsdDefaultEmptyText();
-
-    const year = getWiseUsdYear();
-    const all = loadWiseUsd(year);
-    const filtered = filterWiseUsdForView(all, wiseUsdViewState.globalFilter);
-    const sorted = sortWiseUsdForView(filtered, wiseUsdViewState.sortKey, wiseUsdViewState.sortDir);
-
-    if (normalizeTextForSearch(wiseUsdViewState.globalFilter) !== '' && all.length > 0 && sorted.length === 0) {
-      wiseUsdEmptyState.textContent = 'No wiseUSD entries match your search.';
-    } else {
-      wiseUsdEmptyState.textContent = wiseUsdViewState.defaultEmptyText;
-    }
-
-    wiseUsdEmptyState.hidden = sorted.length > 0;
-    renderWiseUsdRows(sorted);
-    updateWiseUsdTotals(sorted);
-    updateWiseUsdSortIndicators();
-  }
-
-  function initWiseUsdListPage() {
-    if (!wiseUsdTbody || !wiseUsdEmptyState) return;
-    const year = getWiseUsdYear();
-
-    const currentUser = getCurrentUser();
-    const incomeLevel = currentUser ? getEffectivePermissions(currentUser).income : 'none';
-    const hasIncomeFullAccess = currentUser ? canWrite(currentUser, 'income_bankeur') : false;
-
-    // Verified checkbox should be editable for Income Write/Partial.
-    wiseUsdViewState.canVerify = currentUser ? canIncomeEdit(currentUser) : false;
-    wiseUsdViewState.canDelete = currentUser ? canDelete(currentUser, 'income_wise_usd') : false;
-
-    const wiseUsdNewLink = document.getElementById('wiseUsdNewLink');
-    const wiseUsdExportCsvLink = document.getElementById('wiseUsdExportCsvLink');
-    const wiseUsdDownloadTemplateLink = document.getElementById('wiseUsdDownloadTemplateLink');
-    const wiseUsdImportCsvLink = document.getElementById('wiseUsdImportCsvLink');
-    const wiseUsdMenuBtn = document.getElementById('wiseUsdActionsMenuBtn');
-    const wiseUsdMenuPanel = document.getElementById('wiseUsdActionsMenu');
-    const wiseUsdBackToIncomeLink = document.getElementById('wiseUsdBackToIncomeLink');
-
-    function setLinkDisabled(linkEl, disabled) {
-      if (!linkEl) return;
-      linkEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-      if (disabled) linkEl.setAttribute('tabindex', '-1');
-      else linkEl.removeAttribute('tabindex');
-    }
-
-    // Ensure the year is present in the URL for consistent nav highlighting.
-    const fromUrl = getWiseUsdYearFromUrl();
-    if (!fromUrl && getBasename(window.location.pathname) === 'wise_usd.html') {
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.set('year', String(year));
-        window.history.replaceState(null, '', url.toString());
-      } catch {
-        // ignore
-      }
-    }
-
-    ensureWiseUsdListExistsForYear(year);
-    backfillWiseUsdIdTrackFromOrders(year);
-    backfillWiseUsdBudgetNoFromOrders(year);
-
-    const titleEl = document.querySelector('[data-wise-usd-title]');
-    if (titleEl) titleEl.textContent = `${year} wiseUSD`;
-    const listTitleEl = document.querySelector('[data-wise-usd-list-title]');
-    if (listTitleEl) listTitleEl.textContent = `${year} wiseUSD`;
-    if (wiseUsdBackToIncomeLink) {
-      wiseUsdBackToIncomeLink.href = `grand_secretary_ledger.html?year=${encodeURIComponent(String(year))}`;
-      wiseUsdBackToIncomeLink.textContent = `← Back to ${year} Ledger`;
-    }
-    applyAppTabTitle();
-
-    initWiseUsdColumnSorting();
-
-    // Partial access for Income = full access except New Income and Import CSV.
-    setLinkDisabled(wiseUsdNewLink, !hasIncomeFullAccess);
-    if (wiseUsdNewLink && !hasIncomeFullAccess) {
-      wiseUsdNewLink.setAttribute(
-        'data-tooltip',
-        'Requires Full access for Income. Partial access can edit existing wiseUSD entries, but cannot create New Income entries.'
-      );
-    }
-    setLinkDisabled(wiseUsdImportCsvLink, !hasIncomeFullAccess);
-    if (wiseUsdImportCsvLink && !hasIncomeFullAccess) {
-      wiseUsdImportCsvLink.setAttribute(
-        'data-tooltip',
-        'Requires Full access for Income. Partial access can edit existing wiseUSD entries, but cannot Import CSV.'
-      );
-    }
-
-    const globalInput = document.getElementById('wiseUsdGlobalSearch');
-    if (globalInput) {
-      globalInput.value = wiseUsdViewState.globalFilter || '';
-      globalInput.addEventListener('input', () => {
-        wiseUsdViewState.globalFilter = globalInput.value;
-        if (wiseUsdClearSearchBtn) {
-          const hasSearch = normalizeTextForSearch(wiseUsdViewState.globalFilter) !== '';
-          wiseUsdClearSearchBtn.hidden = !hasSearch;
-          wiseUsdClearSearchBtn.disabled = !hasSearch;
-        }
-        applyWiseUsdView();
-      });
-    }
-
-    if (wiseUsdClearSearchBtn && globalInput) {
-      const hasSearch = normalizeTextForSearch(wiseUsdViewState.globalFilter) !== '';
-      wiseUsdClearSearchBtn.hidden = !hasSearch;
-      wiseUsdClearSearchBtn.disabled = !hasSearch;
-      if (!wiseUsdClearSearchBtn.dataset.bound) {
-        wiseUsdClearSearchBtn.dataset.bound = 'true';
-        wiseUsdClearSearchBtn.addEventListener('click', () => {
-          globalInput.value = '';
-          wiseUsdViewState.globalFilter = '';
-          wiseUsdClearSearchBtn.hidden = true;
-          wiseUsdClearSearchBtn.disabled = true;
-          applyWiseUsdView();
-          if (globalInput.focus) globalInput.focus();
-        });
-      }
-    }
-
-    if (wiseUsdNewLink) {
-      wiseUsdNewLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (wiseUsdNewLink.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(wiseUsdNewLink);
-          return;
-        }
-        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
-        openWiseUsdModal(null, year);
-        if (wiseUsdMenuPanel && wiseUsdMenuBtn) {
-          wiseUsdMenuPanel.setAttribute('hidden', '');
-          wiseUsdMenuBtn.setAttribute('aria-expanded', 'false');
-        }
-      });
-    }
-
-    function escapeCsvValue(value) {
-      const s = String(value ?? '');
-      const normalized = s.replace(/\u00A0/g, ' ').replace(/\r\n|\r|\n/g, ' ').trim();
-      const mustQuote = /[",\n\r]/.test(normalized);
-      const escaped = normalized.replace(/"/g, '""');
-      return mustQuote ? `"${escaped}"` : escaped;
-    }
-
-    function downloadCsvFile(csvText, fileName) {
-      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function getTodayStamp() {
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    }
-
-    function exportWiseUsdToCsv() {
-      const header = [
-        'Budget #',
-        'ACTION DATE',
-        '# ID-TRACK',
-        'RECEIVED FROM - DISBURSED TO:',
-        'RECEIPTS $',
-        'DISBURSE $',
-        'DESCRIPTION',
-        'Issuance Date Bank',
-        'Verified',
-        'Checksum',
-        'Bank Statements',
-        'Remarks',
-      ];
-      const entries = loadWiseUsd(year);
-      const sorted = sortWiseUsdForView(entries, 'datePL', 'asc');
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-      for (const e of sorted) {
-        const receipts = getWiseUsdReceipts(e);
-        const disburse = getWiseUsdDisburse(e);
-        const checksumVal = e && e.checksum !== null && e.checksum !== undefined && String(e.checksum).trim() !== '' ? e.checksum : '';
-        const values = [
-          String(e && e.budgetNo ? e.budgetNo : ''),
-          String(e && (e.datePL || e.date) ? (e.datePL || e.date) : ''),
-          String(e && e.idTrack ? e.idTrack : ''),
-          String(e && (e.receivedFromDisbursedTo || e.party) ? (e.receivedFromDisbursedTo || e.party) : ''),
-          receipts ? String(receipts) : '',
-          disburse ? String(disburse) : '',
-          String(e && (e.description || e.reference) ? (e.description || e.reference) : ''),
-          String(e && e.issuanceDateBank ? e.issuanceDateBank : ''),
-          getWiseUsdVerified(e) ? '1' : '',
-          String(checksumVal),
-          String(e && e.bankStatements ? e.bankStatements : ''),
-          String(e && e.remarks ? e.remarks : ''),
-        ];
-        lines.push(values.map(escapeCsvValue).join(','));
-      }
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, `wise_usd_${year}_${getTodayStamp()}.csv`);
-    }
-
-    function downloadWiseUsdCsvTemplate() {
-      const header = [
-        'Budget #',
-        'ACTION DATE',
-        '# ID-TRACK',
-        'RECEIVED FROM - DISBURSED TO:',
-        'RECEIPTS $',
-        'DISBURSE $',
-        'DESCRIPTION',
-        'Issuance Date Bank',
-        'Verified',
-        'Checksum',
-        'Bank Statements',
-        'Remarks',
-      ];
-      const example = ['', getTodayStamp(), '', 'Example Party', '100.00', '', 'Example description', '', '1', '', '', ''];
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-      lines.push(example.map(escapeCsvValue).join(','));
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, `wise_usd_template_${year}_${getTodayStamp()}.csv`);
-    }
-
-    function parseCsvText(text) {
-      const rows = [];
-      const s = String(text ?? '');
-      let row = [];
-      let field = '';
-      let inQuotes = false;
-
-      for (let i = 0; i < s.length; i += 1) {
-        const ch = s[i];
-        if (inQuotes) {
-          if (ch === '"') {
-            const next = s[i + 1];
-            if (next === '"') {
-              field += '"';
-              i += 1;
-            } else {
-              inQuotes = false;
-            }
-          } else {
-            field += ch;
-          }
-          continue;
-        }
-
-        if (ch === '"') {
-          inQuotes = true;
-          continue;
-        }
-
-        if (ch === ',') {
-          row.push(field);
-          field = '';
-          continue;
-        }
-
-        if (ch === '\n') {
-          row.push(field);
-          field = '';
-          rows.push(row);
-          row = [];
-          continue;
-        }
-
-        if (ch === '\r') continue;
-        field += ch;
-      }
-
-      row.push(field);
-      rows.push(row);
-
-      while (rows.length > 0) {
-        const last = rows[rows.length - 1];
-        const isEmpty = last.every((c) => String(c ?? '').trim() === '');
-        if (!isEmpty) break;
-        rows.pop();
-      }
-
-      return rows;
-    }
-
-    function normalizeHeaderName(name) {
-      return String(name ?? '')
-        .replace(/\uFEFF/g, '')
-        .replace(/\u00A0/g, ' ')
-        .trim()
-        .toLowerCase();
-    }
-
-    function normalizeCsvDate(raw) {
-      const s = String(raw ?? '').trim();
-      if (!s) return '';
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-      const mdy = s.match(/^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$/);
-      if (mdy) {
-        const mm = Number(mdy[1]);
-        const dd = Number(mdy[2]);
-        const yyyy = Number(mdy[3]);
-        if (!Number.isInteger(mm) || !Number.isInteger(dd) || !Number.isInteger(yyyy)) return '';
-        if (yyyy < 1000 || yyyy > 9999) return '';
-        if (mm < 1 || mm > 12) return '';
-        if (dd < 1 || dd > 31) return '';
-        const d = new Date(yyyy, mm - 1, dd);
-        if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return '';
-        return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-      }
-
-      const ms = Date.parse(s);
-      if (!Number.isFinite(ms)) return '';
-      const d = new Date(ms);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    }
-
-    function parseNonNegativeAmount(raw) {
-      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!s) return null;
-      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n) || n < 0) return null;
-      return n;
-    }
-
-    function parseSignedAmount(raw) {
-      const s = String(raw ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!s) return null;
-      const cleaned = s.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n)) return null;
-      return n;
-    }
-
-    function findHeaderIndex(headerNames, candidates) {
-      const names = Array.isArray(headerNames) ? headerNames : [];
-      const cands = (Array.isArray(candidates) ? candidates : []).map(normalizeHeaderName).filter(Boolean);
-      if (cands.length === 0) return -1;
-      for (const c of cands) {
-        const exact = names.indexOf(c);
-        if (exact !== -1) return exact;
-      }
-      for (let i = 0; i < names.length; i += 1) {
-        const h = String(names[i] ?? '').trim();
-        if (!h) continue;
-        if (cands.some((c) => h === c || h.startsWith(`${c} `) || h.startsWith(`${c}(`) || h.startsWith(`${c}—`) || h.startsWith(`${c}-`) || h.startsWith(c))) {
-          return i;
-        }
-      }
-      return -1;
-    }
-
-    function parseWiseUsdCsvTextToEntries(csvText, options) {
-      const opts = options && typeof options === 'object' ? options : {};
-      const relaxRequired = !!opts.relaxRequired;
-
-      function parseCsvBooleanish(value) {
-        const s = String(value ?? '').trim().toLowerCase();
-        if (!s) return false;
-        if (s === '1' || s === 'true' || s === 'yes' || s === 'y' || s === 'on' || s === 'checked' || s === 'x') return true;
-        if (s === '0' || s === 'false' || s === 'no' || s === 'n' || s === 'off') return false;
-        // Legacy Checked-by text (e.g., initials) should count as verified.
-        return true;
-      }
-
-      const rows = parseCsvText(csvText);
-      if (rows.length === 0) {
-        return { isEmpty: true, imported: [], errors: [] };
-      }
-
-      const header = rows[0].map(normalizeHeaderName);
-      const dataRows = rows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
-
-      const idx = {
-        budgetNo: findHeaderIndex(header, ['budget #', 'budget', 'budget no', 'budget number']),
-        datePL: findHeaderIndex(header, ['action date', 'date p-l', 'date pl', 'date']),
-        idTrack: findHeaderIndex(header, ['# id-track', 'id-track', 'id track', 'track', 'tracking']),
-        receivedFromDisbursedTo: findHeaderIndex(header, [
-          'received from - disbursed to:',
-          'received from - disbursed to',
-          'received from',
-          'disbursed to',
-          'party',
-          'payee',
-          'remitter',
-          'name',
-          'merchant',
-        ]),
-        receipts: findHeaderIndex(header, ['receipts $', 'receipts', 'receipt', 'credit', 'received', 'in']),
-        disburse: findHeaderIndex(header, ['disburse $', 'disburse', 'disbursement', 'debit', 'paid', 'payment', 'out', 'sent']),
-        description: findHeaderIndex(header, ['description', 'reference', 'details', 'memo', 'note']),
-        issuanceDateBank: findHeaderIndex(header, ['issuance date bank', 'issuance date', 'bank issuance date']),
-        verified: findHeaderIndex(header, ['verified', 'checked by gtreas', 'checked by', 'gtreas']),
-        checksum: findHeaderIndex(header, ['checksum', 'balance']),
-        bankStatements: findHeaderIndex(header, ['bank statements', 'bank statement']),
-        remarks: findHeaderIndex(header, ['remarks', 'remark']),
-        amount: findHeaderIndex(header, ['amount', 'usd', '$', 'value']),
-        currency: findHeaderIndex(header, ['currency', 'ccy']),
-      };
-
-      const hasHeaders =
-        idx.datePL !== -1 &&
-        (idx.receivedFromDisbursedTo !== -1 || idx.description !== -1) &&
-        (idx.receipts !== -1 || idx.disburse !== -1 || idx.amount !== -1);
-
-      if (!hasHeaders && header.length >= 3) {
-        // Allow headerless CSV: DATE P-L, RECEIVED FROM - DISBURSED TO, DESCRIPTION, RECEIPTS, DISBURSE
-        dataRows.unshift(rows[0]);
-        idx.datePL = 0;
-        idx.receivedFromDisbursedTo = 1;
-        idx.description = 2;
-        idx.receipts = 3;
-        idx.disburse = 4;
-        idx.amount = 5;
-      }
-
-      const nowIso = new Date().toISOString();
-      const imported = [];
-      const errors = [];
-
-      for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
-        const r = dataRows[rowIndex];
-        const get = (i) => (i >= 0 ? (r[i] ?? '') : '');
-
-        const rowNo = rowIndex + 2;
-        const budgetNo = String(get(idx.budgetNo)).trim();
-        const datePL = normalizeCsvDate(get(idx.datePL));
-        const idTrack = String(get(idx.idTrack)).trim();
-        const receivedFromDisbursedTo = String(get(idx.receivedFromDisbursedTo)).trim();
-        const description = String(get(idx.description)).trim();
-        const issuanceDateBank = normalizeCsvDate(get(idx.issuanceDateBank));
-        const verifiedRaw = String(get(idx.verified)).trim();
-        const verified = parseCsvBooleanish(verifiedRaw);
-        const bankStatements = String(get(idx.bankStatements)).trim();
-        const remarks = String(get(idx.remarks)).trim();
-
-        const hasAnyText =
-          !!budgetNo ||
-          !!datePL ||
-          !!idTrack ||
-          !!receivedFromDisbursedTo ||
-          !!description ||
-          !!issuanceDateBank ||
-          !!verifiedRaw ||
-          !!bankStatements ||
-          !!remarks;
-
-        const checksumRaw = String(get(idx.checksum)).trim();
-        const checksumNum = parseSignedAmount(checksumRaw);
-        const checksum = checksumNum === null ? checksumRaw : checksumNum;
-
-        const currency = idx.currency !== -1 ? String(get(idx.currency)).trim().toUpperCase() : '';
-        if (currency && currency !== 'USD' && currency !== '$') {
-          errors.push(`Row ${rowNo}: currency is not USD.`);
-          continue;
-        }
-
-        const receiptsRaw = String(get(idx.receipts)).trim();
-        const disburseRaw = String(get(idx.disburse)).trim();
-        let receipts = parseNonNegativeAmount(receiptsRaw);
-        let disburse = parseNonNegativeAmount(disburseRaw);
-
-        if (receipts === null && disburse === null) {
-          const amount = parseSignedAmount(get(idx.amount));
-          if (amount === null) {
-            if (!relaxRequired && (receiptsRaw || disburseRaw || String(get(idx.amount)).trim())) {
-              errors.push(`Row ${rowNo}: missing amount.`);
-            }
-          } else if (amount > 0) {
-            receipts = amount;
-            disburse = null;
-          } else if (amount < 0) {
-            receipts = null;
-            disburse = Math.abs(amount);
-          } else {
-            receipts = null;
-            disburse = null;
-            if (!relaxRequired) errors.push(`Row ${rowNo}: amount is 0.`);
-          }
-        }
-
-        const receiptsHas = Number.isFinite(receipts) && receipts > 0;
-        const disburseHas = Number.isFinite(disburse) && disburse > 0;
-
-        // If the row is completely blank (no meaningful text, no amounts, no checksum), skip silently.
-        const hasAnyAmount = receiptsHas || disburseHas || (checksumRaw && String(checksumRaw).trim() !== '');
-        if (!hasAnyText && !hasAnyAmount) continue;
-
-        if (!relaxRequired) {
-          if (!datePL) errors.push(`Row ${rowNo}: invalid Action Date.`);
-          if (!receivedFromDisbursedTo) errors.push(`Row ${rowNo}: Received From - Disbursed To is required.`);
-          if (!receiptsHas && !disburseHas) errors.push(`Row ${rowNo}: enter a Receipts or Disburse amount.`);
-          if (receiptsHas && disburseHas) errors.push(`Row ${rowNo}: enter only one: Receipts or Disburse.`);
-
-          // Description is optional for import.
-          if (!datePL || !receivedFromDisbursedTo || (!receiptsHas && !disburseHas) || (receiptsHas && disburseHas)) continue;
-        } else {
-          if (receiptsHas && disburseHas) {
-            errors.push(`Row ${rowNo}: enter only one: Receipts or Disburse.`);
-            continue;
-          }
-        }
-
-        imported.push({
-          id: (crypto?.randomUUID ? crypto.randomUUID() : `wu_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          budgetNo,
-          datePL,
-          idTrack,
-          receivedFromDisbursedTo,
-          receipts: receiptsHas ? receipts : null,
-          disburse: disburseHas ? disburse : null,
-          description,
-          issuanceDateBank,
-          verified: verified ? 1 : 0,
-          checksum,
-          bankStatements,
-          remarks,
-        });
-      }
-
-      return { isEmpty: false, imported, errors };
-    }
-
-    function importWiseUsdFromCsvText(csvText, fileName) {
-      const ok = window.confirm(
-        `Importing a CSV will add entries to the wiseUSD list for ${year}. Continue?\n\nFile: ${fileName || 'CSV'}`
-      );
-      if (!ok) return;
-
-      const existingBefore = loadWiseUsd(year);
-      const relaxRequired = !Array.isArray(existingBefore) || existingBefore.length === 0;
-      const parsed = parseWiseUsdCsvTextToEntries(csvText, { relaxRequired });
-      if (parsed.isEmpty) {
-        window.alert('CSV is empty.');
-        return;
-      }
-
-      const imported = parsed.imported;
-      const errors = parsed.errors;
-
-      if (imported.length === 0) {
-        window.alert(errors.length ? `No rows were imported:\n\n${errors.slice(0, 15).join('\n')}` : 'No rows were imported.');
-        return;
-      }
-
-      if (errors.length > 0) {
-        const proceed = window.confirm(
-          `Some rows could not be processed. Continue with ${imported.length} imported row(s)?\n\n${errors
-            .slice(0, 15)
-            .join('\n')}${errors.length > 15 ? '\n…' : ''}`
-        );
-        if (!proceed) return;
-      }
-
-      const positiveImported = imported.filter((e) => computeWiseUsdNet(e) > 0);
-      const negativeImported = imported.filter((e) => computeWiseUsdNet(e) < 0);
-
-      if (negativeImported.length > 0) {
-        ensurePaymentOrdersReconciliationListExistsForYear(year);
-        for (const e of negativeImported) {
-          const po = buildReconciliationOrderFromWiseUsdEntry(e, year);
-          if (po) upsertReconciliationOrderBySource(po, year);
-        }
-      }
-
-      const existing = existingBefore;
-      const merged = [...positiveImported, ...(Array.isArray(existing) ? existing : [])];
-      saveWiseUsd(merged, year);
-      applyWiseUsdView();
-
-      if (typeof showFlashToken === 'function') {
-        showFlashToken(`Imported ${positiveImported.length} wiseUSD row(s). Moved ${negativeImported.length} row(s) to Reconciliation.`);
-      }
-    }
-
-    async function tryAutoSeedWiseUsdFromCsvFile() {
-      if (Number(year) !== 2026) return false;
-
-      const seedFlagKey = `payment_order_wise_usd_seeded_${year}_v1`;
-      if (localStorage.getItem(seedFlagKey) === '1') return false;
-
-      const existing = loadWiseUsd(year);
-      if (Array.isArray(existing) && existing.length > 0) return false;
-
-      let resp;
-      try {
-        resp = await fetch('wise_usd_2026_seed.csv', { cache: 'no-store' });
-      } catch (e) {
-        return false;
-      }
-
-      if (!resp || !resp.ok) return false;
-
-      const text = await resp.text();
-      const parsed = parseWiseUsdCsvTextToEntries(text, { relaxRequired: true });
-      if (parsed.isEmpty || !Array.isArray(parsed.imported) || parsed.imported.length === 0) return false;
-
-      saveWiseUsd(parsed.imported, year);
-      localStorage.setItem(seedFlagKey, '1');
-
-      if (typeof showFlashToken === 'function') {
-        showFlashToken(`Seeded ${parsed.imported.length} wiseUSD row(s) for ${year}.`);
-      }
-
-      return true;
-    }
-
-    if (wiseUsdExportCsvLink) {
-      wiseUsdExportCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        exportWiseUsdToCsv();
-      });
-    }
-    if (wiseUsdDownloadTemplateLink) {
-      wiseUsdDownloadTemplateLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        downloadWiseUsdCsvTemplate();
-      });
-    }
-    if (wiseUsdImportCsvLink) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.csv,text/csv';
-      input.style.display = 'none';
-      document.body.appendChild(input);
-
-      wiseUsdImportCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (wiseUsdImportCsvLink.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(wiseUsdImportCsvLink);
-          return;
-        }
-        if (!requireWriteAccess('income_bankeur', 'Income is read only for your account.')) return;
-        input.value = '';
-        input.click();
-      });
-
-      input.addEventListener('change', () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          importWiseUsdFromCsvText(reader.result, file.name);
-        };
-        reader.onerror = () => {
-          window.alert('Could not read CSV file.');
-        };
-        reader.readAsText(file);
-      });
-    }
-
-    if (wiseUsdMenuBtn) {
-      const MENU_CLOSE_DELAY_MS = 250;
-      let menuCloseTimer = 0;
-
-      function isMenuOpen() {
-        return Boolean(wiseUsdMenuPanel && !wiseUsdMenuPanel.hasAttribute('hidden'));
-      }
-
-      function closeMenu() {
-        if (!wiseUsdMenuPanel || !wiseUsdMenuBtn) return;
-        wiseUsdMenuPanel.setAttribute('hidden', '');
-        wiseUsdMenuBtn.setAttribute('aria-expanded', 'false');
-      }
-
-      function openMenu() {
-        if (!wiseUsdMenuPanel || !wiseUsdMenuBtn) return;
-        wiseUsdMenuPanel.removeAttribute('hidden');
-        wiseUsdMenuBtn.setAttribute('aria-expanded', 'true');
-      }
-
-      function toggleMenu() {
-        if (isMenuOpen()) closeMenu();
-        else openMenu();
-      }
-
-      function cancelScheduledClose() {
-        if (!menuCloseTimer) return;
-        clearTimeout(menuCloseTimer);
-        menuCloseTimer = 0;
-      }
-
-      function scheduleClose() {
-        cancelScheduledClose();
-        if (!isMenuOpen()) return;
-        menuCloseTimer = window.setTimeout(() => {
-          closeMenu();
-          menuCloseTimer = 0;
-        }, MENU_CLOSE_DELAY_MS);
-      }
-
-      wiseUsdMenuBtn.addEventListener('click', () => {
-        toggleMenu();
-      });
-
-      wiseUsdMenuBtn.addEventListener('mouseenter', cancelScheduledClose);
-      wiseUsdMenuBtn.addEventListener('mouseleave', scheduleClose);
-
-      if (wiseUsdMenuPanel) {
-        wiseUsdMenuPanel.addEventListener('mouseenter', cancelScheduledClose);
-        wiseUsdMenuPanel.addEventListener('mouseleave', scheduleClose);
-      }
-
-      document.addEventListener('click', (e) => {
-        if (!isMenuOpen()) return;
-        const menuRoot = e.target?.closest ? e.target.closest('[data-wise-usd-menu]') : null;
-        if (menuRoot) return;
-        cancelScheduledClose();
-        closeMenu();
-      });
-
-      document.addEventListener('keydown', (e) => {
-        if (!isMenuOpen()) return;
-        if (e.key === 'Escape') {
-          cancelScheduledClose();
-          closeMenu();
-        }
-      });
-    }
-
-    wiseUsdTbody.addEventListener('click', (e) => {
-      const dl = e.target && e.target.closest ? e.target.closest('a[data-action="downloadPdf"][data-order-id]') : null;
-      if (dl) {
-        e.preventDefault();
-        const orderId = String(dl.getAttribute('data-order-id') || '').trim();
-        const scope = String(dl.getAttribute('data-order-scope') || '').trim().toLowerCase();
-        if (!orderId) return;
-
-        const order = scope === 'reconciliation'
-          ? loadReconciliationOrders(year).find((o) => o && String(o.id) === orderId)
-          : loadOrders(year).find((o) => o && String(o.id) === orderId);
-        if (!order) return;
-        if (hasOrderMissingRequiredValues(order)) {
-          window.alert('Complete all required fields before downloading a PDF.');
-          return;
-        }
-        generatePaymentOrderPdfFromTemplate({ order });
-        return;
-      }
-
-      const btn = e.target.closest('button[data-wise-usd-action]');
-      if (!btn) return;
-      const row = btn.closest('tr[data-wise-usd-id]');
-      if (!row) return;
-      const id = row.getAttribute('data-wise-usd-id');
-      const action = btn.getAttribute('data-wise-usd-action');
-
-      if (action === 'delete') {
-        if (btn.getAttribute('aria-disabled') === 'true') {
-          alertDisabledAction(btn, 'Requires Delete access for wiseUSD.');
-          return;
-        }
-        if (!requireDeleteAccess('income_wise_usd', 'Delete access is required for wiseUSD.')) return;
-        const ok = window.confirm('Delete this wiseUSD entry?');
-        if (!ok) return;
-        deleteWiseUsdEntryById(id, year);
-        applyWiseUsdView();
-        return;
-      }
-
-      if (action === 'edit') {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        const all = loadWiseUsd(year);
-        const entry = all.find((x) => x && x.id === id);
-        if (!entry) return;
-        openWiseUsdModal(entry, year);
-      }
-    });
-
-    // Persist Verified checkbox state per wiseUSD entry.
-    if (!wiseUsdTbody.dataset.verifiedBound) {
-      wiseUsdTbody.dataset.verifiedBound = '1';
-      wiseUsdTbody.addEventListener('change', (e) => {
-        const input =
-          e.target && e.target.matches
-            ? e.target.matches('input[type="checkbox"][data-wise-usd-verify]')
-              ? e.target
-              : null
-            : null;
-        if (!input) return;
-
-        if (!wiseUsdViewState.canVerify) {
-          input.checked = !input.checked;
-          return;
-        }
-
-        if (!requireIncomeEditAccess('Income is read only for your account.')) {
-          input.checked = !input.checked;
-          return;
-        }
-
-        const id = String(input.getAttribute('data-wise-usd-id') || '').trim();
-        if (!id) return;
-        const all = loadWiseUsd(year);
-        const entry = all.find((x) => x && x.id === id);
-        if (!entry) return;
-
-        entry.verified = input.checked ? 1 : 0;
-        if ('checkedByGTREAS' in entry) delete entry.checkedByGTREAS;
-        entry.updatedAt = new Date().toISOString();
-        upsertWiseUsdEntry(entry, year);
-
-        // Keep sort/search values consistent.
-        applyWiseUsdView();
-      });
-    }
-
-    if (wiseUsdModal && !wiseUsdModal.dataset.bound) {
-      wiseUsdModal.dataset.bound = '1';
-      wiseUsdModal.addEventListener('click', (e) => {
-        const closeTarget = e.target.closest('[data-wise-usd-modal-close]');
-        if (closeTarget) closeWiseUsdModal();
-      });
-    }
-
-    if (!document.body.dataset.wiseUsdEscBound) {
-      document.body.dataset.wiseUsdEscBound = '1';
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && wiseUsdModal && wiseUsdModal.classList.contains('is-open')) {
-          closeWiseUsdModal();
-        }
-      });
-    }
-
-    if (wiseUsdSaveBtn && !wiseUsdSaveBtn.dataset.bound) {
-      wiseUsdSaveBtn.dataset.bound = '1';
-      wiseUsdSaveBtn.addEventListener('click', () => {
-        try {
-          if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-          if (!hasIncomeFullAccess && !currentWiseUsdId) {
-            window.alert('Requires Full access for Income to create a new wiseUSD entry.');
-            return;
-          }
-          clearWiseUsdModalErrors();
-          const res = validateWiseUsdModalValues();
-          if (!res.ok) {
-            showWiseUsdModalErrors(res.errors);
-            return;
-          }
-
-          const nowIso = new Date().toISOString();
-          const id =
-            currentWiseUsdId ||
-            (crypto?.randomUUID ? crypto.randomUUID() : `wu_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-          const existing = currentWiseUsdId ? loadWiseUsd(year).find((x) => x && x.id === currentWiseUsdId) : null;
-
-          const entry = {
-            id,
-            createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
-            updatedAt: nowIso,
-            ...res.values,
-          };
-
-          const net = computeWiseUsdNet(entry);
-          if (net < 0) {
-            const po = buildReconciliationOrderFromWiseUsdEntry(entry, year);
-            if (po) {
-              ensurePaymentOrdersReconciliationListExistsForYear(year);
-              upsertReconciliationOrderBySource(po, year);
-            }
-            if (existing) deleteWiseUsdEntryById(entry.id, year);
-          } else {
-            removeReconciliationOrderBySource('wiseUSD', entry.id, year);
-            upsertWiseUsdEntry(entry, year);
-            if (!existing) {
-              void fireNotificationEvent('new_wise_usd', {
-                date: String(entry.date || ''),
-                party: String(entry.receivedFromDisbursedTo || ''),
-                amount: String(entry.totalAmountInUsd || entry.usdAmount || ''),
-                year: String(year),
-                directLink: String(window.location.href || ''),
-              });
-            }
-          }
-          closeWiseUsdModal();
-          applyWiseUsdView();
-        } catch (err) {
-          console.error('[WiseUSD Save] Failed', err);
-          window.alert(`Unable to save wiseUSD entry. ${err && err.message ? err.message : 'Check console for details.'}`);
-        }
-      });
-    }
-
-    if (!wiseUsdTbody.dataset.storageBound) {
-      wiseUsdTbody.dataset.storageBound = '1';
-      window.addEventListener('storage', (e) => {
-        const key = e && typeof e.key === 'string' ? e.key : '';
-        if (!key) return;
-        if (key.startsWith('payment_order_wise_usd_')) {
-          applyWiseUsdView();
-        }
-      });
-    }
-
-    tryAutoSeedWiseUsdFromCsvFile()
-      .then((didSeed) => {
-        if (didSeed) applyWiseUsdView();
-      })
-      .catch(() => {});
-
-    applyWiseUsdView();
-  }
-
-  function initBudgetEditor() {
-    const budgetYear = getActiveBudgetYear();
-    const budgetKey = getBudgetTableKeyForYear(budgetYear);
-    const editLink = document.getElementById('budgetEditLink');
-    const dashboardLink = document.getElementById('budgetDashboardLink');
-    const deactivateLink = document.getElementById('budgetDeactivateLink');
-    const setActiveBtn = document.getElementById('budgetSetActiveBtn');
-    const saveBtn = document.getElementById('budgetSaveBtn');
-    const cancelBtn = document.getElementById('budgetCancelBtn');
-    const newYearLink = document.getElementById('budgetNewYearLink');
-    const addLineLink = document.getElementById('budgetAddLineLink');
-    const removeLineLink = document.getElementById('budgetRemoveLineLink');
-    const deleteBudgetLink = document.getElementById('budgetDeleteLink');
-    const exportCsvLink = document.getElementById('budgetExportCsvLink');
-    const downloadTemplateLink = document.getElementById('budgetDownloadTemplateLink');
-    const importCsvLink = document.getElementById('budgetImportCsvLink');
-    const menuBtn = document.getElementById('budgetActionsMenuBtn');
-    const menuPanel = document.getElementById('budgetActionsMenu');
-    const table = document.querySelector('table.budgetTable');
-    if (!editLink || !saveBtn || !table) return;
-
-    const currentUser = getCurrentUser();
-    const budgetLevel = currentUser ? getEffectivePermissions(currentUser).budget : 'none';
-    const hasBudgetFullAccess = currentUser ? canWrite(currentUser, 'budget') : false;
-
-    const tbody = table.querySelector('tbody');
-    if (!tbody) return;
-
-    const budgetWrap = table.closest('.table-wrap');
-    let budgetStickyFooterRaf = null;
-
-    const budgetChecksumsToggle = document.getElementById('budgetChecksumsToggle');
-    const budgetChecksumsModeText = document.getElementById('budgetChecksumsModeText');
-    const budgetChecksumsVisibleKey = `payment_order_budget_checksums_visible_${Number(budgetYear)}_v1`;
-    let budgetChecksumsVisible = false;
-
-    function loadBudgetChecksumsVisible() {
-      try {
-        const raw = localStorage.getItem(budgetChecksumsVisibleKey);
-        if (raw === null || raw === undefined || raw === '') return false;
-        return raw === '1' || raw === 'true' || raw === 'show' || raw === 'Show';
-      } catch {
-        return false;
-      }
-    }
-
-    function saveBudgetChecksumsVisible(nextVisible) {
-      try {
-        localStorage.setItem(budgetChecksumsVisibleKey, nextVisible ? '1' : '0');
-      } catch {
-        // ignore
-      }
-    }
-
-    function syncBudgetChecksumsToggleUi() {
-      if (!budgetChecksumsToggle) return;
-      // Match the banking toggle pattern: show the action the user can take.
-      const label = budgetChecksumsVisible ? 'Hide' : 'Show';
-      if (typeof budgetChecksumsToggle.checked === 'boolean') budgetChecksumsToggle.checked = Boolean(budgetChecksumsVisible);
-      budgetChecksumsToggle.setAttribute('aria-label', label);
-      budgetChecksumsToggle.setAttribute('aria-checked', String(Boolean(budgetChecksumsVisible)));
-      if (budgetChecksumsModeText) budgetChecksumsModeText.textContent = label;
-    }
-
-    function applyBudgetChecksumsVisibility() {
-      const show = Boolean(budgetChecksumsVisible);
-      const spacer = tbody.querySelector('tr.budgetTable__checksumSpacer');
-      if (spacer) spacer.hidden = !show;
-
-      const rows = tbody.querySelectorAll('tr.budgetTable__checksum');
-      for (const row of rows) {
-        row.hidden = !show;
-      }
-    }
-
-    function setBudgetChecksumsVisible(next, opts) {
-      const persist = !(opts && opts.persist === false);
-      budgetChecksumsVisible = Boolean(next);
-      applyBudgetChecksumsVisibility();
-      syncBudgetChecksumsToggleUi();
-      if (persist) saveBudgetChecksumsVisible(budgetChecksumsVisible);
-      scheduleBudgetLockedFooter();
-    }
-
-    function clearBudgetStickyFooterCellStyles() {
-      const rows = tbody.querySelectorAll('tr.budgetTable__total, tr.budgetTable__remaining, tr.budgetTable__checksum');
-      for (const row of rows) {
-        const cells = row.querySelectorAll('td, th');
-        for (const cell of cells) {
-          if (cell.style.position === 'sticky') cell.style.position = '';
-          if (cell.style.bottom) cell.style.bottom = '';
-          if (cell.style.zIndex) cell.style.zIndex = '';
-        }
-      }
-    }
-
-    function applyBudgetLockedFooter() {
-      if (!budgetWrap || !budgetWrap.classList.contains('fixedFooterTableWrap')) return;
-
-      const totalRows = Array.from(tbody.querySelectorAll('tr.budgetTable__total'));
-      const totalRow = totalRows.length ? totalRows[totalRows.length - 1] : null;
-      const remainingRow = tbody.querySelector('tr.budgetTable__remaining');
-      const receiptsChecksumRow = tbody.querySelector('tr.budgetTable__checksum[data-checksum-kind="receipts"]');
-      const expendituresChecksumRow = tbody.querySelector('tr.budgetTable__checksum[data-checksum-kind="expenditures"]');
-
-      const stickyRowsBottomToTop = [
-        expendituresChecksumRow,
-        receiptsChecksumRow,
-        remainingRow,
-        totalRow,
-      ].filter((row) => Boolean(row) && !row.hidden);
-
-      if (!stickyRowsBottomToTop.length) return;
-
-      clearBudgetStickyFooterCellStyles();
-
-      let bottomOffset = 0;
-      // Bottom-most footer should be above other sticky layers.
-      let zIndex = 6;
-      for (const row of stickyRowsBottomToTop) {
-        const height = row.getBoundingClientRect && row.getBoundingClientRect().height
-          ? row.getBoundingClientRect().height
-          : 40;
-
-        const cells = row.querySelectorAll('td, th');
-        for (const cell of cells) {
-          cell.style.position = 'sticky';
-          cell.style.bottom = `${bottomOffset}px`;
-          cell.style.zIndex = String(zIndex);
-        }
-
-        bottomOffset += height;
-        zIndex = Math.max(3, zIndex - 1);
-      }
-    }
-
-    function scheduleBudgetLockedFooter() {
-      if (!budgetWrap || !budgetWrap.classList.contains('fixedFooterTableWrap')) return;
-      if (budgetStickyFooterRaf) cancelAnimationFrame(budgetStickyFooterRaf);
-      budgetStickyFooterRaf = requestAnimationFrame(() => {
-        budgetStickyFooterRaf = null;
-        applyBudgetLockedFooter();
-      });
-    }
-
-    function getBudgetTemplateRowsForSeeding(fallbackTbodyHtml) {
-      function deriveTemplateRowsNoSave(tbodyHtml) {
-        const html = String(tbodyHtml ?? '');
-        if (!html.trim()) return [];
-        try {
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html');
-          const tmpBody = doc.querySelector('tbody');
-          if (!tmpBody) return [];
-
-          const allRows = Array.from(tmpBody.querySelectorAll('tr'));
-          const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
-          const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
-
-          const rows = [];
-          for (const tr of allRows) {
-            if (tr.classList.contains('budgetTable__spacer')) continue;
-            if (tr.classList.contains('budgetTable__total')) continue;
-            if (tr.classList.contains('budgetTable__remaining')) continue;
-            if (tr.classList.contains('budgetTable__checksum')) continue;
-
-            const tds = Array.from(tr.querySelectorAll('td'));
-            if (tds.length < 7) continue;
-
-            const rowIndex = allRows.indexOf(tr);
-            const section = firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex ? 1 : 2;
-            const inVal = normalizeBudgetTemplateText(tds[0]?.textContent);
-            const outVal = normalizeBudgetTemplateText(tds[1]?.textContent);
-            const desc = normalizeBudgetTemplateText(tds[2]?.textContent);
-            if (!inVal && !outVal && !desc) continue;
-
-            const kind = section === 2 ? 'budget' : 'anticipated';
-            const ops = getBudgetCalcOpsForRow(kind, tr, desc);
-            const receiptsOp = isValidBudgetCalcOp(tr.dataset && tr.dataset.calcReceipts) ? tr.dataset.calcReceipts : ops.receiptsOp;
-            const expendituresOp = isValidBudgetCalcOp(tr.dataset && tr.dataset.calcExpenditures)
-              ? tr.dataset.calcExpenditures
-              : ops.expendituresOp;
-
-            rows.push({
-              section,
-              in: inVal,
-              out: outVal,
-              description: desc,
-              calcReceiptsOp: receiptsOp,
-              calcExpendituresOp: expendituresOp,
-            });
-          }
-          return rows;
-        } catch {
-          return [];
-        }
-      }
-
-      const existing = loadBudgetTemplateRows();
-      const active = loadActiveBudgetYear();
-      const fromActive = active ? updateBudgetTemplateRowsFromBudgetYear(active) : [];
-      const derived = deriveTemplateRowsNoSave(fallbackTbodyHtml);
-
-      // Merge: never allow template rows to shrink. Favor the shipped template ordering,
-      // then append any custom rows discovered in Active budget or existing stored template.
-      const seen = new Set();
-      const merged = [];
-      const addList = (list) => {
-        const items = Array.isArray(list) ? list.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
-        for (const r of items) {
-          const key = makeBudgetTemplateLineKey(r.in, r.out, r.description);
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          merged.push(r);
-        }
-      };
-
-      addList(derived);
-      addList(fromActive);
-      addList(existing);
-
-      if (!merged.length) return [];
-      return saveBudgetTemplateRows(merged);
-    }
-
-    function buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows) {
-      const normalized = Array.isArray(templateRows) ? templateRows.map(normalizeBudgetTemplateRow).filter(Boolean) : [];
-      if (!normalized.length) return '';
-
-      const section1 = normalized.filter((r) => r.section === 1);
-      const section2 = normalized.filter((r) => r.section === 2);
-
-      const seedTbody = document.createElement('tbody');
-      for (const r of section1) {
-        seedTbody.appendChild(
-          buildDataRowFromRecord({
-            in: r.in,
-            out: r.out,
-            description: r.description,
-            approvedEuro: '0.00 €',
-            receiptsEuro: '0.00 €',
-            expendituresEuro: '0.00 €',
-            balanceEuro: '0.00 €',
-            receiptsUsd: '-',
-            expendituresUsd: '-',
-            calcReceiptsOp: r.calcReceiptsOp,
-            calcExpendituresOp: r.calcExpendituresOp,
-          })
-        );
-      }
-      seedTbody.appendChild(buildSpacerRow());
-      seedTbody.appendChild(buildTotalRow('Total Anticipated Values'));
-      seedTbody.appendChild(buildSpacerRow());
-      for (const r of section2) {
-        seedTbody.appendChild(
-          buildDataRowFromRecord({
-            in: r.in,
-            out: r.out,
-            description: r.description,
-            approvedEuro: '0.00 €',
-            receiptsEuro: '0.00 €',
-            expendituresEuro: '0.00 €',
-            balanceEuro: '0.00 €',
-            receiptsUsd: '-',
-            expendituresUsd: '-',
-            calcReceiptsOp: r.calcReceiptsOp,
-            calcExpendituresOp: r.calcExpendituresOp,
-          })
-        );
-      }
-      seedTbody.appendChild(buildTotalRow('Total Budget, Receipts, Expenditures'));
-      seedTbody.appendChild(buildRemainingRow());
-      for (const el of buildChecksumSection()) seedTbody.appendChild(el);
-      return seedTbody.innerHTML;
-    }
-
-    // Page title ("YYYY Budget")
-    const titleEl = document.querySelector('[data-budget-title]');
-    if (titleEl) titleEl.textContent = `${budgetYear} Budget`;
-
-    const listTitleEl = document.querySelector('[data-budget-list-title]');
-    if (listTitleEl) listTitleEl.textContent = `${budgetYear} Budget`;
-
-    const subheadEl = document.querySelector('[data-budget-subhead]');
-    if (subheadEl) subheadEl.textContent = `Budget overview table for ${budgetYear}.`;
-    applyAppTabTitle();
-
-    // Register this year and seed it using the stored template rows (derived from the Active Budget).
-    // Fallback: the static HTML template shipped in this page.
-    const templateHtml = tbody.innerHTML;
-    const seedRows = getBudgetTemplateRowsForSeeding(templateHtml);
-    const seedHtml = buildSeedBudgetTbodyHtmlFromTemplateRows(seedRows) || templateHtml;
-    ensureBudgetYearExists(budgetYear, seedHtml);
-    initBudgetYearNav();
-
-    // Ensure Receipts/Expenditures reflect the Ledger (ledger-driven budget policy).
-    syncBudgetFromLedger(budgetYear);
-
-    function syncActiveBudgetButton() {
-      if (!setActiveBtn) return;
-      const active = loadActiveBudgetYear();
-      const isActive = active === budgetYear;
-      setActiveBtn.textContent = isActive ? 'Active Budget' : 'Set Active Budget';
-      setActiveBtn.disabled = isActive || !hasBudgetFullAccess;
-
-      if (isActive) {
-        setActiveBtn.setAttribute('title', 'This year is the Active Budget');
-        setActiveBtn.setAttribute(
-          'data-tooltip',
-          'This budget year is currently the Active Budget. Use the gear menu → Deactivate Budget to clear the active selection.'
-        );
-      } else if (!hasBudgetFullAccess) {
-        setActiveBtn.setAttribute('title', 'Requires Full access for Budget');
-        setActiveBtn.setAttribute(
-          'data-tooltip',
-          'Requires Full access for Budget. Partial access can edit and save the budget table, but cannot Activate Budget.'
-        );
-      } else {
-        setActiveBtn.setAttribute('title', 'Set this year as the Active Budget');
-        setActiveBtn.setAttribute(
-          'data-tooltip',
-          'Sets this budget year as the Active Budget. The sidebar Budget link will open this year’s dashboard until you deactivate it.'
-        );
-      }
-
-      // Deactivate link should only be enabled if any active budget is set.
-      const canDeactivate = Boolean(active) && hasBudgetFullAccess;
-      setLinkDisabled(deactivateLink, !canDeactivate);
-      if (deactivateLink) {
-        if (!hasBudgetFullAccess) {
-          deactivateLink.setAttribute('data-tooltip', 'Requires Full access for Budget. Partial access cannot Deactivate Budget.');
-        }
-      }
-    }
-
-    syncActiveBudgetButton();
-
-    // Cross-tab sync: if another tab changes the active year, keep this page accurate.
-    window.addEventListener('storage', (e) => {
-      const key = e && typeof e.key === 'string' ? e.key : '';
-      if (key === ACTIVE_BUDGET_YEAR_KEY || key === BUDGET_YEARS_KEY) {
-        syncActiveBudgetButton();
-        initBudgetYearNav();
-      }
-    });
-
-    if (setActiveBtn) {
-      setActiveBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
-        saveActiveBudgetYear(budgetYear);
-
-        // Treat the newly-activated budget's structure as the template.
-        readBudgetTemplateRowsFromTbodyEl(tbody);
-
-        // First activation: if no Payment Orders list exists for this year,
-        // create it and reset numbering so the first PO number is always 01.
-        const ensured = ensurePaymentOrdersListExistsForYear(budgetYear);
-        if (ensured && ensured.ok && ensured.created) {
-          const year2 = getYear2ForBudgetYear(budgetYear);
-          if (year2) saveNumberingSettings({ year2, nextSeq: 1 });
-        } else {
-          // Otherwise, keep numbering consistent and never go backwards.
-          syncNumberingSettingsToBudgetYear(budgetYear);
-        }
-
-        // Income: create the year list on first activation (if missing).
-        ensureIncomeListExistsForYear(budgetYear);
-
-        // Money Transfers: create the year list on first activation (if missing).
-        ensureMoneyTransfersListExistsForYear(budgetYear);
-
-        // Grand Secretary Ledger: initialize Verified store on first activation (if missing).
-        ensureGsLedgerVerifiedStoreExistsForYear(budgetYear);
-
-        // Flush immediately so the active year and all initialised year lists reach the
-        // WP database before the user navigates away.  Without this the writes sit in a
-        // 350 ms deferred queue and can be lost if the page unloads in time.
-        if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
-          try { await window.acglFmsWpFlushNow(); } catch { /* ignore */ }
-        }
-
-        syncActiveBudgetButton();
-        // Re-render nav so the parent Budget link points at the new active year.
-        initBudgetYearNav();
-      });
-    }
-
-    if (deactivateLink) {
-      deactivateLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (deactivateLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
-        clearActiveBudgetYear();
-        syncActiveBudgetButton();
-        initBudgetYearNav();
-        closeMenu();
-      });
-    }
-
-    if (dashboardLink) {
-      dashboardLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        window.location.href = `budget_dashboard.html?year=${encodeURIComponent(String(budgetYear))}`;
-      });
-    }
-
-    function parseMoney(text) {
-      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!raw || raw === '-' || raw === '—') return 0;
-
-      const isParenNeg = raw.includes('(') && raw.includes(')');
-      const cleaned = raw.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n)) return 0;
-      return isParenNeg ? -Math.abs(n) : n;
-    }
-
-    function parseMoneyOrNull(text) {
-      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!raw || raw === '-' || raw === '—') return null;
-      const isParenNeg = raw.includes('(') && raw.includes(')');
-      const cleaned = raw.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      if (!/[0-9]/.test(cleaned)) return null;
-      const n = Number(cleaned);
-      if (!Number.isFinite(n)) return null;
-      return isParenNeg ? -Math.abs(n) : n;
-    }
-
-    function hasUsdValue(text) {
-      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!raw) return false;
-      if (raw === '-' || raw === '—') return false;
-      return true;
-    }
-
-    function normalizeUsdCells() {
-      const usdValueCells = tbody.querySelectorAll('td.budgetTable__usd');
-      for (const valueCell of usdValueCells) {
-        const parentRow = valueCell.closest('tr');
-        const isTotalRow = Boolean(parentRow && parentRow.classList.contains('budgetTable__total'));
-        const raw = String(valueCell.textContent ?? '').replace(/\u00A0/g, ' ');
-        const trimmed = raw.trim();
-
-        // Clear the separate sign cell (we render "$ " inside the value cell)
-        const maybeSign = valueCell.previousElementSibling;
-        if (maybeSign && maybeSign.classList.contains('budgetTable__usdSign')) {
-          maybeSign.textContent = '';
-        }
-
-        if (!hasUsdValue(trimmed)) {
-          // Keep USD totals explicit and bold.
-          if (isTotalRow) valueCell.innerHTML = '<strong>$ 0.00</strong>';
-          else valueCell.textContent = '-';
-          continue;
-        }
-
-        const withoutDollar = trimmed.replace(/^\$\s*/u, '');
-        // Exactly one space after $.
-        if (isTotalRow) valueCell.innerHTML = `<strong>$ ${withoutDollar}</strong>`;
-        else valueCell.textContent = `$ ${withoutDollar}`;
-      }
-    }
-
-    function applyNegativeNumberClasses() {
-      const rows = tbody.querySelectorAll('tr');
-      for (const row of rows) {
-        const skipDescriptionCol = isEditableDataRow(row);
-        const cells = row.querySelectorAll('td');
-        for (let i = 0; i < cells.length; i += 1) {
-          const cell = cells[i];
-          // Skip Description column (3rd column)
-          if (skipDescriptionCol && i === 2) {
-            cell.classList.remove('is-negative');
-            continue;
-          }
-
-          const value = parseMoney(cell.textContent);
-          if (value < 0) cell.classList.add('is-negative');
-          else cell.classList.remove('is-negative');
-        }
-      }
-    }
-
-    function formatEuro(amount) {
-      const n = Number(amount);
-      const safe = Number.isFinite(n) ? n : 0;
-      return `${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-    }
-
-    function formatUsd(amount) {
-      const n = Number(amount);
-      const safe = Number.isFinite(n) ? n : 0;
-      return `$ ${safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    }
-
-    function normalizeEuroCells() {
-      const rows = tbody.querySelectorAll('tr');
-      for (const row of rows) {
-        if (!isEditableDataRow(row)) continue;
-        const tds = row.querySelectorAll('td');
-
-        // Money columns: 4-7 (0-based 3..6)
-        for (let col = 3; col <= 6; col += 1) {
-          const cell = tds[col];
-          if (!cell) continue;
-          const parsed = parseMoneyOrNull(cell.textContent);
-          if (parsed === null) continue;
-          cell.textContent = formatEuro(parsed);
-        }
-      }
-    }
-
-    function isEditableDataRow(row) {
-      if (!row) return false;
-      if (row.classList.contains('budgetTable__spacer')) return false;
-      if (row.classList.contains('budgetTable__total')) return false;
-      if (row.classList.contains('budgetTable__remaining')) return false;
-      if (row.classList.contains('budgetTable__checksum')) return false;
-      const tds = row.querySelectorAll('td');
-      return tds.length >= 7;
-    }
-
-    function sumSection(rows, kind) {
-      const totals = {
-        approved: 0,
-        receipts: 0,
-        expenditures: 0,
-        balance: 0,
-        receiptsUsd: 0,
-        expendituresUsd: 0,
-      };
-
-      for (const row of rows) {
-        if (!isEditableDataRow(row)) continue;
-        const tds = row.querySelectorAll('td');
-        const approved = parseMoney(tds[3]?.textContent);
-        const receipts = parseMoney(tds[4]?.textContent);
-        const expenditures = parseMoney(tds[5]?.textContent);
-        const desc = tds[2]?.textContent ?? '';
-        const ops = getBudgetCalcOpsForRow(kind, row, desc);
-        const balance = computeBudgetBalance(approved, receipts, expenditures, ops);
-
-        totals.approved += approved;
-        totals.receipts += receipts;
-        totals.expenditures += expenditures;
-        totals.balance += balance;
-
-        // Keep Balance Euro consistent for each row
-        if (tds[6]) tds[6].textContent = formatEuro(balance);
-
-        // USD value columns (sign columns are present but visually collapsed)
-        totals.receiptsUsd += parseMoney(tds[8]?.textContent);
-        totals.expendituresUsd += parseMoney(tds[10]?.textContent);
-      }
-
-      return totals;
-    }
-
-    function updateTotalRow(totalRow, totals) {
-      if (!totalRow) return;
-      const tds = totalRow.querySelectorAll('td');
-      if (tds.length < 11) return;
-
-      tds[3].innerHTML = `<strong>${formatEuro(totals.approved)}</strong>`;
-      tds[4].innerHTML = `<strong>${formatEuro(totals.receipts)}</strong>`;
-      tds[5].innerHTML = `<strong>${formatEuro(totals.expenditures)}</strong>`;
-      tds[6].innerHTML = `<strong>${formatEuro(totals.balance)}</strong>`;
-
-      // Keep USD sign cells blank; render "$ " inside the value cells.
-      if (tds[7]) tds[7].textContent = '';
-      if (tds[9]) tds[9].textContent = '';
-      if (tds[8]) tds[8].innerHTML = `<strong>${formatUsd(totals.receiptsUsd)}</strong>`;
-      if (tds[10]) tds[10].innerHTML = `<strong>${formatUsd(totals.expendituresUsd)}</strong>`;
-    }
-
-    function updateRemainingRow(remainingRow, section1Totals, section2Totals) {
-      if (!remainingRow) return;
-      const cells = remainingRow.querySelectorAll('td');
-      if (cells.length < 7) return;
-
-      // Remaining funds of balance =
-      // (Total Budget, Receipts, Expenditures -> Receipts Euro)
-      // + (Total Anticipated Values -> Balance Euro)
-      // - (Total Budget, Receipts, Expenditures -> Expenditures Euro)
-      const remaining = section2Totals.receipts + section1Totals.balance - section2Totals.expenditures;
-      // Value should appear under the Balance Euro column.
-      const valueCell = cells[6];
-      valueCell.innerHTML = `<strong>${formatEuro(remaining)}</strong>`;
-
-      if (remaining < 0) valueCell.classList.add('is-negative');
-      else valueCell.classList.remove('is-negative');
-    }
-
-    function ensureRemainingRowLayout() {
-      const remainingRow = tbody.querySelector('tr.budgetTable__remaining');
-      if (!remainingRow) return;
-
-      const cells = Array.from(remainingRow.querySelectorAll('td'));
-
-      // New layout is 11 plain <td> cells (no colspans) to match the 11 visible columns.
-      const hasAnyColspan = cells.some((c) => c.hasAttribute('colspan'));
-      if (!hasAnyColspan && cells.length === 11) return;
-
-      // Preserve the label text if we can find it.
-      const labelText = remainingRow.textContent?.includes('Remaining') ? 'Remaining funds of balance' : 'Remaining funds of balance';
-
-      // Build 11 cells: label in Description (3), value in Balance Euro (7).
-      remainingRow.innerHTML = `
-        <td></td>
-        <td></td>
-        <td><strong>${labelText}</strong></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td class="num"><strong>-</strong></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
-      `.trim();
-    }
-
-    function ensureTotalRowsLayout() {
-      const totalRows = tbody.querySelectorAll('tr.budgetTable__total');
-      for (const row of totalRows) {
-        const cells = Array.from(row.querySelectorAll('td'));
-        const hasAnyColspan = cells.some((c) => c.hasAttribute('colspan'));
-        if (!hasAnyColspan && cells.length === 11) continue;
-
-        const rowText = row.textContent ?? '';
-        const labelText = rowText.includes('Total Budget')
-          ? 'Total Budget, Receipts, Expenditures'
-          : 'Total Anticipated Values';
-
-        row.innerHTML = `
-          <td></td>
-          <td></td>
-          <td><strong>${labelText}</strong></td>
-          <td class="num"><strong>-</strong></td>
-          <td class="num"><strong>-</strong></td>
-          <td class="num"><strong>-</strong></td>
-          <td class="num"><strong>-</strong></td>
-          <td class="budgetTable__usdSign"></td>
-          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
-          <td class="budgetTable__usdSign"></td>
-          <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
-        `.trim();
-      }
-    }
-
-    function buildChecksumSpacerRow() {
-      const tr = document.createElement('tr');
-      tr.className = 'budgetTable__spacer budgetTable__checksumSpacer';
-      tr.innerHTML = '<td colspan="11"></td>';
-      return tr;
-    }
-
-    function buildChecksumRow(kind) {
-      const tr = document.createElement('tr');
-      tr.className = 'budgetTable__checksum';
-      tr.setAttribute('data-checksum-kind', kind);
-
-      const label = kind === 'receipts' ? 'Receipts Checksum' : 'Expenditure Checksum';
-      // Value lives under the related column:
-      // receipts checksum -> Receipts Euro (col 5 / index 4)
-      // expenditure checksum -> Expenditures Euro (col 6 / index 5)
-      tr.innerHTML = `
-        <td></td>
-        <td></td>
-        <td><strong>${label}</strong></td>
-        <td></td>
-        <td class="num">${kind === 'receipts' ? '<strong>-</strong>' : ''}</td>
-        <td class="num">${kind === 'expenditures' ? '<strong>-</strong>' : ''}</td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
-      `.trim();
-      return tr;
-    }
-
-    function ensureChecksumRowsLayout() {
-      const existing = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
-      const hasReceipts = existing.some((r) => r.getAttribute('data-checksum-kind') === 'receipts');
-      const hasExpenditures = existing.some((r) => r.getAttribute('data-checksum-kind') === 'expenditures');
-
-      const remainingRow = tbody.querySelector('tr.budgetTable__remaining');
-      const insertAfter = remainingRow && remainingRow.isConnected ? remainingRow : null;
-
-      // Ensure we have a spacer before the checksum rows.
-      let spacer = tbody.querySelector('tr.budgetTable__checksumSpacer');
-      if (!spacer) {
-        spacer = buildChecksumSpacerRow();
-        if (insertAfter) insertAfter.insertAdjacentElement('afterend', spacer);
-        else tbody.appendChild(spacer);
-      }
-
-      // Add missing checksum rows (keep existing user-saved ones intact).
-      if (!hasReceipts) spacer.insertAdjacentElement('afterend', buildChecksumRow('receipts'));
-
-      // Re-find spacer sibling insertion point for expenditures so ordering is stable.
-      const rowsAfterSpacer = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
-      const receiptsRow = rowsAfterSpacer.find((r) => r.getAttribute('data-checksum-kind') === 'receipts');
-      const insertionPoint = receiptsRow && receiptsRow.isConnected ? receiptsRow : spacer;
-
-      if (!hasExpenditures) insertionPoint.insertAdjacentElement('afterend', buildChecksumRow('expenditures'));
-
-      // Normalize layout to 11 cells (no colspans)
-      const all = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
-      for (const row of all) {
-        const tds = row.querySelectorAll('td');
-        if (tds.length === 11) continue;
-        const kind = row.getAttribute('data-checksum-kind') || 'receipts';
-        row.replaceWith(buildChecksumRow(kind));
-      }
-
-      // Respect the Checksums toggle (Show/Hide) even if we rebuild rows.
-      applyBudgetChecksumsVisibility();
-      scheduleBudgetLockedFooter();
-    }
-
-    function updateChecksumRows(section1Totals, section2Totals) {
-      const receiptsChecksum = section1Totals.receipts - section2Totals.receipts;
-      const expendituresChecksum = section1Totals.expenditures - section2Totals.expenditures;
-
-      const rows = Array.from(tbody.querySelectorAll('tr.budgetTable__checksum'));
-      for (const row of rows) {
-        const kind = row.getAttribute('data-checksum-kind');
-        const tds = row.querySelectorAll('td');
-        if (tds.length < 11) continue;
-
-        if (kind === 'receipts') {
-          tds[4].innerHTML = `<strong>${formatEuro(receiptsChecksum)}</strong>`;
-          if (receiptsChecksum < 0) tds[4].classList.add('is-negative');
-          else tds[4].classList.remove('is-negative');
-        }
-
-        if (kind === 'expenditures') {
-          tds[5].innerHTML = `<strong>${formatEuro(expendituresChecksum)}</strong>`;
-          if (expendituresChecksum < 0) tds[5].classList.add('is-negative');
-          else tds[5].classList.remove('is-negative');
-        }
-      }
-    }
-
-    function recalculateBudgetTotals() {
-      const rows = Array.from(tbody.querySelectorAll('tr'));
-      const totalRows = rows.filter((r) => r.classList.contains('budgetTable__total'));
-      if (totalRows.length < 2) return;
-
-      const firstTotalIndex = rows.indexOf(totalRows[0]);
-      const secondTotalIndex = rows.indexOf(totalRows[1]);
-      if (firstTotalIndex < 0 || secondTotalIndex < 0 || secondTotalIndex <= firstTotalIndex) return;
-
-      const section1Rows = rows.slice(0, firstTotalIndex);
-      const section2Rows = rows.slice(firstTotalIndex + 1, secondTotalIndex);
-
-      const s1 = sumSection(section1Rows, 'anticipated');
-      const s2 = sumSection(section2Rows, 'budget');
-
-      updateTotalRow(totalRows[0], s1);
-      updateTotalRow(totalRows[1], s2);
-
-      const remainingRow = rows.find((r) => r.classList.contains('budgetTable__remaining'));
-      if (remainingRow) updateRemainingRow(remainingRow, s1, s2);
-
-      // Checksum section lives at the bottom and compares totals between sections.
-      updateChecksumRows(s1, s2);
-
-      normalizeEuroCells();
-      normalizeUsdCells();
-      applyNegativeNumberClasses();
-
-      // Budget footers live in <tbody>; keep them locked like other tables.
-      scheduleBudgetLockedFooter();
-    }
-
-    const savedHtml = budgetKey ? localStorage.getItem(budgetKey) : null;
-    if (savedHtml) tbody.innerHTML = savedHtml;
-
-    // If older saved HTML is present, migrate row layout to current schema.
-    ensureRemainingRowLayout();
-    ensureTotalRowsLayout();
-    ensureChecksumRowsLayout();
-
-    // Default: show checksums. Allow per-year override.
-    budgetChecksumsVisible = loadBudgetChecksumsVisible();
-    syncBudgetChecksumsToggleUi();
-    applyBudgetChecksumsVisibility();
-
-    // Mock budget convenience: ensure every Approved amount is set for 2025.
-    // This persists into shared storage so the values are stable across reloads.
-    if (Number(budgetYear) === 2025 && budgetKey) {
-      const before = tbody.innerHTML;
-      const res = applyMockApprovedEuroToBudgetTbody(tbody, budgetYear, { force: true });
-      if (res && res.ok && res.changed) {
-        try {
-          localStorage.setItem(`${budgetKey}_backup_before_mock_approved_v1`, String(before));
-        } catch {
-          // ignore
-        }
-        localStorage.setItem(budgetKey, tbody.innerHTML);
-      }
-    }
-
-    // Ensure money formats look consistent on load.
-    normalizeEuroCells();
-    normalizeUsdCells();
-
-    // Ensure totals are correct on load (including restored saved state)
-    recalculateBudgetTotals();
-    applyNegativeNumberClasses();
-
-    if (budgetWrap && !budgetWrap.dataset.budgetStickyFooterBound) {
-      budgetWrap.dataset.budgetStickyFooterBound = '1';
-      window.addEventListener('resize', scheduleBudgetLockedFooter);
-    }
-
-    if (budgetChecksumsToggle && !budgetChecksumsToggle.dataset.budgetChecksumsBound) {
-      budgetChecksumsToggle.dataset.budgetChecksumsBound = '1';
-      budgetChecksumsToggle.addEventListener('change', () => {
-        const checked = typeof budgetChecksumsToggle.checked === 'boolean' ? budgetChecksumsToggle.checked : true;
-        setBudgetChecksumsVisible(checked, { persist: true });
-      });
-
-      // Cross-tab sync for the checksums visibility setting.
-      window.addEventListener('storage', (e) => {
-        const key = e && typeof e.key === 'string' ? e.key : '';
-        if (key === budgetChecksumsVisibleKey) {
-          const next = loadBudgetChecksumsVisible();
-          setBudgetChecksumsVisible(next, { persist: false });
-        }
-      });
-    }
-
-    let isEditing = false;
-    let selectedRow = null;
-    let lastClickedSection = 1; // 1 = anticipated (top), 2 = budget (bottom)
-    let editStartHtml = null;
-
-    function isMenuOpen() {
-      return Boolean(menuPanel && !menuPanel.hasAttribute('hidden'));
-    }
-
-    function closeMenu() {
-      if (!menuPanel || !menuBtn) return;
-      menuPanel.setAttribute('hidden', '');
-      menuBtn.setAttribute('aria-expanded', 'false');
-    }
-
-    function openMenu() {
-      if (!menuPanel || !menuBtn) return;
-      menuPanel.removeAttribute('hidden');
-      menuBtn.setAttribute('aria-expanded', 'true');
-    }
-
-    function toggleMenu() {
-      if (!menuPanel || !menuBtn) return;
-      if (isMenuOpen()) closeMenu();
-      else openMenu();
-    }
-
-    function setLinkDisabled(linkEl, disabled) {
-      if (!linkEl) return;
-      linkEl.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-      if (disabled) linkEl.setAttribute('tabindex', '-1');
-      else linkEl.removeAttribute('tabindex');
-    }
-
-    function setMenuItemVisible(el, visible) {
-      if (!el) return;
-      el.hidden = !visible;
-      el.setAttribute('aria-hidden', visible ? 'false' : 'true');
-      if (!visible) el.setAttribute('tabindex', '-1');
-    }
-
-    function setSelectedRow(nextRow) {
-      if (selectedRow && selectedRow.isConnected) {
-        selectedRow.classList.remove('budgetRow--selected');
-      }
-
-      selectedRow = nextRow && isEditableDataRow(nextRow) ? nextRow : null;
-      if (selectedRow) selectedRow.classList.add('budgetRow--selected');
-
-      setLinkDisabled(removeLineLink, !isEditing || !selectedRow);
-    }
-
-    function updateLineButtons() {
-      // Only show Add/Remove while editing.
-      setMenuItemVisible(addLineLink, isEditing);
-      setMenuItemVisible(removeLineLink, isEditing);
-
-      setLinkDisabled(addLineLink, !isEditing);
-      setLinkDisabled(removeLineLink, !isEditing || !selectedRow);
-      setLinkDisabled(deleteBudgetLink, !canDelete(currentUser, 'budget'));
-
-      // In the dropdown, Edit should be available only when not editing.
-      setLinkDisabled(editLink, isEditing);
-
-      // Import replaces the table, so prevent it during editing.
-      setLinkDisabled(importCsvLink, isEditing || !hasBudgetFullAccess);
-      if (importCsvLink && !hasBudgetFullAccess) {
-        importCsvLink.setAttribute(
-          'data-tooltip',
-          'Requires Full access for Budget. Partial access can edit and save the budget table, but cannot Import CSV.'
-        );
-      }
-
-      // Creating a new year budget should be done outside edit mode.
-      setLinkDisabled(newYearLink, isEditing || !hasBudgetFullAccess);
-      if (newYearLink && !hasBudgetFullAccess) {
-        newYearLink.setAttribute(
-          'data-tooltip',
-          'Requires Full access for Budget. Partial access cannot create a New Budget Year.'
-        );
-      }
-
-      // Ensure these remain enabled.
-      setLinkDisabled(exportCsvLink, false);
-      setLinkDisabled(downloadTemplateLink, false);
-    }
-
-    // Apply initial enabled/disabled state (including Partial access restrictions).
-    updateLineButtons();
-
-    function applyEditingAttributesToRow(row) {
-      if (!row || !isEditableDataRow(row)) return;
-      const cells = row.querySelectorAll('td');
-      for (const cell of cells) {
-        if (cell.classList.contains('budgetTable__usdSign')) {
-          cell.removeAttribute('contenteditable');
-          cell.removeAttribute('spellcheck');
-          continue;
-        }
-
-        if (isEditing) {
-          cell.setAttribute('contenteditable', 'true');
-          cell.setAttribute('spellcheck', 'false');
-        } else {
-          cell.removeAttribute('contenteditable');
-          cell.removeAttribute('spellcheck');
-        }
-      }
-    }
-
-    function createEmptyBudgetRow() {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="num"></td>
-        <td class="num"></td>
-        <td></td>
-        <td class="num budgetTable__euro">0.00 €</td>
-        <td class="num budgetTable__euro">0.00 €</td>
-        <td class="num budgetTable__euro">0.00 €</td>
-        <td class="num budgetTable__bal">0.00 €</td>
-        <td class="budgetTable__usdSign">$</td>
-        <td class="num budgetTable__usd">-</td>
-        <td class="budgetTable__usdSign">$</td>
-        <td class="num budgetTable__usd">-</td>
-      `.trim();
-      return tr;
-    }
-
-    function addLine() {
-      if (!isEditing) return;
-      const newRow = createEmptyBudgetRow();
-
-      const firstTotal = tbody.querySelector('tr.budgetTable__total');
-      const totalRows = tbody.querySelectorAll('tr.budgetTable__total');
-      const secondTotal = totalRows.length >= 2 ? totalRows[1] : null;
-      if (selectedRow && selectedRow.isConnected) {
-        selectedRow.insertAdjacentElement('afterend', newRow);
-      } else if (lastClickedSection === 2 && secondTotal) {
-        // Insert into the Budget section by default if the user last clicked there.
-        secondTotal.insertAdjacentElement('beforebegin', newRow);
-      } else if (firstTotal) {
-        // Default to Anticipated section.
-        firstTotal.insertAdjacentElement('beforebegin', newRow);
-      } else {
-        tbody.appendChild(newRow);
-      }
-
-      applyEditingAttributesToRow(newRow);
-      setSelectedRow(newRow);
-      recalculateBudgetTotals();
-    }
-
-    function removeLine() {
-      if (!isEditing) return;
-      if (!selectedRow || !selectedRow.isConnected) return;
-      if (!isEditableDataRow(selectedRow)) return;
-
-      const rowToRemove = selectedRow;
-      setSelectedRow(null);
-      rowToRemove.remove();
-      recalculateBudgetTotals();
-    }
-
-    function setEditing(next) {
-      isEditing = Boolean(next);
-      table.classList.toggle('budgetTable--editing', isEditing);
-
-      // Only Save remains a button; Edit is a link.
-      saveBtn.hidden = !isEditing;
-      if (cancelBtn) cancelBtn.hidden = !isEditing;
-
-      if (!isEditing) setSelectedRow(null);
-
-      const rows = tbody.querySelectorAll('tr');
-      for (const row of rows) {
-        if (!isEditableDataRow(row)) continue;
-        const cells = row.querySelectorAll('td');
-        for (const cell of cells) {
-          if (cell.classList.contains('budgetTable__usdSign')) {
-            cell.removeAttribute('contenteditable');
-            cell.removeAttribute('spellcheck');
-            continue;
-          }
-          if (isEditing) {
-            cell.setAttribute('contenteditable', 'true');
-            cell.setAttribute('spellcheck', 'false');
-          } else {
-            cell.removeAttribute('contenteditable');
-            cell.removeAttribute('spellcheck');
-          }
-        }
-      }
-
-      updateLineButtons();
-    }
-
-    function saveEdits() {
-      // Update computed totals before persisting
-      recalculateBudgetTotals();
-      applyNegativeNumberClasses();
-      normalizeEuroCells();
-      normalizeUsdCells();
-      const clone = tbody.cloneNode(true);
-      clone.querySelectorAll('.budgetRow--selected').forEach((el) => el.classList.remove('budgetRow--selected'));
-      clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
-      clone.querySelectorAll('[spellcheck]').forEach((el) => el.removeAttribute('spellcheck'));
-
-      // If this year is the Active Budget (or no active is set yet), treat its structure as the template.
-      const active = loadActiveBudgetYear();
-      if (!active || active === budgetYear) {
-        readBudgetTemplateRowsFromTbodyEl(clone);
-      }
-
-      if (budgetKey) localStorage.setItem(budgetKey, clone.innerHTML);
-      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Modified', [
-        { field: 'Table', from: '', to: 'Edited' },
-      ]);
-    }
-
-    function promptForBudgetYear(defaultYear) {
-      const suggested = Number.isInteger(defaultYear) ? defaultYear : new Date().getFullYear();
-      const raw = window.prompt('Enter budget year (4 digits)', String(suggested));
-      if (raw === null) return null;
-      const y = Number(String(raw).trim());
-      if (!Number.isInteger(y) || y < 1900 || y > 3000) {
-        window.alert('Please enter a valid 4-digit year (e.g., 2026).');
-        return null;
-      }
-      return y;
-    }
-
-    function openBudgetYear(year) {
-      window.location.href = `budget.html?year=${encodeURIComponent(String(year))}`;
-    }
-
-    function createOrOpenBudgetYear(year) {
-      const y = Number(year);
-      if (!Number.isInteger(y)) return;
-      const key = getBudgetTableKeyForYear(y);
-      if (!key) return;
-
-      const years = loadBudgetYears();
-      const exists = years.includes(y) || Boolean(localStorage.getItem(key));
-      if (exists) {
-        openBudgetYear(y);
-        return;
-      }
-
-      // Seed new year from the template rows (derived from the Active Budget).
-      const templateRows = getBudgetTemplateRowsForSeeding(templateHtml);
-      const initial = buildSeedBudgetTbodyHtmlFromTemplateRows(templateRows) || templateHtml;
-      localStorage.setItem(key, initial);
-      saveBudgetYears([y, ...years]);
-      appendAppAuditEvent(`Budget (${y})`, `Budget ${y}`, 'Created', []);
-      openBudgetYear(y);
-    }
-
-    function escapeCsvValue(value) {
-      const s = String(value ?? '');
-      // Normalize whitespace/newlines for CSV
-      const normalized = s.replace(/\u00A0/g, ' ').replace(/\r\n|\r|\n/g, ' ').trim();
-      const mustQuote = /[",\n\r]/.test(normalized);
-      const escaped = normalized.replace(/"/g, '""');
-      return mustQuote ? `"${escaped}"` : escaped;
-    }
-
-    function getDownloadFileName() {
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `budget_${yyyy}-${mm}-${dd}.csv`;
-    }
-
-    function downloadCsvFile(csvText, fileName) {
-      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function exportBudgetToCsv() {
-      // Ensure export is consistent with what the UI shows.
-      recalculateBudgetTotals();
-      normalizeEuroCells();
-      normalizeUsdCells();
-      applyNegativeNumberClasses();
-
-      const header = [
-        'IN',
-        'OUT',
-        'Description',
-        'Amount Approved Euro',
-        'Receipts Euro',
-        'Expenditures Euro',
-        'Balance Euro',
-        'Receipts USD',
-        'Expenditures USD',
-      ];
-
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-
-      const rows = Array.from(tbody.querySelectorAll('tr'));
-      for (const row of rows) {
-        if (row.classList.contains('budgetTable__spacer')) continue;
-        const tds = Array.from(row.querySelectorAll('td'));
-        if (tds.length < 7) continue;
-
-        // Table is 11 columns; USD columns are split (sign + value). Export the value cells only.
-        const values = [
-          tds[0]?.textContent ?? '',
-          tds[1]?.textContent ?? '',
-          tds[2]?.textContent ?? '',
-          tds[3]?.textContent ?? '',
-          tds[4]?.textContent ?? '',
-          tds[5]?.textContent ?? '',
-          tds[6]?.textContent ?? '',
-          tds[8]?.textContent ?? '',
-          tds[10]?.textContent ?? '',
-        ];
-
-        lines.push(values.map(escapeCsvValue).join(','));
-      }
-
-      // UTF-8 BOM helps Excel parse UTF-8 + € correctly.
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, getDownloadFileName());
-    }
-
-    function getTemplateFileName() {
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `budget_template_${yyyy}-${mm}-${dd}.csv`;
-    }
-
-    function downloadBudgetCsvTemplate() {
-      const header = [
-        'Section',
-        'IN',
-        'OUT',
-        'Description',
-        'Amount Approved Euro',
-        'Calculation',
-        'Receipts Euro',
-        'Calculation',
-        'Expenditures Euro',
-        'Calculation',
-        'Balance Euro',
-        'Receipts USD',
-        'Expenditures USD',
-      ];
-
-      function opLabel(op) {
-        if (op === 'add') return 'add (+)';
-        if (op === 'subtract') return 'subtract (-)';
-        if (op === 'equals') return 'equals (=)';
-        return '';
-      }
-
-      const templateRows = getBudgetTemplateRowsForSeeding(templateHtml);
-
-      const dataRows = templateRows.length
-        ? templateRows.map((r) => {
-            const sectionName = r.section === 1 ? 'Anticipated' : 'Budget';
-            const kind = r.section === 2 ? 'budget' : 'anticipated';
-            const ops = getBudgetCalcOpsForRow(kind, null, r.description);
-            const receiptsOp = r.calcReceiptsOp || ops.receiptsOp;
-            const expendituresOp = r.calcExpendituresOp || ops.expendituresOp;
-
-            return [
-              sectionName,
-              r.in,
-              r.out,
-              r.description,
-              '0.00 €',
-              opLabel(receiptsOp),
-              '0.00 €',
-              opLabel(expendituresOp),
-              '0.00 €',
-              opLabel('equals'),
-              '0.00 €',
-              '-',
-              '-',
-            ];
-          })
-        : [
-            // Minimal fallback if no template exists yet.
-            ['Anticipated', '1020', '2020', 'Example anticipated line', '0.00 €', 'subtract (-)', '0.00 €', 'subtract (-)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
-            ['Budget', '1998', '2998', 'Example budget line', '0.00 €', 'add (+)', '0.00 €', 'subtract (-)', '0.00 €', 'equals (=)', '0.00 €', '-', '-'],
-          ];
-
-      const lines = [];
-      lines.push(header.map(escapeCsvValue).join(','));
-      for (const r of dataRows) lines.push(r.map(escapeCsvValue).join(','));
-
-      const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
-      downloadCsvFile(csv, getTemplateFileName());
-    }
-
-    function parseCsvText(text) {
-      const rows = [];
-      const s = String(text ?? '');
-      let row = [];
-      let field = '';
-      let inQuotes = false;
-
-      for (let i = 0; i < s.length; i += 1) {
-        const ch = s[i];
-
-        if (inQuotes) {
-          if (ch === '"') {
-            const next = s[i + 1];
-            if (next === '"') {
-              field += '"';
-              i += 1;
-            } else {
-              inQuotes = false;
-            }
-          } else {
-            field += ch;
-          }
-          continue;
-        }
-
-        if (ch === '"') {
-          inQuotes = true;
-          continue;
-        }
-
-        if (ch === ',') {
-          row.push(field);
-          field = '';
-          continue;
-        }
-
-        if (ch === '\n') {
-          row.push(field);
-          field = '';
-          rows.push(row);
-          row = [];
-          continue;
-        }
-
-        if (ch === '\r') {
-          // Ignore CR; LF handles end-of-line.
-          continue;
-        }
-
-        field += ch;
-      }
-
-      // Flush
-      row.push(field);
-      rows.push(row);
-
-      // Drop completely empty trailing row
-      while (rows.length > 0) {
-        const last = rows[rows.length - 1];
-        const isEmpty = last.every((c) => String(c ?? '').trim() === '');
-        if (!isEmpty) break;
-        rows.pop();
-      }
-
-      return rows;
-    }
-
-    function normalizeHeaderName(name) {
-      return String(name ?? '')
-        .replace(/\uFEFF/g, '')
-        .replace(/\u00A0/g, ' ')
-        .trim()
-        .toLowerCase();
-    }
-
-    function buildDataRowFromRecord(rec) {
-      const inVal = String(rec.in ?? '').trim();
-      const outVal = String(rec.out ?? '').trim();
-      const desc = String(rec.description ?? '').trim();
-
-      const approvedEuro = String(rec.approvedEuro ?? '').trim() || '0.00 €';
-      const receiptsEuro = String(rec.receiptsEuro ?? '').trim() || '0.00 €';
-      const expendituresEuro = String(rec.expendituresEuro ?? '').trim() || '0.00 €';
-      const balanceEuro = String(rec.balanceEuro ?? '').trim() || '0.00 €';
-
-      const receiptsUsd = String(rec.receiptsUsd ?? '').replace(/\u00A0/g, ' ').trim();
-      const expendituresUsd = String(rec.expendituresUsd ?? '').replace(/\u00A0/g, ' ').trim();
-
-      const tr = document.createElement('tr');
-      const receiptsOp = normalizeBudgetCalcToken(rec && (rec.calcReceiptsOp ?? rec.calcReceipts));
-      const expendituresOp = normalizeBudgetCalcToken(rec && (rec.calcExpendituresOp ?? rec.calcExpenditures));
-      if (receiptsOp === 'add' || receiptsOp === 'subtract') tr.dataset.calcReceipts = receiptsOp;
-      if (expendituresOp === 'add' || expendituresOp === 'subtract') tr.dataset.calcExpenditures = expendituresOp;
-      tr.innerHTML = `
-        <td class="num">${escapeHtml(inVal)}</td>
-        <td class="num">${escapeHtml(outVal)}</td>
-        <td>${escapeHtml(desc)}</td>
-        <td class="num budgetTable__euro">${escapeHtml(approvedEuro)}</td>
-        <td class="num budgetTable__euro">${escapeHtml(receiptsEuro)}</td>
-        <td class="num budgetTable__euro">${escapeHtml(expendituresEuro)}</td>
-        <td class="num budgetTable__bal">${escapeHtml(balanceEuro)}</td>
-        <td class="budgetTable__usdSign">$</td>
-        <td class="num budgetTable__usd">${escapeHtml(receiptsUsd || '-')}</td>
-        <td class="budgetTable__usdSign">$</td>
-        <td class="num budgetTable__usd">${escapeHtml(expendituresUsd || '-')}</td>
-      `.trim();
-      return tr;
-    }
-
-    function buildSpacerRow() {
-      const tr = document.createElement('tr');
-      tr.className = 'budgetTable__spacer';
-      tr.innerHTML = '<td colspan="11"></td>';
-      return tr;
-    }
-
-    function buildTotalRow(label) {
-      const tr = document.createElement('tr');
-      tr.className = 'budgetTable__total';
-      tr.innerHTML = `
-        <td></td>
-        <td></td>
-        <td><strong>${escapeHtml(label)}</strong></td>
-        <td class="num"><strong>-</strong></td>
-        <td class="num"><strong>-</strong></td>
-        <td class="num"><strong>-</strong></td>
-        <td class="num"><strong>-</strong></td>
-        <td class="budgetTable__usdSign"></td>
-        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
-        <td class="budgetTable__usdSign"></td>
-        <td class="num budgetTable__usd"><strong>$ 0.00</strong></td>
-      `.trim();
-      return tr;
-    }
-
-    function buildRemainingRow() {
-      const tr = document.createElement('tr');
-      tr.className = 'budgetTable__remaining';
-      tr.innerHTML = `
-        <td></td>
-        <td></td>
-        <td><strong>Remaining funds of balance</strong></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td class="num"><strong>-</strong></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
-      `.trim();
-      return tr;
-    }
-
-    function buildChecksumSection() {
-      return [
-        buildChecksumSpacerRow(),
-        buildChecksumRow('receipts'),
-        buildChecksumRow('expenditures'),
-      ];
-    }
-
-    // Small local helper for safe HTML insertion
-    function escapeHtml(str) {
-      return String(str ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
-
-    function importBudgetFromCsvText(csvText, fileName) {
-      if (isEditing) {
-        window.alert('Please click Save (exit Edit mode) before importing a CSV.');
-        return;
-      }
-
-      const ok = window.confirm(
-        `Importing a CSV will update currency values for matching rows and add any missing rows. Continue?\n\nFile: ${fileName || 'CSV'}`
-      );
-      if (!ok) return;
-
-      function normalizeKeyText(v) {
-        return String(v ?? '').replace(/\u00A0/g, ' ').trim();
-      }
-
-      function makeLineKey(inVal, outVal, desc) {
-        const a = normalizeKeyText(inVal);
-        const b = normalizeKeyText(outVal);
-        if (a || b) return `${a}::${b}`;
-        return `desc::${normalizeKeyText(desc).toLowerCase()}`;
-      }
-
-      function getRowSection(tr) {
-        const allRows = Array.from(tbody.querySelectorAll('tr'));
-        const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
-        const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
-        const rowIndex = allRows.indexOf(tr);
-        if (firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex) return 1;
-        return 2;
-      }
-
-      function isEffectivelyEmptyBudget() {
-        const rows = Array.from(tbody.querySelectorAll('tr')).filter((r) => isEditableDataRow(r));
-        if (rows.length === 0) return true;
-        for (const row of rows) {
-          const tds = row.querySelectorAll('td');
-          const approved = parseMoney(tds[3]?.textContent);
-          const receipts = parseMoney(tds[4]?.textContent);
-          const expenditures = parseMoney(tds[5]?.textContent);
-          const receiptsUsd = parseMoney(tds[8]?.textContent);
-          const expendituresUsd = parseMoney(tds[10]?.textContent);
-          if (approved !== 0 || receipts !== 0 || expenditures !== 0 || receiptsUsd !== 0 || expendituresUsd !== 0) return false;
-        }
-        return true;
-      }
-
-      const lockTemplateColumns = isEffectivelyEmptyBudget();
-
-      function findMatchingExistingRow(targetSection, rec) {
-        const targetKey = makeLineKey(rec.in, rec.out, rec.description);
-        if (!targetKey) return null;
-
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-        for (const row of rows) {
-          if (!isEditableDataRow(row)) continue;
-          if (getRowSection(row) !== targetSection) continue;
-          const tds = row.querySelectorAll('td');
-          const key = makeLineKey(tds[0]?.textContent, tds[1]?.textContent, tds[2]?.textContent);
-          if (key === targetKey) return row;
-        }
-        return null;
-      }
-
-      function patchRowFromRecord(row, rec) {
-        if (!row || !isEditableDataRow(row)) return;
-        const tds = row.querySelectorAll('td');
-        if (tds.length < 11) return;
-
-        const recIn = normalizeKeyText(rec.in);
-        const recOut = normalizeKeyText(rec.out);
-        const recDesc = normalizeKeyText(rec.description);
-
-        // Only update the template columns if the row is blank. For empty budgets,
-        // keep IN/OUT/Description as the template and only patch currency values.
-        if (!lockTemplateColumns) {
-          if (!normalizeKeyText(tds[0]?.textContent) && recIn) tds[0].textContent = recIn;
-          if (!normalizeKeyText(tds[1]?.textContent) && recOut) tds[1].textContent = recOut;
-          if (!normalizeKeyText(tds[2]?.textContent) && recDesc) tds[2].textContent = recDesc;
-        } else {
-          if (!normalizeKeyText(tds[2]?.textContent) && recDesc) tds[2].textContent = recDesc;
-        }
-
-        if (String(rec.approvedEuro ?? '').trim() !== '' && tds[3]) tds[3].textContent = rec.approvedEuro;
-
-        // Policy: receipts/expenditures are ledger-derived only.
-        if (tds[4]) tds[4].textContent = '0.00 €';
-        if (tds[5]) tds[5].textContent = '0.00 €';
-        if (tds[8]) tds[8].textContent = '-';
-        if (tds[10]) tds[10].textContent = '-';
-
-        if (rec.calcReceiptsOp === 'add' || rec.calcReceiptsOp === 'subtract') row.dataset.calcReceipts = rec.calcReceiptsOp;
-        if (rec.calcExpendituresOp === 'add' || rec.calcExpendituresOp === 'subtract') row.dataset.calcExpenditures = rec.calcExpendituresOp;
-      }
-
-      function insertRowFromRecord(targetSection, rec) {
-        const newRow = buildDataRowFromRecord({
-          ...rec,
-          receiptsEuro: '0.00 €',
-          expendituresEuro: '0.00 €',
-          balanceEuro: '0.00 €',
-          receiptsUsd: '-',
-          expendituresUsd: '-',
-        });
-        const totals = tbody.querySelectorAll('tr.budgetTable__total');
-        const firstTotal = totals.length >= 1 ? totals[0] : null;
-        const secondTotal = totals.length >= 2 ? totals[1] : null;
-
-        if (targetSection === 1 && firstTotal) {
-          firstTotal.insertAdjacentElement('beforebegin', newRow);
-        } else if (targetSection === 2 && secondTotal) {
-          secondTotal.insertAdjacentElement('beforebegin', newRow);
-        } else {
-          tbody.appendChild(newRow);
-        }
-
-        return newRow;
-      }
-
-      const rows = parseCsvText(csvText);
-      if (rows.length === 0) {
-        window.alert('CSV is empty.');
-        return;
-      }
-
-      const header = rows[0].map(normalizeHeaderName);
-      const dataRows = rows.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
-
-      const idx = {
-        section: header.indexOf('section'),
-        date: header.indexOf('date') !== -1 ? header.indexOf('date') : header.indexOf('transaction date'),
-        in: header.indexOf('in'),
-        out: header.indexOf('out'),
-        description: header.indexOf('description'),
-        approvedEuro: header.indexOf('amount approved euro'),
-        receiptsEuro: header.indexOf('receipts euro'),
-        expendituresEuro: header.indexOf('expenditures euro'),
-        balanceEuro: header.indexOf('balance euro'),
-        receiptsUsd: header.indexOf('receipts usd'),
-        expendituresUsd: header.indexOf('expenditures usd'),
-      };
-
-      // New template: three "Calculation" columns (operators) after each EUR amount column.
-      // Layout: Amount Approved Euro, Calculation, Receipts Euro, Calculation, Expenditures Euro, Calculation, Balance Euro
-      const calcIdx = {
-        receiptsOp: idx.approvedEuro !== -1 && header[idx.approvedEuro + 1] === 'calculation' ? idx.approvedEuro + 1 : -1,
-        expendituresOp: idx.receiptsEuro !== -1 && header[idx.receiptsEuro + 1] === 'calculation' ? idx.receiptsEuro + 1 : -1,
-        equals: idx.expendituresEuro !== -1 && header[idx.expendituresEuro + 1] === 'calculation' ? idx.expendituresEuro + 1 : -1,
-      };
-
-      const isCalcTemplate =
-        idx.section !== -1 &&
-        idx.in !== -1 &&
-        idx.out !== -1 &&
-        idx.description !== -1 &&
-        idx.approvedEuro !== -1 &&
-        idx.receiptsEuro !== -1 &&
-        idx.expendituresEuro !== -1 &&
-        idx.balanceEuro !== -1 &&
-        idx.receiptsUsd !== -1 &&
-        idx.expendituresUsd !== -1 &&
-        calcIdx.receiptsOp !== -1 &&
-        calcIdx.expendituresOp !== -1 &&
-        calcIdx.equals !== -1;
-
-      const hasAnyCalculationColumn = header.includes('calculation');
-      if (hasAnyCalculationColumn && !isCalcTemplate) {
-        window.alert(
-          'Import failed: CSV includes Calculation column(s) but is missing one or more required columns from the Budget template.'
-        );
-        return;
-      }
-
-      const hasSectionColumn = idx.section !== -1;
-      const hasTemplateHeaders = idx.in !== -1 && idx.out !== -1 && idx.description !== -1;
-
-      if (!hasTemplateHeaders && header.length >= 3) {
-        // Allow importing a file that has no headers by treating the first row as data.
-        dataRows.unshift(rows[0]);
-      }
-
-      function normalizeCsvDateForImport(raw) {
-        const s = String(raw ?? '').trim();
-        if (!s) return '';
-        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-        const mdy = s.match(/^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$/);
-        if (mdy) {
-          const mm = Number(mdy[1]);
-          const dd = Number(mdy[2]);
-          const yyyy = Number(mdy[3]);
-          if (!Number.isInteger(mm) || !Number.isInteger(dd) || !Number.isInteger(yyyy)) return '';
-          if (yyyy < 1000 || yyyy > 9999) return '';
-          if (mm < 1 || mm > 12) return '';
-          if (dd < 1 || dd > 31) return '';
-          const d = new Date(yyyy, mm - 1, dd);
-          if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return '';
-          return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-        }
-        const ms = Date.parse(s);
-        if (!Number.isFinite(ms)) return '';
-        const d = new Date(ms);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        return `${yyyy}-${mm}-${dd}`;
-      }
-
-      function inferHeaderlessColumnOffset(row) {
-        // If the first column looks like a date (e.g. M/D/YYYY) and the next columns look
-        // like IN/OUT codes, treat the file as having a leading Date column we can ignore.
-        const r = Array.isArray(row) ? row : [];
-        const firstIsDate = normalizeCsvDateForImport(r[0]) !== '';
-        const nextLooksLikeCodes = /^\d{4}$/.test(String(r[1] ?? '').trim()) && /^\d{4}$/.test(String(r[2] ?? '').trim());
-        return firstIsDate && nextLooksLikeCodes ? 1 : 0;
-      }
-
-      const section1 = [];
-      const section2 = [];
-      let inferredSection = 1; // 1 = anticipated, 2 = budget
-
-      function isTotalsOrRemaining(descText) {
-        const d = String(descText ?? '').toLowerCase();
-        if (!d) return false;
-        return d.includes('total anticipated values')
-          || d.includes('total budget')
-          || d.includes('remaining funds of balance')
-          || d.includes('receipts checksum')
-          || d.includes('expenditure checksum');
-      }
-
-      for (const r of dataRows) {
-        const get = (i) => (i >= 0 ? (r[i] ?? '') : '');
-
-        // Template-aware record reading
-        const rawSection = hasSectionColumn ? get(idx.section) : '';
-        const offset = (idx.in === -1 && idx.out === -1 && idx.description === -1) ? inferHeaderlessColumnOffset(r) : 0;
-        const inVal = idx.in !== -1 ? get(idx.in) : r[0 + offset] ?? '';
-        const outVal = idx.out !== -1 ? get(idx.out) : r[1 + offset] ?? '';
-        const desc = idx.description !== -1 ? get(idx.description) : r[2 + offset] ?? '';
-
-        // Support round-tripping from exported CSV (it includes the total/remaining rows)
-        if (String(desc ?? '').trim().toLowerCase().includes('total anticipated values')) {
-          inferredSection = 2;
-          continue;
-        }
-        if (isTotalsOrRemaining(desc)) continue;
-
-        const record = {
-          in: inVal,
-          out: outVal,
-          description: desc,
-          approvedEuro: idx.approvedEuro !== -1 ? get(idx.approvedEuro) : (r[3 + offset] ?? ''),
-          receiptsEuro: idx.receiptsEuro !== -1 ? get(idx.receiptsEuro) : (r[4 + offset] ?? ''),
-          expendituresEuro: idx.expendituresEuro !== -1 ? get(idx.expendituresEuro) : (r[5 + offset] ?? ''),
-          balanceEuro: idx.balanceEuro !== -1 ? get(idx.balanceEuro) : (r[6 + offset] ?? ''),
-          receiptsUsd: idx.receiptsUsd !== -1 ? get(idx.receiptsUsd) : (r[7 + offset] ?? ''),
-          expendituresUsd: idx.expendituresUsd !== -1 ? get(idx.expendituresUsd) : (r[8 + offset] ?? ''),
-        };
-
-        // New template behavior: require Calculation columns + required values and compute Balance Euro from them.
-        if (isCalcTemplate) {
-          const rawReceiptsOp = get(calcIdx.receiptsOp);
-          const rawExpendituresOp = get(calcIdx.expendituresOp);
-          const rawEquals = get(calcIdx.equals);
-
-          const receiptsOp = normalizeBudgetCalcToken(rawReceiptsOp);
-          const expendituresOp = normalizeBudgetCalcToken(rawExpendituresOp);
-          const eq = normalizeBudgetCalcToken(rawEquals);
-
-          const requiredValues = [
-            rawSection,
-            inVal,
-            outVal,
-            desc,
-            record.approvedEuro,
-            rawReceiptsOp,
-            record.receiptsEuro,
-            rawExpendituresOp,
-            record.expendituresEuro,
-            rawEquals,
-            record.balanceEuro,
-            record.receiptsUsd,
-            record.expendituresUsd,
-          ];
-
-          const missing = requiredValues.some((v) => String(v ?? '').trim() === '');
-          if (missing) {
-            window.alert(
-              `Import failed: missing required value (including Calculation columns) for a row.\n\nFile: ${fileName || 'CSV'}`
-            );
-            return;
-          }
-
-          if ((receiptsOp !== 'add' && receiptsOp !== 'subtract') || (expendituresOp !== 'add' && expendituresOp !== 'subtract') || eq !== 'equals') {
-            window.alert(
-              `Import failed: invalid Calculation value(s).\n` +
-              `Expected add (+) or subtract (-) for the first two Calculation columns, and equals (=) for the third.\n\n` +
-              `File: ${fileName || 'CSV'}`
-            );
-            return;
-          }
-
-          const approvedN = parseMoney(record.approvedEuro);
-          const receiptsN = parseMoney(record.receiptsEuro);
-          const expendituresN = parseMoney(record.expendituresEuro);
-          const computedBalance = computeBudgetBalance(approvedN, receiptsN, expendituresN, { receiptsOp, expendituresOp });
-
-          record.calcReceiptsOp = receiptsOp;
-          record.calcExpendituresOp = expendituresOp;
-          record.balanceEuro = formatEuro(computedBalance);
-        }
-
-        const sectionName = String(rawSection ?? '').trim().toLowerCase();
-        const targetSection = sectionName.startsWith('a') ? 1 : sectionName.startsWith('b') ? 2 : inferredSection;
-
-        if (targetSection === 1) section1.push(record);
-        else section2.push(record);
-      }
-
-      const imported = [
-        ...section1.map((rec) => ({ section: 1, rec })),
-        ...section2.map((rec) => ({ section: 2, rec })),
-      ];
-
-      for (const item of imported) {
-        const targetSection = item.section;
-        const rec = item.rec;
-
-        const match = findMatchingExistingRow(targetSection, rec);
-        if (match) patchRowFromRecord(match, rec);
-        else insertRowFromRecord(targetSection, rec);
-      }
-
-      // Normalize and persist using the same pipeline as manual edits.
-      ensureRemainingRowLayout();
-      ensureTotalRowsLayout();
-      ensureChecksumRowsLayout();
-      recalculateBudgetTotals();
-      normalizeEuroCells();
-      normalizeUsdCells();
-      applyNegativeNumberClasses();
-      saveEdits();
-
-      // Keep Receipts/Expenditures derived from the Ledger.
-      syncBudgetFromLedger(budgetYear);
-    }
-
-    editLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
-      if (isEditing) return;
-      editStartHtml = tbody.innerHTML;
-      setEditing(true);
-    });
-
-    saveBtn.addEventListener('click', () => {
-      if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
-      if (!isEditing) return;
-      saveEdits();
-
-      // Keep Receipts/Expenditures derived from the Ledger.
-      syncBudgetFromLedger(budgetYear);
-      setEditing(false);
-      editStartHtml = null;
-      void fireNotificationEvent('budget_update', {
-        year: String(budgetYear),
-        user: String(getTimelineUsername() || ''),
-        directLink: String(window.location.href || ''),
-      });
-    });
-
-    if (cancelBtn) {
-      cancelBtn.addEventListener('click', () => {
-        if (!isEditing) return;
-        // Restore the table to the state it was in when Edit was clicked.
-        setSelectedRow(null);
-        setEditing(false);
-        if (typeof editStartHtml === 'string') {
-          tbody.innerHTML = editStartHtml;
-          ensureRemainingRowLayout();
-          ensureTotalRowsLayout();
-          ensureChecksumRowsLayout();
-          normalizeEuroCells();
-          normalizeUsdCells();
-          recalculateBudgetTotals();
-          applyNegativeNumberClasses();
-        }
-        editStartHtml = null;
-      });
-    }
-
-    if (addLineLink) {
-      addLineLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (addLineLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
-        if (!isEditing) return;
-        addLine();
-      });
-    }
-    if (removeLineLink) {
-      removeLineLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (removeLineLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireBudgetEditAccess('Budget is read only for your account.')) return;
-        if (!isEditing) return;
-        removeLine();
-      });
-    }
-
-    if (exportCsvLink) {
-      exportCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        exportBudgetToCsv();
-      });
-    }
-    if (downloadTemplateLink) {
-      downloadTemplateLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        downloadBudgetCsvTemplate();
-      });
-    }
-
-    if (importCsvLink) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.csv,text/csv';
-      input.style.display = 'none';
-      document.body.appendChild(input);
-
-      importCsvLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (importCsvLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
-        if (isEditing) return;
-        input.value = '';
-        input.click();
-      });
-
-      input.addEventListener('change', () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          importBudgetFromCsvText(reader.result, file.name);
-        };
-        reader.onerror = () => {
-          window.alert('Could not read CSV file.');
-        };
-        reader.readAsText(file);
-      });
-    }
-
-    if (newYearLink) {
-      newYearLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (newYearLink.getAttribute('aria-disabled') === 'true') return;
-        if (!requireWriteAccess('budget', 'Budget is read only for your account.')) return;
-        if (isEditing) return;
-        const y = promptForBudgetYear(budgetYear + 1);
-        if (!y) return;
-        createOrOpenBudgetYear(y);
-      });
-    }
-
-    function deleteCurrentBudgetYear() {
-      if (!requireDeleteAccess('budget', 'Requires Delete access for Budget.')) return;
-      const activeYear = loadActiveBudgetYear();
-      if (activeYear !== null && Number(activeYear) === Number(budgetYear)) {
-        window.alert('Active Budget cannot be deleted. Deactivate it first, then delete.');
-        return;
-      }
-
-      const ok = window.confirm(
-        `Delete the ${budgetYear} budget year?\n\nThis permanently removes ALL data for ${budgetYear}: budget table, payment orders, ledger entries, money transfers, income records, backups, and the Archive link. This cannot be undone.`
-      );
-      if (!ok) return;
-
-      const y = Number(budgetYear);
-      const rm = (k) => { if (k) { try { localStorage.removeItem(k); } catch { /* ignore */ } } };
-
-      // Budget
-      rm(getBudgetTableKeyForYear(y));
-      rm(getBudgetMetaKeyForYear(y));
-      rm(`payment_order_budget_checksums_visible_${y}_v1`);
-
-      // Payment orders & reconciliation
-      rm(getPaymentOrdersKeyForYear(y));
-      rm(getPaymentOrdersReconciliationKeyForYear(y));
-
-      // Money transfers
-      rm(getMoneyTransfersKeyForYear(y));
-
-      // Ledger
-      rm(getIncomeKeyForYear(y));
-      rm(getWiseEurKeyForYear(y));
-      rm(getWiseUsdKeyForYear(y));
-      rm(getGsLedgerVerifiedKeyForYear(y));
-
-      // Backups: remove all backup data entries then the index and last-auto marker
-      try {
-        const index = loadBackupIndex(y);
-        for (const m of (Array.isArray(index) ? index : [])) {
-          if (m && m.id) rm(getBackupDataKeyForYearId(y, m.id));
-        }
-      } catch { /* ignore */ }
-      rm(getBackupIndexKeyForYear(y));
-      rm(getBackupLastAutoKeyForYear(y));
-
-      // Remove year from list (this also removes the Archive link)
-      const years = loadBudgetYears().filter((yr) => Number(yr) !== y);
-      saveBudgetYears(years);
-
-      // If this was the active budget year, clear the active setting.
-      if (loadActiveBudgetYear() === budgetYear) clearActiveBudgetYear();
-
-      appendAppAuditEvent(`Budget (${budgetYear})`, `Budget ${budgetYear}`, 'Deleted', [
-        { field: 'Year', from: String(budgetYear), to: '' },
-      ]);
-
-      // Exit edit mode and navigate away.
-      setSelectedRow(null);
-      setEditing(false);
-      editStartHtml = null;
-      closeMenu();
-
-      if (years.length > 0) {
-        const nextYear = years[0];
-        window.location.href = `budget.html?year=${encodeURIComponent(String(nextYear))}`;
-      } else {
-        window.location.href = withWpEmbedParams('archive.html');
-      }
-    }
-
-    if (deleteBudgetLink) {
-      deleteBudgetLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (deleteBudgetLink.getAttribute('aria-disabled') === 'true') return;
-        deleteCurrentBudgetYear();
-      });
-    }
-
-    if (menuBtn) {
-      const MENU_CLOSE_DELAY_MS = 250;
-      let menuCloseTimer = 0;
-
-      function cancelScheduledClose() {
-        if (!menuCloseTimer) return;
-        clearTimeout(menuCloseTimer);
-        menuCloseTimer = 0;
-      }
-
-      function scheduleClose() {
-        cancelScheduledClose();
-        if (!isMenuOpen()) return;
-        menuCloseTimer = window.setTimeout(() => {
-          closeMenu();
-          menuCloseTimer = 0;
-        }, MENU_CLOSE_DELAY_MS);
-      }
-
-      menuBtn.addEventListener('click', () => {
-        toggleMenu();
-      });
-
-      // Allow time to move from the gear icon to the menu panel.
-      menuBtn.addEventListener('mouseenter', cancelScheduledClose);
-      menuBtn.addEventListener('mouseleave', scheduleClose);
-
-      if (menuPanel) {
-        menuPanel.addEventListener('mouseenter', cancelScheduledClose);
-        menuPanel.addEventListener('mouseleave', scheduleClose);
-      }
-
-      document.addEventListener('click', (e) => {
-        if (!isMenuOpen()) return;
-        const menuRoot = e.target?.closest ? e.target.closest('[data-budget-menu]') : null;
-        if (menuRoot) return;
-        cancelScheduledClose();
-        closeMenu();
-      });
-
-      document.addEventListener('keydown', (e) => {
-        if (!isMenuOpen()) return;
-        if (e.key === 'Escape') {
-          cancelScheduledClose();
-          closeMenu();
-        }
-      });
-    }
-
-    // Select a row for removal while editing.
-    tbody.addEventListener('click', (e) => {
-      if (!isEditing) return;
-      const row = e.target?.closest ? e.target.closest('tr') : null;
-      if (!row || row.classList.contains('budgetTable__total') || row.classList.contains('budgetTable__remaining')) {
-        setSelectedRow(null);
-        return;
-      }
-      if (!isEditableDataRow(row)) {
-        setSelectedRow(null);
-        return;
-      }
-
-       // Track which section the user is interacting with so Add line
-       // defaults into the correct section even when nothing is selected.
-      const allRows = Array.from(tbody.querySelectorAll('tr'));
-      const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
-      if (totals.length >= 2) {
-        const firstTotalIndex = allRows.indexOf(totals[0]);
-        const secondTotalIndex = allRows.indexOf(totals[1]);
-        const rowIndex = allRows.indexOf(row);
-        if (rowIndex > firstTotalIndex && rowIndex < secondTotalIndex) lastClickedSection = 2;
-        else if (rowIndex >= 0 && rowIndex < firstTotalIndex) lastClickedSection = 1;
-      }
-
-      setSelectedRow(row);
-    });
-
-    // While editing, update negative formatting live.
-    let rafId = 0;
-    tbody.addEventListener('input', () => {
-      if (!isEditing) return;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        applyNegativeNumberClasses();
-        rafId = 0;
-      });
-    });
-
-    // On leaving a USD value cell, normalize to "$ " + value.
-    tbody.addEventListener('focusout', (e) => {
-      if (!isEditing) return;
-      const td = e.target?.closest ? e.target.closest('td') : null;
-      if (!td) return;
-      const isUsd = td.classList.contains('budgetTable__usd');
-      const isEuro = td.classList.contains('budgetTable__euro') || td.classList.contains('budgetTable__bal');
-      if (!isUsd && !isEuro) return;
-      normalizeEuroCells();
-      normalizeUsdCells();
-      applyNegativeNumberClasses();
-    });
-
-    setEditing(false);
-  }
-
-  function initBudgetDashboard() {
-    const root = document.querySelector('[data-budget-dashboard]');
-    if (!root) return;
-
-    const gridAnt = root.querySelector('[data-budget-dashboard-grid-anticipated]') || root.querySelector('[data-budget-dashboard-grid]');
-    const gridBud = root.querySelector('[data-budget-dashboard-grid-budget]');
-    const emptyAnt = root.querySelector('[data-budget-dashboard-empty-anticipated]') || root.querySelector('[data-budget-dashboard-empty]');
-    const emptyBud = root.querySelector('[data-budget-dashboard-empty-budget]');
-    if (!gridAnt) return;
-
-    const year = getActiveBudgetYear();
-
-    // Ensure dashboard reflects ledger-derived receipts/expenditures.
-    syncBudgetFromLedger(year);
-    const titleEl = document.querySelector('[data-budget-dashboard-title]');
-    if (titleEl) titleEl.textContent = `${year} Budget Dashboard`;
-    const subheadEl = document.querySelector('[data-budget-dashboard-subhead]');
-    if (subheadEl) {
-      subheadEl.classList.remove('subhead--withSeal');
-      subheadEl.textContent = `Charts for ${year}: Expenditures vs Balance (Euro).`;
-    }
-    applyAppTabTitle();
-
-    const backLink = document.getElementById('budgetDashboardBackLink');
-    if (backLink) {
-      backLink.href = `budget.html?year=${encodeURIComponent(String(year))}`;
-      backLink.textContent = `← Back to ${year} Budget`;
-      backLink.setAttribute('aria-label', `Back to ${year} Budget`);
-      backLink.removeAttribute('title');
-    }
-
-    initBudgetYearNav();
-
-    const searchInput = document.getElementById('budgetDashboardSearch');
-
-    const key = getBudgetTableKeyForYear(year);
-    const html = key ? localStorage.getItem(key) : null;
-    const tbody = document.createElement('tbody');
-    tbody.innerHTML = String(html || '');
-
-    function parseMoney(text) {
-      const raw = String(text ?? '').replace(/\u00A0/g, ' ').trim();
-      if (!raw || raw === '-' || raw === '—') return 0;
-      const isParenNeg = raw.includes('(') && raw.includes(')');
-      const cleaned = raw.replace(/[^0-9.,\-]/g, '').replace(/,/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n)) return 0;
-      return isParenNeg ? -Math.abs(n) : n;
-    }
-
-    function formatEuro(n) {
-      const num = Number(n);
-      const isNeg = num < 0;
-      const abs = Math.abs(num);
-      const fmt = new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(abs);
-      return `${isNeg ? '-' : ''}${fmt} €`;
-    }
-
-    function pct(value, total) {
-      if (!total || total <= 0) return 0;
-      return Math.round((value / total) * 100);
-    }
-
-    const leaderUpdaters = [];
-    let leaderRaf = 0;
-
-    function scheduleLeaderUpdate() {
-      if (leaderRaf) cancelAnimationFrame(leaderRaf);
-      leaderRaf = requestAnimationFrame(() => {
-        for (const fn of leaderUpdaters) fn();
-        leaderRaf = 0;
-      });
-    }
-
-    function createDonutSvg(valueA, valueB) {
-      const total = valueA + valueB;
-      const radius = 48;
-      const stroke = 20;
-      const cx = 60;
-      const cy = 60;
-      const c = 2 * Math.PI * radius;
-      const aLen = total > 0 ? (valueA / total) * c : 0;
-      const bLen = total > 0 ? (valueB / total) * c : 0;
-
-      const startAngle = -Math.PI / 2;
-      const aFrac = total > 0 ? valueA / total : 0;
-      const bFrac = total > 0 ? valueB / total : 0;
-      const midAngleA = startAngle + (aFrac * 2 * Math.PI) / 2;
-      const midAngleB = startAngle + aFrac * 2 * Math.PI + (bFrac * 2 * Math.PI) / 2;
-
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 120 120');
-      svg.classList.add('budgetDash__donut');
-
-      const track = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      track.setAttribute('cx', String(cx));
-      track.setAttribute('cy', String(cy));
-      track.setAttribute('r', String(radius));
-      track.setAttribute('fill', 'none');
-      track.setAttribute('stroke-width', String(stroke));
-      track.classList.add('budgetDash__donutTrack');
-      svg.appendChild(track);
-
-      const segA = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      segA.setAttribute('cx', String(cx));
-      segA.setAttribute('cy', String(cy));
-      segA.setAttribute('r', String(radius));
-      segA.setAttribute('fill', 'none');
-      segA.setAttribute('stroke-width', String(stroke));
-      segA.setAttribute('stroke-linecap', 'butt');
-      segA.setAttribute('stroke-dasharray', `${aLen} ${Math.max(0, c - aLen)}`);
-      segA.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
-      segA.classList.add('budgetDash__donutSegA');
-      svg.appendChild(segA);
-
-      const segB = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      segB.setAttribute('cx', String(cx));
-      segB.setAttribute('cy', String(cy));
-      segB.setAttribute('r', String(radius));
-      segB.setAttribute('fill', 'none');
-      segB.setAttribute('stroke-width', String(stroke));
-      segB.setAttribute('stroke-linecap', 'butt');
-      segB.setAttribute('stroke-dasharray', `${bLen} ${Math.max(0, c - bLen)}`);
-      segB.setAttribute('stroke-dashoffset', String(-aLen));
-      segB.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
-      segB.classList.add('budgetDash__donutSegB');
-      svg.appendChild(segB);
-
-      return {
-        svg,
-        total,
-        meta: {
-          cx,
-          cy,
-          radius,
-          stroke,
-          midAngleA,
-          midAngleB,
-        },
-      };
-    }
-
-    function attachLeaderLines(chartRowEl, donutSvgEl, balanceValueEl, expValueEl, meta, showBalanceLine, showExpLine) {
-      if (!chartRowEl || !donutSvgEl || !meta) return;
-      if (!balanceValueEl || !expValueEl) return;
-
-      const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      overlay.classList.add('budgetDash__leaders');
-      overlay.setAttribute('aria-hidden', 'true');
-
-      const lineLeft = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      lineLeft.classList.add('budgetDash__leaderLine');
-      const lineRight = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      lineRight.classList.add('budgetDash__leaderLine');
-
-      overlay.appendChild(lineLeft);
-      overlay.appendChild(lineRight);
-      chartRowEl.appendChild(overlay);
-
-      function pointOnArcToClient(angleRad) {
-        // Anchor leader lines to the middle of the donut ring (not the outer edge)
-        // so the line sits more centered within the chart space.
-        const r = meta.radius;
-        const x = meta.cx + r * Math.cos(angleRad);
-        const y = meta.cy + r * Math.sin(angleRad);
-        const rect = donutSvgEl.getBoundingClientRect();
-        return {
-          x: rect.left + (x / 120) * rect.width,
-          y: rect.top + (y / 120) * rect.height,
-        };
-      }
-
-      function centerOf(el) {
-        const r = el.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      }
-
-      function donutCenterClient() {
-        const rect = donutSvgEl.getBoundingClientRect();
-        return {
-          x: rect.left + (meta.cx / 120) * rect.width,
-          y: rect.top + (meta.cy / 120) * rect.height,
-        };
-      }
-
-      function endPointNearText(valueEl, donutCenter) {
-        const r = valueEl.getBoundingClientRect();
-        const gap = 6;
-        const y = r.top + r.height / 2;
-
-        // If the value is left of the donut, approach from the right side
-        // and stop just AFTER the text. If it's right of the donut, stop
-        // just BEFORE the text.
-        const isLeftOfDonut = (r.left + r.width / 2) < donutCenter.x;
-        const x = isLeftOfDonut ? (r.right + gap) : (r.left - gap);
-        return { x, y };
-      }
-
-      function update() {
-        const rowRect = chartRowEl.getBoundingClientRect();
-        const w = Math.max(1, rowRect.width);
-        const h = Math.max(1, rowRect.height);
-        overlay.setAttribute('viewBox', `0 0 ${w} ${h}`);
-        overlay.setAttribute('width', String(w));
-        overlay.setAttribute('height', String(h));
-
-        const dCenter = donutCenterClient();
-
-        // Balance metric -> segment A (only when value > 0)
-        const arcA = pointOnArcToClient(meta.midAngleA);
-        const balTarget = endPointNearText(balanceValueEl, dCenter);
-
-        // Expenditures metric -> segment B (only when value > 0)
-        const arcB = pointOnArcToClient(meta.midAngleB);
-        const expTarget = endPointNearText(expValueEl, dCenter);
-
-        const a0x = arcA.x - rowRect.left;
-        const a0y = arcA.y - rowRect.top;
-        const a1x = balTarget.x - rowRect.left;
-        const a1y = balTarget.y - rowRect.top;
-
-        const b0x = arcB.x - rowRect.left;
-        const b0y = arcB.y - rowRect.top;
-        const b1x = expTarget.x - rowRect.left;
-        const b1y = expTarget.y - rowRect.top;
-
-        // Two-segment leader: angled then horizontal.
-        const midAx = a0x + (a1x - a0x) * 0.6;
-        const midBx = b0x + (b1x - b0x) * 0.6;
-
-        if (showBalanceLine) {
-          lineLeft.style.display = '';
-          lineLeft.setAttribute('d', `M ${a0x} ${a0y} L ${midAx} ${a1y} L ${a1x} ${a1y}`);
-        } else {
-          lineLeft.style.display = 'none';
-          lineLeft.setAttribute('d', '');
-        }
-
-        if (showExpLine) {
-          lineRight.style.display = '';
-          lineRight.setAttribute('d', `M ${b0x} ${b0y} L ${midBx} ${b1y} L ${b1x} ${b1y}`);
-        } else {
-          lineRight.style.display = 'none';
-          lineRight.setAttribute('d', '');
-        }
-      }
-
-      leaderUpdaters.push(update);
-      update();
-    }
-
-    gridAnt.innerHTML = '';
-    if (gridBud) gridBud.innerHTML = '';
-
-    const allRows = Array.from(tbody.querySelectorAll('tr'));
-    const totals = allRows.filter((r) => r.classList.contains('budgetTable__total'));
-    const firstTotalIndex = totals.length >= 1 ? allRows.indexOf(totals[0]) : -1;
-    const secondTotalIndex = totals.length >= 2 ? allRows.indexOf(totals[1]) : -1;
-
-    /** @type {Array<{outCode:string, desc:string, approved:number, receipts:number, exp:number, bal:number, section:'anticipated'|'budget'}>} */
-    const items = [];
-    for (const tr of allRows) {
-      if (tr.classList.contains('budgetTable__spacer')) continue;
-      if (tr.classList.contains('budgetTable__total')) continue;
-      if (tr.classList.contains('budgetTable__remaining')) continue;
-      if (tr.classList.contains('budgetTable__checksum')) continue;
-
-      const tds = tr.querySelectorAll('td');
-      if (tds.length < 7) continue;
-
-      const outCode = String(tds[1].textContent || '').trim();
-      if (!/^\d{4}$/.test(outCode)) continue;
-
-      const desc = String(tds[2].textContent || '').trim();
-      const exp = parseMoney(tds[5].textContent);
-      const bal = parseMoney(tds[6].textContent);
-
-      const approved = parseMoney(tds[3].textContent);
-      const receipts = parseMoney(tds[4].textContent);
-
-      const rowIndex = allRows.indexOf(tr);
-      /** @type {'anticipated'|'budget'} */
-      let section = 'budget';
-      if (firstTotalIndex >= 0 && rowIndex >= 0 && rowIndex < firstTotalIndex) {
-        section = 'anticipated';
-      } else if (firstTotalIndex >= 0 && secondTotalIndex >= 0 && rowIndex > firstTotalIndex && rowIndex < secondTotalIndex) {
-        section = 'budget';
-      } else if (firstTotalIndex >= 0 && secondTotalIndex < 0 && rowIndex > firstTotalIndex) {
-        section = 'budget';
-      }
-
-      items.push({ outCode, desc, approved, receipts, exp, bal, section });
-    }
-
-    const anticipatedItems = items.filter((i) => i.section === 'anticipated');
-    const budgetItems = items.filter((i) => i.section === 'budget');
-
-    function renderAnticipatedTotalsSummary() {
-      const anticipatedSection = root.querySelector('section[aria-label="Anticipated Values"]');
-      if (!anticipatedSection) return;
-
-      let summaryEl = root.querySelector('[data-budget-dashboard-anticipated-summary]');
-      if (!summaryEl) {
-        summaryEl = document.createElement('section');
-        summaryEl.className = 'budgetDash__summary';
-        summaryEl.setAttribute('data-budget-dashboard-anticipated-summary', '1');
-        summaryEl.setAttribute('aria-label', 'Anticipated totals');
-        root.insertBefore(summaryEl, anticipatedSection);
-      }
-
-      const anticipatedApproved = anticipatedItems.reduce((sum, it) => sum + Math.abs(Number(it && it.approved) || 0), 0);
-      const anticipatedReceipts = anticipatedItems.reduce((sum, it) => sum + Math.abs(Number(it && it.receipts) || 0), 0);
-      const anticipatedExpenditures = anticipatedItems.reduce((sum, it) => sum + Math.max(0, Number(it && it.exp) || 0), 0);
-      const anticipatedBalance = anticipatedItems.reduce((sum, it) => sum + (Number(it && it.bal) || 0), 0);
-
-      const budgetApproved = budgetItems.reduce((sum, it) => sum + Math.abs(Number(it && it.approved) || 0), 0);
-      const budgetReceipts = budgetItems.reduce((sum, it) => sum + Math.abs(Number(it && it.receipts) || 0), 0);
-      const budgetExpenditures = budgetItems.reduce((sum, it) => sum + Math.max(0, Number(it && it.exp) || 0), 0);
-      const budgetBalance = budgetItems.reduce((sum, it) => sum + (Number(it && it.bal) || 0), 0);
-
-      const totalBudget = anticipatedApproved + budgetApproved;
-      const totalReceipts = anticipatedReceipts + budgetReceipts;
-      const totalExpenditures = anticipatedExpenditures + budgetExpenditures;
-      const totalBalance = anticipatedBalance + budgetBalance;
-      const totalRemaining = anticipatedBalance + budgetReceipts - budgetExpenditures;
-
-      const overspent = totalRemaining < 0;
-      const totalRemainingAbs = Math.abs(totalRemaining);
-      const balanceBase = Math.max(0, totalBalance);
-      const expendituresBase = Math.max(0, totalExpenditures);
-      const summaryDonutOverspent = totalBalance < totalExpenditures;
-      const summaryDonutDeficit = Math.abs(totalBalance - totalExpenditures);
-      const balanceLegendLabel = summaryDonutOverspent ? 'Overspent' : 'Total Balance';
-      const balanceLegendValue = summaryDonutOverspent ? summaryDonutDeficit : balanceBase;
-      const donutTotal = balanceLegendValue + expendituresBase;
-      const { svg } = createDonutSvg(balanceLegendValue, expendituresBase);
-      if (summaryDonutOverspent) svg.classList.add('budgetDash__donut--overspent');
-
-      const remainingFundsPctOfBalance = balanceBase > 0
-        ? Math.round((Math.max(0, totalRemaining) / balanceBase) * 100)
-        : 0;
-      const remainingFundsStateClass = remainingFundsPctOfBalance <= 10
-        ? 'budgetDash__summaryFill--remainingLow'
-        : (remainingFundsPctOfBalance <= 25 ? 'budgetDash__summaryFill--remainingWarn' : 'budgetDash__summaryFill--remainingGood');
-
-      const maxMetric = Math.max(totalBudget, totalReceipts, totalExpenditures, Math.abs(totalRemaining), 1);
-      const pctBudget = Math.round((totalBudget / maxMetric) * 100);
-      const pctReceipts = Math.round((totalReceipts / maxMetric) * 100);
-      const pctExpenditures = Math.round((totalExpenditures / maxMetric) * 100);
-      const pctRemaining = Math.round((Math.abs(totalRemaining) / maxMetric) * 100);
-      const remainingApprovedBudget = totalBudget - totalExpenditures;
-      const remainingApprovedPct = Math.round((Math.max(0, remainingApprovedBudget) / Math.max(totalBudget, 1)) * 100);
-      const remainingApprovedFillClass = remainingApprovedPct <= 10
-        ? 'budgetDash__summaryFill--remainingLow'
-        : (remainingApprovedPct <= 25 ? 'budgetDash__summaryFill--remainingWarn' : 'budgetDash__summaryFill--remainingGood');
-
-      summaryEl.innerHTML = `
-        <article class="budgetDash__summaryCard">
-          <h3 class="budgetDash__summaryTitle budgetCode" tabindex="0" data-tooltip="This graph compares Total Balance and Total Expenditures. Total Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Balance Euro). Remaining Funds of Balance is shown in the bar graph as Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Receipts Euro) - Total Budget, Receipts, Expenditures (Expenditures Euro).">Total Balance vs Total Expenditures</h3>
-          <div class="budgetDash__summaryDonut">
-            <div class="budgetDash__donutWrap">${svg.outerHTML}</div>
-            <div class="budgetDash__summaryLegend">
-              <span class="budgetDash__swatch budgetDash__swatch--a${summaryDonutOverspent ? ' budgetDash__swatch--overspent' : ''}" aria-hidden="true"></span>
-              <span class="budgetCode" tabindex="0" data-tooltip="${summaryDonutOverspent ? `Overspent = Total Expenditures (${formatEuro(expendituresBase)}) - Total Balance (${formatEuro(balanceBase)}). Current value: ${formatEuro(balanceLegendValue)}.` : `Total Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Balance Euro). Current value: ${formatEuro(balanceLegendValue)}.`}">${balanceLegendLabel} (${donutTotal > 0 ? pct(balanceLegendValue, donutTotal) : 0}%)</span>
-              <span class="budgetDash__swatch budgetDash__swatch--b" aria-hidden="true"></span>
-              <span class="budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro). Current value: ${formatEuro(expendituresBase)}.">Total Expenditures (${donutTotal > 0 ? pct(expendituresBase, donutTotal) : 0}%)</span>
-            </div>
-          </div>
-        </article>
-        <article class="budgetDash__summaryCard">
-          <h3 class="budgetDash__summaryTitle">Total Approved Budget</h3>
-          <div class="budgetDash__summaryBars">
-            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Approved Budget = Total Anticipated Values (Amount Approved Euro) + Total Budget, Receipts, Expenditures (Amount Approved Euro).">Total Approved Budget</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Approved Budget = Total Anticipated Values (Amount Approved Euro) + Total Budget, Receipts, Expenditures (Amount Approved Euro).">${escapeHtml(formatEuro(totalBudget))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--budget" style="width:${pctBudget}%;"></span></span></div>
-            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Remaining Approved Budget = Total Approved Budget - Total Expenditures.">Remaining Approved Budget</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Remaining Approved Budget = Total Approved Budget - Total Expenditures.">${escapeHtml(formatEuro(remainingApprovedBudget))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill ${remainingApprovedFillClass}" style="width:${remainingApprovedPct}%;"></span></span></div>
-            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Receipts = Total Anticipated Values (Receipts Euro) + Total Budget, Receipts, Expenditures (Receipts Euro).">Total Receipts</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Receipts = Total Anticipated Values (Receipts Euro) + Total Budget, Receipts, Expenditures (Receipts Euro).">${escapeHtml(formatEuro(totalReceipts))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--receipts" style="width:${pctReceipts}%;"></span></span></div>
-            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro).">Total Expenditures</span><span class="budgetDash__summaryValue budgetCode" tabindex="0" data-tooltip="Total Expenditures = Total Anticipated Values (Expenditures Euro) + Total Budget, Receipts, Expenditures (Expenditures Euro).">${escapeHtml(formatEuro(totalExpenditures))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill budgetDash__summaryFill--expenditures" style="width:${pctExpenditures}%;"></span></span></div>
-            <div class="budgetDash__summaryBarRow"><span class="budgetDash__summaryLabel budgetCode" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Receipts Euro) - Total Budget, Receipts, Expenditures (Expenditures Euro).">Remaining Funds of Balance</span><span class="budgetDash__summaryValue budgetCode${overspent ? ' is-negative' : ''}" tabindex="0" data-tooltip="Remaining Funds of Balance = Total Anticipated Values (Balance Euro) + Total Budget, Receipts, Expenditures (Receipts Euro) - Total Budget, Receipts, Expenditures (Expenditures Euro).">${escapeHtml(formatEuro(totalRemaining))}</span><span class="budgetDash__summaryTrack"><span class="budgetDash__summaryFill ${remainingFundsStateClass}" style="width:${remainingFundsPctOfBalance}%;"></span></span></div>
-          </div>
-        </article>
-      `.trim();
-    }
-
-    renderAnticipatedTotalsSummary();
-
-    const anticipatedCount = anticipatedItems.length;
-    const budgetCount = budgetItems.length;
-
-    if (emptyAnt) emptyAnt.hidden = anticipatedItems.length > 0;
-    if (emptyBud) emptyBud.hidden = budgetItems.length > 0;
-
-    function renderItem(item, targetGrid) {
-      const card = document.createElement('article');
-      card.className = 'budgetDash__card';
-      card.dataset.search = `${item.outCode} ${item.desc || ''}`.trim();
-
-      const h = document.createElement('h3');
-      h.className = 'budgetDash__title';
-      h.textContent = `${item.outCode} — ${item.desc || ''}`.trim();
-      card.appendChild(h);
-
-      const chartRow = document.createElement('div');
-      chartRow.className = 'budgetDash__chartRow';
-
-      const expVal = Math.max(0, Number(item.exp) || 0);
-      const rawBal = Number(item.bal) || 0;
-      const isOverspent = rawBal < 0;
-      const balVal = isOverspent ? Math.abs(rawBal) : Math.max(0, rawBal);
-      const labelA = isOverspent ? 'Overspent' : 'Balance';
-      const labelB = 'Expenditures';
-
-      if (isOverspent) card.classList.add('budgetDash__card--overspent');
-
-      const { svg, total, meta } = createDonutSvg(balVal, expVal);
-      if (isOverspent) svg.classList.add('budgetDash__donut--overspent');
-
-      function createMetricBlock(side, valueText, percentText, valueTooltip) {
-        const el = document.createElement('div');
-        el.className = `budgetDash__metric budgetDash__metric--${side}`;
-        const valEl = document.createElement('div');
-        valEl.className = 'budgetDash__metricVal budgetCode';
-        valEl.textContent = valueText;
-        if (valueTooltip) {
-          valEl.setAttribute('tabindex', '0');
-          valEl.setAttribute('data-tooltip', valueTooltip);
-        }
-        const pctEl = document.createElement('div');
-        pctEl.className = 'budgetDash__metricPct';
-        pctEl.textContent = percentText;
-        el.appendChild(valEl);
-        el.appendChild(pctEl);
-        return { el, valEl };
-      }
-
-      const balanceSide = Math.cos(meta.midAngleA) >= 0 ? 'right' : 'left';
-      const expSide = Math.cos(meta.midAngleB) >= 0 ? 'right' : 'left';
-
-      const leftCol = document.createElement('div');
-      leftCol.className = 'budgetDash__metricCol';
-      const rightCol = document.createElement('div');
-      rightCol.className = 'budgetDash__metricCol';
-
-      const receiptsVal = Number(item.receipts) || 0;
-      const balanceTooltip = isOverspent
-        ? `Overspent = Receipts Euro (${formatEuro(receiptsVal)}) - Expenditures Euro (${formatEuro(expVal)}). Displayed value: ${formatEuro(-balVal)}.`
-        : `Balance = Receipts Euro (${formatEuro(receiptsVal)}) - Expenditures Euro (${formatEuro(expVal)}). Displayed value: ${formatEuro(balVal)}.`;
-      const expendituresTooltip = `Expenditures = Expenditures Euro for this row. Displayed value: ${formatEuro(expVal)}.`;
-
-      const balBlock = createMetricBlock(balanceSide === 'left' ? 'left' : 'right', formatEuro(isOverspent ? -balVal : balVal), `${pct(balVal, total)}%`, balanceTooltip);
-      const expBlock = createMetricBlock(expSide === 'left' ? 'left' : 'right', formatEuro(expVal), `${pct(expVal, total)}%`, expendituresTooltip);
-      if (isOverspent) balBlock.valEl.classList.add('is-negative');
-
-      function sortKeyForAngle(angleRad) {
-        // Smaller y first (top). In screen coords, y = sin(angle).
-        return Math.sin(angleRad);
-      }
-
-      // Place each block on the same side as its segment.
-      if (balanceSide === 'left') leftCol.appendChild(balBlock.el);
-      else rightCol.appendChild(balBlock.el);
-
-      if (expSide === 'left') leftCol.appendChild(expBlock.el);
-      else rightCol.appendChild(expBlock.el);
-
-      // If both land on the same side, order them top-to-bottom
-      // to reduce leader-line crossings.
-      if (balanceSide === expSide) {
-        const col = balanceSide === 'left' ? leftCol : rightCol;
-        const children = Array.from(col.children);
-        const desired = [
-          { el: balBlock.el, key: sortKeyForAngle(meta.midAngleA) },
-          { el: expBlock.el, key: sortKeyForAngle(meta.midAngleB) },
-        ].sort((a, b) => a.key - b.key);
-        for (const child of children) col.removeChild(child);
-        for (const item2 of desired) col.appendChild(item2.el);
-      }
-
-      chartRow.appendChild(leftCol);
-      const donutWrap = document.createElement('div');
-      donutWrap.className = 'budgetDash__donutWrap';
-      donutWrap.appendChild(svg);
-      chartRow.appendChild(donutWrap);
-      chartRow.appendChild(rightCol);
-      card.appendChild(chartRow);
-
-      // Leader lines connect each value to its donut segment.
-      if (total > 0) {
-        // End lines near the value text without overlapping it.
-        const showBal = balVal > 0;
-        const showExp = expVal > 0;
-        attachLeaderLines(chartRow, svg, balBlock.valEl, expBlock.valEl, meta, showBal, showExp);
-      }
-
-      const legend = document.createElement('div');
-      legend.className = 'budgetDash__legend';
-      legend.innerHTML = `
-        <span class="budgetDash__swatch budgetDash__swatch--a${isOverspent ? ' budgetDash__swatch--overspent' : ''}" aria-hidden="true"></span>
-        <span>${labelA}</span>
-        <span class="budgetDash__swatch budgetDash__swatch--b" aria-hidden="true"></span>
-        <span>${labelB}</span>
-      `.trim();
-      card.appendChild(legend);
-
-      if (targetGrid) targetGrid.appendChild(card);
-    }
-
-    for (const item of anticipatedItems) {
-      renderItem(item, gridAnt);
-    }
-
-    // If the split markup is missing, render everything into the single grid.
-    const budgetTarget = gridBud || gridAnt;
-    for (const item of budgetItems) {
-      renderItem(item, budgetTarget);
-    }
-
-    window.addEventListener('resize', scheduleLeaderUpdate);
-    scheduleLeaderUpdate();
-
-    // When the left navigation opens/closes or nested sections expand/collapse,
-    // the available width for cards changes but the window size does not.
-    // Recompute leader lines on layout changes.
-    if (!root.dataset.leaderLinesBound) {
-      root.dataset.leaderLinesBound = '1';
-
-      if (typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(() => scheduleLeaderUpdate());
-        ro.observe(root);
-        const main = document.querySelector('.appMain');
-        if (main) ro.observe(main);
-      }
-
-      if (navToggleBtn) {
-        navToggleBtn.addEventListener('click', () => {
-          // Run once immediately, and once after any CSS transition.
-          scheduleLeaderUpdate();
-          requestAnimationFrame(scheduleLeaderUpdate);
-        });
-      }
-
-      const navTree = document.querySelector('[data-nav-tree]');
-      if (navTree) {
-        navTree.addEventListener('click', () => {
-          requestAnimationFrame(scheduleLeaderUpdate);
-        });
-      }
-
-      if (appShell) {
-        appShell.addEventListener('transitionend', () => {
-          scheduleLeaderUpdate();
-        });
-      }
-    }
-
-    function getVisibleCardCount(gridEl) {
-      if (!gridEl) return 0;
-      const cards = gridEl.querySelectorAll('.budgetDash__card');
-      let n = 0;
-      for (const c of cards) {
-        if (!c.hasAttribute('hidden')) n += 1;
-      }
-      return n;
-    }
-
-    function applyDashboardFilter() {
-      if (!searchInput) return;
-      const q = String(searchInput.value || '').trim().toLowerCase();
-
-      const cards = root.querySelectorAll('.budgetDash__card');
-      for (const card of cards) {
-        const hay = String(card.dataset.search || card.textContent || '').toLowerCase();
-        const match = !q || hay.includes(q);
-        card.hidden = !match;
-      }
-
-      // Empty-state behavior:
-      // - No search: show empty only when the section has no items.
-      // - With search: show empty when no visible items remain.
-      if (!q) {
-        if (emptyAnt) emptyAnt.hidden = anticipatedCount > 0;
-        if (emptyBud) emptyBud.hidden = budgetCount > 0;
-      } else {
-        if (emptyAnt) emptyAnt.hidden = getVisibleCardCount(gridAnt) > 0;
-        if (emptyBud && gridBud) emptyBud.hidden = getVisibleCardCount(gridBud) > 0;
-        if (emptyBud && !gridBud && emptyAnt) {
-          // Fallback single-grid markup.
-          emptyAnt.hidden = getVisibleCardCount(gridAnt) > 0;
-        }
-      }
-
-      scheduleLeaderUpdate();
-    }
-
-    if (searchInput) {
-      searchInput.addEventListener('input', applyDashboardFilter);
-      searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          searchInput.value = '';
-          applyDashboardFilter();
-        }
-      });
-    }
-  }
-
-  function initArchivePage() {
-    const root = document.querySelector('[data-archive]');
-    if (!root) return;
-
-    const grid = root.querySelector('[data-archive-grid]');
-    const emptyEl = root.querySelector('[data-archive-empty]');
-    if (!grid) return;
-
-    const currentUser = getCurrentUser();
-    const canManualDeleteFromArchive = currentUser
-      ? (getEffectivePermissions(currentUser).budget || 'none') === 'full'
-      : false;
-
-    const config = getNavConfig();
-    const isYearLabel = (label) => /^\d{4}$/.test(String(label || '').trim());
-    const actualYears = new Set(loadBudgetYears().map((y) => String(y)));
-    const activeBudgetYear = loadActiveBudgetYear();
-
-    const areas = (Array.isArray(config) ? config : []).filter((it) => {
-      const children = Array.isArray(it && it.children) ? it.children : [];
-      return children.some((c) => {
-        const label = String(c && c.label ? c.label : '').trim();
-        return isYearLabel(label) && actualYears.has(label);
-      });
-    });
-
-    grid.innerHTML = '';
-
-    for (const area of areas) {
-      const card = document.createElement('div');
-      card.className = 'archive__card';
-
-      const header = document.createElement('div');
-      header.className = 'archive__cardHeader';
-
-      const h = document.createElement('h2');
-      h.className = 'archive__title';
-      h.textContent = String(area && area.label ? area.label : '').trim() || 'Archive';
-      const yearsWrap = document.createElement('div');
-      yearsWrap.className = 'archive__years';
-
-      const yearChildren = (Array.isArray(area && area.children) ? area.children : []).filter((c) => {
-        const label = String(c && c.label ? c.label : '').trim();
-        return isYearLabel(label) && actualYears.has(label);
-      });
-      for (const child of yearChildren) {
-        const yearLabel = String(child && child.label ? child.label : '').trim();
-        const yearNum = Number(yearLabel);
-        const isActiveBudgetYear = activeBudgetYear !== null && Number(activeBudgetYear) === yearNum;
-        const yearItem = document.createElement('span');
-        yearItem.className = 'archive__yearItem';
-
-        const a = document.createElement('a');
-        a.className = 'actionLink';
-        a.href = String(child && child.href ? child.href : '#');
-        a.textContent = '';
-        a.appendChild(document.createTextNode(yearLabel));
-        if (isActiveBudgetYear) {
-          const badge = document.createElement('span');
-          badge.className = 'appNavTree__badge';
-          badge.textContent = ' (active)';
-          a.appendChild(badge);
-        }
-        yearItem.appendChild(a);
-
-        if (canManualDeleteFromArchive && Number.isInteger(yearNum) && !isActiveBudgetYear) {
-          const delBtn = document.createElement('button');
-          delBtn.type = 'button';
-          delBtn.className = 'archive__yearDelete';
-          delBtn.setAttribute('aria-label', `Delete budget year ${yearLabel}`);
-          delBtn.setAttribute('title', `Delete all data for budget year ${yearLabel}`);
-          delBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zM3.042 3.5h9.916l-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92zm3.458 1.5a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 1 0v-6a.5.5 0 0 0-.5-.5m3 0a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 1 0v-6a.5.5 0 0 0-.5-.5"/></svg>';
-
-          delBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const activeYear = loadActiveBudgetYear();
-            if (activeYear !== null && Number(activeYear) === yearNum) {
-              window.alert('Active Budget cannot be deleted. Deactivate it first, then delete.');
-              return;
-            }
-
-            const ok = window.confirm(
-              `Delete the ${yearLabel} budget year?\n\nThis permanently removes ALL data for ${yearLabel}: budget table, payment orders, ledger entries, money transfers, income records, backups, and this Archive link. This cannot be undone.`
-            );
-            if (!ok) return;
-
-            const rm = (k) => { if (k) { try { localStorage.removeItem(k); } catch { /* ignore */ } } };
-
-            // Budget
-            rm(getBudgetTableKeyForYear(yearNum));
-            rm(getBudgetMetaKeyForYear(yearNum));
-            rm(`payment_order_budget_checksums_visible_${yearNum}_v1`);
-
-            // Payment orders & reconciliation
-            rm(getPaymentOrdersKeyForYear(yearNum));
-            rm(getPaymentOrdersReconciliationKeyForYear(yearNum));
-
-            // Money transfers
-            rm(getMoneyTransfersKeyForYear(yearNum));
-
-            // Ledger
-            rm(getIncomeKeyForYear(yearNum));
-            rm(getWiseEurKeyForYear(yearNum));
-            rm(getWiseUsdKeyForYear(yearNum));
-            rm(getGsLedgerVerifiedKeyForYear(yearNum));
-
-            // Backups: remove all backup data entries then the index and last-auto marker
-            try {
-              const index = loadBackupIndex(yearNum);
-              for (const m of (Array.isArray(index) ? index : [])) {
-                if (m && m.id) rm(getBackupDataKeyForYearId(yearNum, m.id));
-              }
-            } catch { /* ignore */ }
-            rm(getBackupIndexKeyForYear(yearNum));
-            rm(getBackupLastAutoKeyForYear(yearNum));
-
-            // Remove year from list (this also removes the Archive link)
-            const years = loadBudgetYears().filter((yr) => Number(yr) !== yearNum);
-            saveBudgetYears(years);
-
-            // If this was the active budget year, clear the active setting.
-            if (loadActiveBudgetYear() === yearLabel || loadActiveBudgetYear() === yearNum) clearActiveBudgetYear();
-
-            appendAppAuditEvent(`Budget (${yearLabel})`, `Budget ${yearLabel}`, 'Deleted', [
-              { field: 'Year', from: yearLabel, to: '' },
-            ]);
-
-            initArchivePage();
-          });
-
-          yearItem.appendChild(delBtn);
-        }
-
-        yearsWrap.appendChild(yearItem);
-      }
-
-      header.appendChild(h);
-      card.appendChild(header);
-      card.appendChild(yearsWrap);
-      grid.appendChild(card);
-    }
-
-    if (emptyEl) emptyEl.hidden = areas.length > 0;
-  }
-
-  // ---- Backups (year-scoped snapshots) ----
-
-  const BACKUP_SCHEMA = 'acgl-fms-year-backup';
-  const BACKUP_VERSION = 1;
-  const BACKUP_MAX_PER_YEAR = 30;
-  const BACKUP_AUTO_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
-  function normalizeBackupYear(year) {
-    const y = Number(year);
-    if (!Number.isInteger(y)) return null;
-    if (y < 1900 || y > 3000) return null;
-    return y;
-  }
-
-  function getBackupIndexKeyForYear(year) {
-    const y = normalizeBackupYear(year);
-    if (!y) return null;
-    return `payment_order_backup_index_${y}_v1`;
-  }
-
-  function getBackupLastAutoKeyForYear(year) {
-    const y = normalizeBackupYear(year);
-    if (!y) return null;
-    return `payment_order_backup_last_auto_${y}_v1`;
-  }
-
-  function getBackupDataKeyForYearId(year, id) {
-    const y = normalizeBackupYear(year);
-    if (!y) return null;
-    const raw = String(id ?? '').trim();
-    if (!raw) return null;
-    const safe = raw.replace(/[^A-Za-z0-9_\-]/g, '').slice(0, 40);
-    if (!safe) return null;
-    return `payment_order_backup_${y}_${safe}_v1`;
-  }
-
-  function getBackupScopedKeysForYear(year) {
-    const y = normalizeBackupYear(year);
-    if (!y) return [];
-    const out = [];
-    const add = (k) => {
-      if (k) out.push(k);
-    };
-
-    add(getPaymentOrdersKeyForYear(y));
-    add(getPaymentOrdersReconciliationKeyForYear(y));
-    add(getIncomeKeyForYear(y));
-    add(getBudgetTableKeyForYear(y));
-    add(getWiseEurKeyForYear(y));
-    add(getWiseUsdKeyForYear(y));
-    add(getGsLedgerVerifiedKeyForYear(y));
-
-    return out;
-  }
-
-  function loadBackupIndex(year) {
-    const key = getBackupIndexKeyForYear(year);
-    if (!key) return [];
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function saveBackupIndex(year, index) {
-    const key = getBackupIndexKeyForYear(year);
-    if (!key) return;
-    localStorage.setItem(key, JSON.stringify(Array.isArray(index) ? index : []));
-  }
-
-  function makeBackupIdNow() {
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
-  }
-
-  function createYearBackup(year, kind) {
-    const y = normalizeBackupYear(year);
-    if (!y) return { ok: false, error: 'invalid_year' };
-
-    if (IS_WP_SHARED_MODE && !getWpToken()) {
-      return { ok: false, error: 'wp_login_required' };
-    }
-
-    // Backups are stored under payment_order_backup_* keys, which are treated as
-    // Settings-scoped in WordPress shared storage.
-    if (IS_WP_SHARED_MODE) {
-      const hasAnyUsers = loadUsers().length > 0;
-      const u = getCurrentUser();
-      if (hasAnyUsers && (!u || !canSettingsEdit(u))) {
-        return { ok: false, error: 'forbidden' };
-      }
-    }
-
-    const id = makeBackupIdNow();
-    const createdAt = new Date().toISOString();
-    const keys = getBackupScopedKeysForYear(y);
-    const values = {};
-    for (const k of keys) {
-      values[k] = localStorage.getItem(k);
-    }
-
-    const payload = {
-      schema: BACKUP_SCHEMA,
-      version: BACKUP_VERSION,
-      year: y,
-      id,
-      createdAt,
-      kind: kind === 'auto' ? 'auto' : 'manual',
-      keys: values,
-    };
-
-    const dataKey = getBackupDataKeyForYearId(y, id);
-    if (!dataKey) return { ok: false, error: 'invalid_id' };
-
-    const text = JSON.stringify(payload);
-    localStorage.setItem(dataKey, text);
-
-    const meta = {
-      id,
-      createdAt,
-      kind: payload.kind,
-      bytes: text.length,
-      keyCount: keys.length,
-    };
-
-    const index = loadBackupIndex(y);
-    const nextIndex = [meta, ...(Array.isArray(index) ? index : []).filter((m) => m && m.id !== id)].slice(0, BACKUP_MAX_PER_YEAR);
-    saveBackupIndex(y, nextIndex);
-
-    // Prune dropped backups.
-    try {
-      const keep = new Set(nextIndex.map((m) => (m && m.id ? String(m.id) : '')).filter(Boolean));
-      for (const m of Array.isArray(index) ? index : []) {
-        const mid = m && m.id ? String(m.id) : '';
-        if (!mid || keep.has(mid)) continue;
-        const dk = getBackupDataKeyForYearId(y, mid);
-        if (dk) localStorage.removeItem(dk);
-      }
-    } catch {
-      // ignore
-    }
-
-    return { ok: true, year: y, id, meta, payload };
-  }
-
-  function loadBackupPayloadFromStorage(year, id) {
-    const y = normalizeBackupYear(year);
-    if (!y) return null;
-    const dataKey = getBackupDataKeyForYearId(y, id);
-    if (!dataKey) return null;
-    try {
-      const raw = localStorage.getItem(dataKey);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function downloadBackupById(year, id) {
-    const payload = loadBackupPayloadFromStorage(year, id);
-    if (!payload) {
-      window.alert('Backup not found.');
-      return;
-    }
-    const y = normalizeBackupYear(payload.year);
-    const bid = String(payload.id || id || '');
-    const fileName = `acgl-fms-backup-${String(y || year)}-${bid}.json`;
-    const text = JSON.stringify(payload, null, 2);
-    const blob = new Blob([text], { type: 'application/json;charset=utf-8;' });
-    downloadBlob(blob, fileName);
-  }
-
-  function restoreYearBackupFromPayload(payloadRaw) {
-    const payload = payloadRaw && typeof payloadRaw === 'object' ? payloadRaw : null;
-    if (!payload) return { ok: false, error: 'invalid_payload' };
-    if (payload.schema !== BACKUP_SCHEMA) return { ok: false, error: 'invalid_schema' };
-    if (Number(payload.version) !== BACKUP_VERSION) return { ok: false, error: 'unsupported_version' };
-
-    if (IS_WP_SHARED_MODE && !getWpToken()) {
-      return { ok: false, error: 'wp_login_required' };
-    }
-
-    const bag = payload.keys && typeof payload.keys === 'object' ? payload.keys : {};
-
-    // Build the set of allowed keys: all-years backup has a `years` array;
-    // legacy per-year backup has a single `year` field.
-    const years = [];
-    if (Array.isArray(payload.years)) {
-      for (const v of payload.years) {
-        const y = normalizeBackupYear(v);
-        if (y) years.push(y);
-      }
-    } else {
-      const y = normalizeBackupYear(payload.year);
-      if (y) years.push(y);
-    }
-
-    if (years.length === 0) return { ok: false, error: 'invalid_year' };
-
-    const allowed = new Set();
-    for (const y of years) {
-      for (const k of getBackupScopedKeysForYear(y)) allowed.add(k);
-    }
-
-    for (const k of Object.keys(bag)) {
-      if (!allowed.has(k)) continue;
-      const v = bag[k];
-      if (v === null || v === undefined) {
-        localStorage.removeItem(k);
-      } else {
-        localStorage.setItem(k, String(v));
-      }
-    }
-
-    // Ensure all years are discoverable in the budget year list.
-    try {
-      const existing = loadBudgetYears();
-      const merged = Array.from(new Set([...years, ...existing]));
-      saveBudgetYears(merged);
-    } catch {
-      // ignore
-    }
-
-    return { ok: true, years };
-  }
-
-  function formatBackupCreatedAt(iso) {
-    const s = String(iso || '').trim();
-    if (!s) return 'Unknown date';
-    return s.replace('T', ' ').replace('Z', '');
-  }
-
-  function maybeAutoBackupActiveYear() {
-    const y = normalizeBackupYear(getActiveBudgetYear());
-    if (!y) return;
-
-    if (IS_WP_SHARED_MODE && !getWpToken()) return;
-    if (IS_WP_SHARED_MODE) {
-      const hasAnyUsers = loadUsers().length > 0;
-      const u = getCurrentUser();
-      if (hasAnyUsers && (!u || !canSettingsEdit(u))) return;
-    }
-
-    const lastKey = getBackupLastAutoKeyForYear(y);
-    if (!lastKey) return;
-    const now = Date.now();
-    try {
-      const last = Number(localStorage.getItem(lastKey) || '0');
-      if (Number.isFinite(last) && last > 0 && now - last < BACKUP_AUTO_INTERVAL_MS) return;
-    } catch {
-      // ignore
-    }
-
-    const keys = getBackupScopedKeysForYear(y);
-    const hasAny = keys.some((k) => localStorage.getItem(k) !== null);
-    if (!hasAny) return;
-
-    const res = createYearBackup(y, 'auto');
-    if (!res.ok) return;
-    try {
-      localStorage.setItem(lastKey, String(now));
-    } catch {
-      // ignore
-    }
-  }
-
-  function initBackupPage() {
+  
+  // [bundle-strip:transfers-remove-income-and-banking-pages] removed in page-specific build.
+function initBackupPage() {
     const root = document.querySelector('[data-backup]');
     if (!root) return;
 
@@ -21297,7 +14762,7 @@ function loadIncome(year) {
   if (typeof initRolesSettingsPage === 'function') initRolesSettingsPage();
   if (typeof initBackupPage === 'function') initBackupPage();
 
-  // [bundle-strip:banking-remove-request-form] removed in page-specific build.
+  // [bundle-strip:transfers-remove-request-form] removed in page-specific build.
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
@@ -21393,7 +14858,7 @@ function loadIncome(year) {
   await initSharedTableEnhancements();
 
   
-  // [bundle-strip:banking-remove-itemize] removed in page-specific build.
+  // [bundle-strip:transfers-remove-itemize] removed in page-specific build.
 
 })().catch((err) => {
   try {

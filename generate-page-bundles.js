@@ -13,10 +13,10 @@ const ROOT = __dirname;
 const SOURCE = path.join(ROOT, 'app.js');
 
 const OUT_REQUEST = path.join(ROOT, 'app-request.js');
-const OUT_WORKFLOWS = path.join(ROOT, 'app-workflows.js');
 const OUT_SETTINGS = path.join(ROOT, 'app-settings.js');
 const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
-const OUT_BANKING = path.join(ROOT, 'app-banking.js');
+const OUT_INCOME_LEDGER = path.join(ROOT, 'app-income-ledger.js');
+const OUT_WISE = path.join(ROOT, 'app-wise.js');
 const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
 const OUT_OPERATIONS = path.join(ROOT, 'app-operations.js');
 const OUT_BUDGET = path.join(ROOT, 'app-budget.js');
@@ -30,6 +30,9 @@ const M_ITEMIZE = '// ---- Itemize page logic ----';
 const M_MT_LIST = '// ---- Money Transfers list page ----';
 const M_INCOME_COL_TYPES = 'const INCOME_COL_TYPES = {';
 const M_LOAD_INCOME_FN = 'function loadIncome(year) {';
+const M_GS_LEDGER_INIT_FN = 'function initGsLedgerListPage() {';
+const M_INCOME_INIT_FN = 'function initIncomeListPage() {';
+const M_WISE_EUR_INIT_FN = 'function initWiseEurListPage() {';
 const M_BUDGET_EDITOR_FN = 'function initBudgetEditor() {';
 const M_ARCHIVE_FN = 'function initArchivePage() {';
 const M_CATCH = '\n})().catch((err) => {';
@@ -154,15 +157,6 @@ function buildRequestBundle(source) {
   return banner('request') + out;
 }
 
-function buildWorkflowBundle(source) {
-  let out = source;
-  out = removeBetween(out, M_SETTINGS, M_INCOME, 'workflows-remove-settings');
-  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'workflows-remove-request-form');
-  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'workflows-remove-itemize');
-  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'workflows-remove-money-transfers');
-  return banner('workflows') + out;
-}
-
 function buildSettingsBundle(source) {
   let out = source;
   out = removeBetween(out, M_PAYMENT_ORDERS, M_SETTINGS, 'settings-remove-payment-orders-and-reconciliation');
@@ -180,13 +174,26 @@ function buildItemizeBundle(source) {
   return banner('itemize') + out;
 }
 
-function buildBankingBundle(source) {
+function buildIncomeLedgerBundle(source) {
   let out = source;
-  out = removeBetween(out, M_SETTINGS, M_INCOME, 'banking-remove-settings');
-  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'banking-remove-request-form');
-  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'banking-remove-itemize');
-  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'banking-remove-money-transfers');
-  return banner('banking') + out;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'income-ledger-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'income-ledger-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'income-ledger-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'income-ledger-remove-money-transfers');
+  out = removeBetween(out, M_WISE_EUR_INIT_FN, M_BUDGET_EDITOR_FN, 'income-ledger-remove-wise-pages');
+  return banner('income-ledger') + out;
+}
+
+function buildWiseBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'wise-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'wise-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'wise-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'wise-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_INCOME_INIT_FN, 'wise-remove-ledger-page');
+  out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'wise-remove-income-page');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'wise-remove-budget-editor');
+  return banner('wise') + out;
 }
 
 function buildTransfersBundle(source) {
@@ -222,19 +229,19 @@ function main() {
   const source = fs.readFileSync(SOURCE, 'utf8');
 
   const request = buildRequestBundle(source);
-  const workflows = buildWorkflowBundle(source);
   const settings = buildSettingsBundle(source);
   const itemize = buildItemizeBundle(source);
-  const banking = buildBankingBundle(source);
+  const incomeLedger = buildIncomeLedgerBundle(source);
+  const wise = buildWiseBundle(source);
   const transfers = buildTransfersBundle(source);
   const operations = buildOperationsBundle(source);
   const budget = buildBudgetBundle(source);
 
   writeBundle(OUT_REQUEST, request);
-  writeBundle(OUT_WORKFLOWS, workflows);
   writeBundle(OUT_SETTINGS, settings);
   writeBundle(OUT_ITEMIZE, itemize);
-  writeBundle(OUT_BANKING, banking);
+  writeBundle(OUT_INCOME_LEDGER, incomeLedger);
+  writeBundle(OUT_WISE, wise);
   writeBundle(OUT_TRANSFERS, transfers);
   writeBundle(OUT_OPERATIONS, operations);
   writeBundle(OUT_BUDGET, budget);

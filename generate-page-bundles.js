@@ -185,6 +185,7 @@ function buildItemizeBundle(source) {
 
 function buildIncomeBundle(source) {
   let out = source;
+  out = removeBetween(out, M_RECON, M_SETTINGS, 'income-remove-reconciliation-page');
   out = removeBetween(out, M_SETTINGS, M_INCOME, 'income-remove-settings');
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'income-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'income-remove-itemize');
@@ -196,6 +197,7 @@ function buildIncomeBundle(source) {
 
 function buildGsLedgerBundle(source) {
   let out = source;
+  out = removeBetween(out, M_RECON, M_SETTINGS, 'gs-ledger-remove-reconciliation-page');
   out = removeBetween(out, M_SETTINGS, M_INCOME, 'gs-ledger-remove-settings');
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'gs-ledger-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'gs-ledger-remove-itemize');
@@ -258,6 +260,7 @@ function buildMenuBundle(source) {
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'menu-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'menu-remove-itemize');
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'menu-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'menu-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'menu-remove-budget-editor');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'menu-remove-archive-page');
   return banner('menu') + out;
@@ -270,6 +273,7 @@ function buildArchiveBundle(source) {
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'archive-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'archive-remove-itemize');
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'archive-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'archive-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'archive-remove-budget-editor');
   return banner('archive') + out;
 }
@@ -280,6 +284,7 @@ function buildReconciliationBundle(source) {
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'reconciliation-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'reconciliation-remove-itemize');
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'reconciliation-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_BUDGET_EDITOR_FN, 'reconciliation-remove-ledger-income-wise-pages');
   out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'reconciliation-remove-budget-editor');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'reconciliation-remove-archive-page');
   return banner('reconciliation') + out;

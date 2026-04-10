@@ -40,7 +40,6 @@ const FILES = [
   'table-enhancements.js',
   'pdf-lib.min.js',
   'datastore.js',
-  'app.js',
   'app-request.js',
   'app-settings.js',
   'app-itemize.js',

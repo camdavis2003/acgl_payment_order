@@ -55,7 +55,6 @@ function patchAssetUrlsInHtml(html, version) {
     'hoverPopup.js',
     'user-roles.js',
     'datastore.js',
-    'app.js',
     'app-request.js',
     'app-settings.js',
     'app-shell.js',

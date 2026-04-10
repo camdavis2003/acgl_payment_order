@@ -41,7 +41,7 @@ const FILES = [
   'pdf-lib.min.js',
   'datastore.js',
   'app-request.js',
-  'app-settings.js',
+  'app-admin-settings.js',
   'app-itemize.js',
   'app-menu.js',
   'app-archive.js',

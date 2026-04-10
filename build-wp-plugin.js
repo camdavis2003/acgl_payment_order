@@ -56,7 +56,7 @@ function patchAssetUrlsInHtml(html, version) {
     'user-roles.js',
     'datastore.js',
     'app-request.js',
-    'app-settings.js',
+    'app-admin-settings.js',
     'app-shell.js',
     'app-itemize.js',
     'app-money-transfers.js',

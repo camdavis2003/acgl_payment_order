@@ -1,4 +1,4 @@
-/* Generated from app.js by generate-page-bundles.js: settings. Do not edit manually. */
+/* Generated from app.js by generate-page-bundles.js: admin-settings. Do not edit manually. */
 /*
   Payment Order Request app (no backend)
   - Validates required fields

@@ -13,7 +13,7 @@ const ROOT = __dirname;
 const SOURCE = path.join(ROOT, 'app.js');
 
 const OUT_REQUEST = path.join(ROOT, 'app-request.js');
-const OUT_SETTINGS = path.join(ROOT, 'app-settings.js');
+const OUT_ADMIN_SETTINGS = path.join(ROOT, 'app-admin-settings.js');
 const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
 const OUT_INCOME = path.join(ROOT, 'app-income.js');
 const OUT_GS_LEDGER = path.join(ROOT, 'app-gs-ledger.js');
@@ -173,7 +173,7 @@ function buildSettingsBundle(source) {
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'settings-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'settings-remove-itemize');
   out = insertBeforeMarker(out, M_CATCH, INCOME_KEY_HELPER_FALLBACK, 'settings-insert-income-key-helper');
-  return banner('settings') + out;
+  return banner('admin-settings') + out;
 }
 
 function buildItemizeBundle(source) {
@@ -326,7 +326,7 @@ function main() {
   const budgetDashboard = buildBudgetDashboardBundle(source);
 
   writeBundle(OUT_REQUEST, request);
-  writeBundle(OUT_SETTINGS, settings);
+  writeBundle(OUT_ADMIN_SETTINGS, settings);
   writeBundle(OUT_ITEMIZE, itemize);
   writeBundle(OUT_INCOME, income);
   writeBundle(OUT_GS_LEDGER, gsLedger);

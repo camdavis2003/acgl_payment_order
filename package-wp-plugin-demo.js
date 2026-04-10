@@ -37,15 +37,6 @@ try {
 const ROOT = __dirname;
 const PLUGIN_DIR = path.join(ROOT, 'wp-plugin', 'acgl-fms');
 const DIST_DIR = path.join(ROOT, 'dist');
-const RELAX_DEMO_SETTINGS_CARD_VISIBILITY = String(process.env.DEMO_RELAX_SETTINGS_CARD_VISIBILITY || '').trim() === '1';
-// Demo UI branding is ON by default so browser tabs clearly indicate demo.
-// Set DEMO_BRAND_UI=0 to disable.
-const DEMO_BRAND_UI = String(process.env.DEMO_BRAND_UI || '1').trim() !== '0';
-const DEMO_LEGACY_DATA_MIGRATION = String(process.env.DEMO_LEGACY_DATA_MIGRATION || '1').trim() !== '0';
-// Data-key isolation is ON by default so demo and prod never share localStorage keys
-// when both plugins are active on the same WordPress site.
-// Set DEMO_ISOLATE_BROWSER_DATA_KEYS=0 to disable (not recommended for co-install).
-const DEMO_ISOLATE_BROWSER_DATA_KEYS = String(process.env.DEMO_ISOLATE_BROWSER_DATA_KEYS || '1').trim() !== '0';
 
 // Folder name *inside* the zip (i.e. wp-content/plugins/<this>/...).
 // Keep this distinct from production to avoid WP "replace existing" behavior.
@@ -103,6 +94,62 @@ function replaceAll(haystack, needle, replacement) {
   return String(haystack).split(String(needle)).join(String(replacement));
 }
 
+function namespaceDemoDataKeys(srcText) {
+  let out = String(srcText);
+
+  const exactKeyMap = [
+    ['payment_order_users_v1', 'payment_order_demo_users_v1'],
+    ['payment_order_backlog_v1', 'payment_order_demo_backlog_v1'],
+    ['payment_order_auth_audit_v1', 'payment_order_demo_auth_audit_v1'],
+    ['payment_order_numbering', 'payment_order_demo_numbering'],
+    ['payment_order_grand_lodge_info_v1', 'payment_order_demo_grand_lodge_info_v1'],
+    ['payment_order_budget_years_v1', 'payment_order_demo_budget_years_v1'],
+    ['payment_order_active_budget_year_v1', 'payment_order_demo_active_budget_year_v1'],
+    ['payment_order_notifications_settings_v1', 'payment_order_demo_notifications_settings_v1'],
+    ['payment_orders_legacy_migrated_v1', 'payment_orders_demo_legacy_migrated_v1'],
+    ['payment_order_budget_table_html_v1', 'payment_order_demo_budget_table_html_v1'],
+    ['payment_order_theme', 'payment_order_demo_theme'],
+    ['payment_order_draft', 'payment_order_demo_draft'],
+    ['payment_order_draft_items', 'payment_order_demo_draft_items'],
+    ['payment_order_edit_order_id', 'payment_order_demo_edit_order_id'],
+    ['payment_order_edit_order_year_v1', 'payment_order_demo_edit_order_year_v1'],
+    ['payment_order_budget_template_rows_v1', 'payment_order_demo_budget_template_rows_v1'],
+    ['payment_order_current_user_v1', 'payment_order_demo_current_user_v1'],
+    ['payment_order_login_at_v1', 'payment_order_demo_login_at_v1'],
+    ['payment_order_last_activity_at_v1', 'payment_order_demo_last_activity_at_v1'],
+    ['payment_order_app_audit_v1', 'payment_order_demo_app_audit_v1'],
+    ['payment_order_flash_token', 'payment_order_demo_flash_token'],
+    ['payment_order_attachments_db', 'payment_order_demo_attachments_db'],
+  ];
+
+  const prefixKeyMap = [
+    ['payment_orders_', 'payment_orders_demo_'],
+    ['payment_order_income_', 'payment_order_demo_income_'],
+    ['payment_order_wise_eur_', 'payment_order_demo_wise_eur_'],
+    ['payment_order_wise_usd_', 'payment_order_demo_wise_usd_'],
+    ['payment_order_budget_table_html_', 'payment_order_demo_budget_table_html_'],
+    ['payment_order_budget_meta_', 'payment_order_demo_budget_meta_'],
+    ['payment_order_gs_ledger_verified_', 'payment_order_demo_gs_ledger_verified_'],
+    ['payment_order_backup_', 'payment_order_demo_backup_'],
+    ['payment_order_wise_eur_idtrack_backfill_', 'payment_order_demo_wise_eur_idtrack_backfill_'],
+    ['payment_order_wise_eur_budget_backfill_', 'payment_order_demo_wise_eur_budget_backfill_'],
+    ['payment_order_wise_usd_idtrack_backfill_', 'payment_order_demo_wise_usd_idtrack_backfill_'],
+    ['payment_order_wise_usd_budget_backfill_', 'payment_order_demo_wise_usd_budget_backfill_'],
+    ['payment_order_wise_eur_seeded_', 'payment_order_demo_wise_eur_seeded_'],
+    ['payment_order_wise_usd_seeded_', 'payment_order_demo_wise_usd_seeded_'],
+    ['payment_order_budget_checksums_visible_', 'payment_order_demo_budget_checksums_visible_'],
+  ];
+
+  for (const [from, to] of exactKeyMap) {
+    out = replaceAll(out, from, to);
+  }
+  for (const [from, to] of prefixKeyMap) {
+    out = replaceAll(out, from, to);
+  }
+
+  return out;
+}
+
 function transformPhp(srcText) {
   let out = String(srcText);
 
@@ -113,28 +160,10 @@ function transformPhp(srcText) {
   // Namespacing / isolation.
   out = replaceAll(out, 'ACGL_FMS_', 'ACGL_FMS_DEMO_');
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
+  out = namespaceDemoDataKeys(out);
 
-  // When data-key isolation is on, the demo app uses payment_order_demo_* keys in
-  // localStorage and in WP REST calls.  The PHP key-to-module auth helper must strip
-  // that infix so it can resolve the correct permission module for each key.
-  // This replacement runs AFTER the acgl_fms_* rename so the function is already named
-  // acgl_fms_demo_key_to_module in the transformed source.
-  if (DEMO_ISOLATE_BROWSER_DATA_KEYS) {
-    out = out.replace(
-      /function acgl_fms_demo_key_to_module\(\$key\) \{(\r?\n)([ \t]+)\$k = \(string\) \$key;/,
-      (_, nl, indent) =>
-        `function acgl_fms_demo_key_to_module($key) {${nl}${indent}$k = (string) $key;${nl}` +
-        `${indent}// Strip demo data-key infix for canonical module lookup.${nl}` +
-        `${indent}$k = preg_replace('/^payment_order_demo_/', 'payment_order_', $k);${nl}` +
-        `${indent}$k = preg_replace('/^payment_orders_demo_/', 'payment_orders_', $k);${nl}` +
-        `${indent}$k = preg_replace('/^money_transfers_demo_/', 'money_transfers_', $k);`
-    );
-  }
-
-  // Optional UI branding so demo and prod can be visually distinguished.
-  if (DEMO_BRAND_UI) {
-    out = replaceAll(out, ' — FMS</title>', ' — FMS (DEMO)</title>');
-  }
+  // Make the full-page wrapper tab title clearly DEMO.
+  out = replaceAll(out, ' — FMS</title>', ' — FMS (DEMO)</title>');
 
   // Shortcode tag and other exact matches without trailing underscore.
   out = replaceAll(out, "'acgl_fms'", "'acgl_fms_demo'");
@@ -145,178 +174,28 @@ function transformPhp(srcText) {
   // and we don't accidentally turn it into "acgl-fms-demo-demo/v1".
   out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
 
-      // Demo activation: one-time snapshot copy from production KV table into demo KV
-      // for settings datasets used in testing.
-      out = out.replace(
-        /register_activation_hook\(__FILE__, function \(\) \{\r?\n\s*acgl_fms_demo_db_install\(\);/,
-      `register_activation_hook(__FILE__, function () {
-        acgl_fms_demo_db_install();
-
-      // DEMO one-time seed: copy selected settings data from production storage.
-      // This is activation-only and marker-gated (no recurring runtime sync).
-      try {
-        global $wpdb;
-        $demo_table = acgl_fms_demo_kv_table_name();
-        $prod_table = $wpdb->prefix . implode('_', ['acgl', 'fms', 'kv']);
-        $seed_marker_key = 'payment_order_demo_seed_marker_v1';
-        $seed_marker = acgl_fms_demo_kv_get_raw($seed_marker_key);
-
-        if (
-          (!is_string($seed_marker) || trim($seed_marker) === '') &&
-          is_string($prod_table) &&
-          $prod_table !== '' &&
-          $prod_table !== $demo_table
-        ) {
-          $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $prod_table));
-          if (is_string($exists) && $exists === $prod_table) {
-            // target_key = key stored in demo table (demo-prefixed, matches demo JS)
-            // source_key = key read from prod table (canonical name)
-            $seed_map = [
-              'payment_order_demo_users_v1'           => 'payment_order_users_v1',
-              'payment_order_demo_backlog_v1'          => 'payment_order_backlog_v1',
-              'payment_order_demo_grand_lodge_info_v1' => 'payment_order_grand_lodge_info_v1',
-            ];
-
-            foreach ($seed_map as $target_key => $source_key) {
-              $target_key = (string) $target_key;
-              $source_key = (string) $source_key;
-              if ($target_key === '' || $source_key === '') continue;
-
-              $current = acgl_fms_demo_kv_get_raw($target_key);
-              if (is_string($current) && trim($current) !== '') continue;
-
-              $source = $wpdb->get_var($wpdb->prepare("SELECT v FROM {$prod_table} WHERE k = %s", $source_key));
-              if (!is_string($source) || trim($source) === '') continue;
-
-              acgl_fms_demo_kv_set_raw($target_key, $source);
-            }
-
-            acgl_fms_demo_kv_set_raw($seed_marker_key, wp_json_encode([
-              'seeded_at' => time(),
-              'source' => 'activation',
-            ]));
-          }
-        }
-      } catch (Throwable $e) {
-        // ignore
-      }`
-      );
-
   return out;
 }
 
 function transformHtml(srcText) {
   let out = String(srcText);
-  // Optional UI branding so demo and prod can be visually distinguished.
-  if (DEMO_BRAND_UI) {
-    out = out.replace(/<title>\s*ACGL\s*-\s*FMS\s*<\/title>/i, '<title>ACGL - FMS (DEMO)</title>');
-  }
+  // Update the in-app tab title when the HTML is opened directly.
+  out = out.replace(/<title>\s*ACGL\s*-\s*FMS\s*<\/title>/i, '<title>ACGL - FMS (DEMO)</title>');
   return out;
 }
 
 function transformAppJs(srcText) {
   let out = String(srcText);
 
-  const legacyMigrationBootstrap = `
-/* DEMO one-time legacy key migration (prod remains untouched).
-   Copies old shared browser keys into demo-prefixed keys so existing demo/mock data survives isolation. */
-(() => {
-  try {
-    const MIGRATION_KEY = 'acgl_fms_legacy_keys_migrated_v1';
-    if (localStorage.getItem(MIGRATION_KEY) === '1') return;
+  // Make demo tab title obvious even after JS overrides document.title.
+  out = replaceAll(out, "const APP_TAB_TITLE = 'ACGL - FMS';", "const APP_TAB_TITLE = 'ACGL - FMS (DEMO)';");
 
-    const oldPoPrefix = ['payment', 'order', ''].join('_');
-    const oldPosPrefix = ['payment', 'orders', ''].join('_');
-    const oldMtPrefix = ['money', 'transfers', ''].join('_');
-    const demoPoPrefix = ['payment', 'order', 'demo', ''].join('_');
-    const demoPosPrefix = ['payment', 'orders', 'demo', ''].join('_');
-    const demoMtPrefix = ['money', 'transfers', 'demo', ''].join('_');
-    const prefixes = [oldPoPrefix, oldPosPrefix, oldMtPrefix];
-    const keys = [];
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      if (k.startsWith(demoPoPrefix) || k.startsWith(demoPosPrefix) || k.startsWith(demoMtPrefix)) continue;
-      if (prefixes.some((p) => k.startsWith(p))) keys.push(k);
-    }
-
-    for (const oldKey of keys) {
-      let newKey = oldKey;
-      if (oldKey.startsWith(oldPosPrefix)) {
-        newKey = demoPosPrefix + oldKey.slice(oldPosPrefix.length);
-      } else if (oldKey.startsWith(oldPoPrefix)) {
-        newKey = demoPoPrefix + oldKey.slice(oldPoPrefix.length);
-      } else if (oldKey.startsWith(oldMtPrefix)) {
-        newKey = demoMtPrefix + oldKey.slice(oldMtPrefix.length);
-      }
-
-      if (newKey === oldKey) continue;
-      if (localStorage.getItem(newKey) !== null) continue;
-
-      const value = localStorage.getItem(oldKey);
-      if (value !== null) localStorage.setItem(newKey, value);
-    }
-
-    localStorage.setItem(MIGRATION_KEY, '1');
-  } catch {
-    // ignore
-  }
-
-})();
-`;
-
-  if (DEMO_LEGACY_DATA_MIGRATION) {
-    out = `${legacyMigrationBootstrap}\n${out}`;
-  }
-
-  // Optional UI branding so demo and prod can be visually distinguished.
-  if (DEMO_BRAND_UI) {
-    out = replaceAll(out, "const APP_TAB_TITLE = 'ACGL - FMS';", "const APP_TAB_TITLE = 'ACGL - FMS (DEMO)';");
-  }
-
-  // Keep session/auth state separate between production and demo.
+  // Separate browser state between production and demo.
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
 
-  // Optional standalone-mode data-key isolation.
-  if (DEMO_ISOLATE_BROWSER_DATA_KEYS) {
-    out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
-    out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
-    out = replaceAll(out, 'money_transfers_', 'money_transfers_demo_');
-  }
-
-  // Point demo app at demo REST namespace.
-  out = replaceAll(out, 'acgl-fms/v1', 'acgl-fms-demo/v1');
-
-  if (RELAX_DEMO_SETTINGS_CARD_VISIBILITY) {
-    // Optional demo-only UX mode: keep major Admin Settings cards visible for
-    // users that can access the Settings page, even if legacy role rows miss
-    // newer child keys.
-    out = replaceAll(out, "roles: 'settings_roles',", "roles: 'settings',");
-    out = replaceAll(out, "backlog: 'settings_backlog',", "backlog: 'settings',");
-    out = replaceAll(out, "grandlodge: 'settings_grandlodge',", "grandlodge: 'settings',");
-    out = replaceAll(out, "backup: 'settings_backup',", "backup: 'settings',");
-  }
-
-  return out;
-}
-
-function transformAppShellJs(srcText) {
-  let out = String(srcText);
-
-  // Optional UI branding so demo and prod can be visually distinguished.
-  if (DEMO_BRAND_UI) {
-    out = replaceAll(out, "const APP_TAB_TITLE = 'ACGL - FMS';", "const APP_TAB_TITLE = 'ACGL - FMS (DEMO)';");
-  }
-
-  // Keep session/auth state separate between production and demo.
-  out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
-
-  // Optional standalone-mode data-key isolation.
-  if (DEMO_ISOLATE_BROWSER_DATA_KEYS) {
-    out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
-    out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
-    out = replaceAll(out, 'money_transfers_', 'money_transfers_demo_');
-  }
+  // Point demo app at demo slugs/routes/namespaces.
+  out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
+  out = namespaceDemoDataKeys(out);
 
   return out;
 }
@@ -324,16 +203,18 @@ function transformAppShellJs(srcText) {
 function transformDatastoreJs(srcText) {
   let out = String(srcText);
 
-  // Point demo store at demo REST namespace.
-  out = replaceAll(out, 'acgl-fms/v1', 'acgl-fms-demo/v1');
+  // Keep all JS identifiers/routes isolated from production.
+  out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
+  out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
+  out = namespaceDemoDataKeys(out);
 
-  // Optional standalone-mode data-key isolation.
-  if (DEMO_ISOLATE_BROWSER_DATA_KEYS) {
-    out = replaceAll(out, 'payment_order_', 'payment_order_demo_');
-    out = replaceAll(out, 'payment_orders_', 'payment_orders_demo_');
-    out = replaceAll(out, 'money_transfers_', 'money_transfers_demo_');
-  }
+  return out;
+}
 
+function transformMarkdown(srcText) {
+  let out = String(srcText);
+  out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
+  out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');
   return out;
 }
 
@@ -382,21 +263,9 @@ async function zipDemoPlugin() {
       continue;
     }
 
-    if (
-      entryRel === 'app/app.js'
-      || entryRel === 'app/app-request.js'
-      || entryRel === 'app/app-workflows.js'
-      || entryRel === 'app/app-settings.js'
-    ) {
+    if (entryRel === 'app/app.js') {
       const raw = fs.readFileSync(abs, 'utf8');
       const transformed = transformAppJs(raw);
-      archive.append(transformed, { name: entryName });
-      continue;
-    }
-
-    if (entryRel === 'app/app-shell.js') {
-      const raw = fs.readFileSync(abs, 'utf8');
-      const transformed = transformAppShellJs(raw);
       archive.append(transformed, { name: entryName });
       continue;
     }
@@ -404,6 +273,20 @@ async function zipDemoPlugin() {
     if (entryRel === 'app/datastore.js') {
       const raw = fs.readFileSync(abs, 'utf8');
       const transformed = transformDatastoreJs(raw);
+      archive.append(transformed, { name: entryName });
+      continue;
+    }
+
+    if (entryRel.startsWith('app/') && entryRel.endsWith('.js')) {
+      const raw = fs.readFileSync(abs, 'utf8');
+      const transformed = transformDatastoreJs(raw);
+      archive.append(transformed, { name: entryName });
+      continue;
+    }
+
+    if (entryRel.toLowerCase() === 'readme.md') {
+      const raw = fs.readFileSync(abs, 'utf8');
+      const transformed = transformMarkdown(raw);
       archive.append(transformed, { name: entryName });
       continue;
     }
@@ -421,10 +304,6 @@ async function zipDemoPlugin() {
   }
 
   // Build/copy the latest app assets into the plugin.
-  console.log(`Demo settings visibility mode: ${RELAX_DEMO_SETTINGS_CARD_VISIBILITY ? 'relaxed (demo-only)' : 'strict (prod parity)'}`);
-  console.log(`Demo UI branding: ${DEMO_BRAND_UI ? 'enabled' : 'disabled (prod parity)'}`);
-  console.log(`Demo legacy localStorage migration: ${DEMO_LEGACY_DATA_MIGRATION ? 'enabled' : 'disabled (prod parity)'}`);
-  console.log(`Demo browser data-key isolation: ${DEMO_ISOLATE_BROWSER_DATA_KEYS ? 'enabled' : 'disabled (prod parity)'}`);
   run(process.execPath, ['build-wp-plugin.js']);
 
   await zipDemoPlugin();

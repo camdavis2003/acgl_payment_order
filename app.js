@@ -4123,6 +4123,19 @@
     return { ok: true, changed: true };
   }
 
+  function syncBudgetFromLedgerSafe(year, sourceLabel) {
+    try {
+      return syncBudgetFromLedger(year);
+    } catch (err) {
+      console.error('[Budget Sync] Failed', {
+        source: sourceLabel || 'unknown',
+        year,
+        error: err,
+      });
+      return { ok: false, reason: 'exception' };
+    }
+  }
+
   function initMasonicYearSelectFromBudgets(preferredYear2) {
     if (!masonicYearInput) return;
     if (String(masonicYearInput.tagName || '').toUpperCase() !== 'SELECT') return;
@@ -4618,6 +4631,7 @@
   const openItemModalBtn = document.getElementById('openItemModalBtn');
   const addMilageBtn = document.getElementById('addMilageBtn');
   const itemizeContext = document.getElementById('itemizeContext');
+  const backToFormLink = document.getElementById('backToFormLink');
 
   // Attachments (itemize page)
   const attachmentsDropzone = document.getElementById('attachmentsDropzone');
@@ -13771,7 +13785,7 @@
     });
 
     // Budget updates are ledger-driven only.
-    syncBudgetFromLedger(resolvedYear);
+    syncBudgetFromLedgerSafe(resolvedYear, 'wiseEUR');
   }
 
   function upsertWiseEurEntry(entry, year) {
@@ -13861,7 +13875,7 @@
     });
 
     // Budget updates are ledger-driven only.
-    syncBudgetFromLedger(resolvedYear);
+    syncBudgetFromLedgerSafe(resolvedYear, 'wiseUSD');
   }
 
   function upsertWiseUsdEntry(entry, year) {
@@ -16183,7 +16197,7 @@
     localStorage.setItem(key, JSON.stringify(entries || []));
 
     // Budget updates are ledger-driven only.
-    syncBudgetFromLedger(resolvedYear);
+    syncBudgetFromLedgerSafe(resolvedYear, 'income');
   }
 
   function upsertIncomeEntry(entry, year) {
@@ -17360,107 +17374,112 @@
 
     if (incomeSaveBtn) {
       incomeSaveBtn.addEventListener('click', () => {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        if (!hasIncomeFullAccess && !currentIncomeId) {
-          window.alert('Requires Full access for Income to create a new income entry.');
-          return;
-        }
-        clearIncomeModalErrors();
-        const res = validateIncomeModalValues();
-        if (!res.ok) {
-          showIncomeModalErrors(res.errors);
-          return;
-        }
+        try {
+          if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+          if (!hasIncomeCreateAccess && !currentIncomeId) {
+            window.alert('Requires Full access for Income to create a new income entry.');
+            return;
+          }
+          clearIncomeModalErrors();
+          const res = validateIncomeModalValues();
+          if (!res.ok) {
+            showIncomeModalErrors(res.errors);
+            return;
+          }
 
-        const nowIso = new Date().toISOString();
-        const timelineUser = getTimelineUsername();
-        const id =
-          currentIncomeId ||
-          (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-        const existing = currentIncomeId ? loadIncome(year).find((x) => x && x.id === currentIncomeId) : null;
+          const nowIso = new Date().toISOString();
+          const timelineUser = getTimelineUsername();
+          const id =
+            currentIncomeId ||
+            (crypto?.randomUUID ? crypto.randomUUID() : `inc_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+          const existing = currentIncomeId ? loadIncome(year).find((x) => x && x.id === currentIncomeId) : null;
 
-        const entry = {
-          id,
-          createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
-          updatedAt: nowIso,
-          ...res.values,
-          idTrack: existing && existing.idTrack ? existing.idTrack : '',
-        };
+          const entry = {
+            id,
+            createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
+            updatedAt: nowIso,
+            ...res.values,
+            idTrack: existing && existing.idTrack ? existing.idTrack : '',
+          };
 
-        // Timeline
-        if (existing) {
-          entry.timeline = appendIncomeTimelineEvent(existing, {
-            at: nowIso,
-            user: timelineUser,
-            action: 'Edited',
-            changes: computeIncomeAuditChanges(existing, entry),
-          });
-        } else {
-          entry.timeline = [
-            {
+          // Timeline
+          if (existing) {
+            entry.timeline = appendIncomeTimelineEvent(existing, {
               at: nowIso,
               user: timelineUser,
-              action: 'Created',
-              changes: computeIncomeAuditChanges(null, entry),
-            },
-          ];
-        }
-
-        upsertIncomeEntry(entry, year);
-
-        if (!existing) {
-          void fireNotificationEvent('new_bank_eur', {
-            date: String(entry.date || ''),
-            description: String(entry.description || ''),
-            amount: String(entry.euro || ''),
-            year: String(year),
-            directLink: String(window.location.href || ''),
-          });
-        }
-
-        // Keep negative BankEUR entries in sync with Reconciliation.
-        // Negative amounts are expenditures: create/update a reconciliation order while still displaying the entry.
-        const euroNum = Number(entry.euro);
-        const sourceEntryId = `inc:${String(id)}`;
-        if (Number.isFinite(euroNum) && euroNum < 0) {
-          ensurePaymentOrdersReconciliationListExistsForYear(year);
-          const absEuro = Math.abs(euroNum);
-          const itemTitle = String(entry.description || '').trim() || 'Imported from BankEUR';
-          const po = {
-            id: (crypto?.randomUUID ? crypto.randomUUID() : `po_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            source: 'Commerzbank',
-            sourceEntryId,
-            paymentOrderNo: '',
-            date: String(entry.date || '').trim(),
-            name: String(entry.remitter || '').trim(),
-            euro: absEuro,
-            usd: null,
-            items: [
+              action: 'Edited',
+              changes: computeIncomeAuditChanges(existing, entry),
+            });
+          } else {
+            entry.timeline = [
               {
-                id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-                title: itemTitle,
-                euro: absEuro,
-                usd: null,
+                at: nowIso,
+                user: timelineUser,
+                action: 'Created',
+                changes: computeIncomeAuditChanges(null, entry),
               },
-            ],
-            address: '',
-            iban: '',
-            bic: '',
-            specialInstructions: '',
-            budgetNumber: String(entry.budgetNumber || '').trim(),
-            purpose: String(entry.description || '').trim(),
-            with: 'Grand Secretary',
-            status: 'Submitted',
-          };
-          upsertReconciliationOrderBySource(po, year);
-        } else {
-          removeReconciliationOrderBySource('Commerzbank', sourceEntryId, year);
-        }
+            ];
+          }
 
-        applyIncomeView();
-        closeIncomeModal();
+          upsertIncomeEntry(entry, year);
+
+          if (!existing) {
+            void fireNotificationEvent('new_bank_eur', {
+              date: String(entry.date || ''),
+              description: String(entry.description || ''),
+              amount: String(entry.euro || ''),
+              year: String(year),
+              directLink: String(window.location.href || ''),
+            });
+          }
+
+          // Keep negative BankEUR entries in sync with Reconciliation.
+          // Negative amounts are expenditures: create/update a reconciliation order while still displaying the entry.
+          const euroNum = Number(entry.euro);
+          const sourceEntryId = `inc:${String(id)}`;
+          if (Number.isFinite(euroNum) && euroNum < 0) {
+            ensurePaymentOrdersReconciliationListExistsForYear(year);
+            const absEuro = Math.abs(euroNum);
+            const itemTitle = String(entry.description || '').trim() || 'Imported from BankEUR';
+            const po = {
+              id: (crypto?.randomUUID ? crypto.randomUUID() : `po_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              source: 'Commerzbank',
+              sourceEntryId,
+              paymentOrderNo: '',
+              date: String(entry.date || '').trim(),
+              name: String(entry.remitter || '').trim(),
+              euro: absEuro,
+              usd: null,
+              items: [
+                {
+                  id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+                  title: itemTitle,
+                  euro: absEuro,
+                  usd: null,
+                },
+              ],
+              address: '',
+              iban: '',
+              bic: '',
+              specialInstructions: '',
+              budgetNumber: String(entry.budgetNumber || '').trim(),
+              purpose: String(entry.description || '').trim(),
+              with: 'Grand Secretary',
+              status: 'Submitted',
+            };
+            upsertReconciliationOrderBySource(po, year);
+          } else {
+            removeReconciliationOrderBySource('Commerzbank', sourceEntryId, year);
+          }
+
+          closeIncomeModal();
+          applyIncomeView();
+        } catch (err) {
+          console.error('[Income Save] Failed', err);
+          window.alert(`Unable to save Income entry. ${err && err.message ? err.message : 'Check console for details.'}`);
+        }
       });
     }
 
@@ -19302,55 +19321,60 @@
     if (wiseEurSaveBtn && !wiseEurSaveBtn.dataset.bound) {
       wiseEurSaveBtn.dataset.bound = '1';
       wiseEurSaveBtn.addEventListener('click', () => {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        if (!hasIncomeFullAccess && !currentWiseEurId) {
-          window.alert('Requires Full access for Income to create a new wiseEUR entry.');
-          return;
-        }
-        clearWiseEurModalErrors();
-        const res = validateWiseEurModalValues();
-        if (!res.ok) {
-          showWiseEurModalErrors(res.errors);
-          return;
-        }
-
-        const nowIso = new Date().toISOString();
-        const id =
-          currentWiseEurId ||
-          (crypto?.randomUUID ? crypto.randomUUID() : `we_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-        const existing = currentWiseEurId ? loadWiseEur(year).find((x) => x && x.id === currentWiseEurId) : null;
-
-        const entry = {
-          id,
-          createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
-          updatedAt: nowIso,
-          ...res.values,
-          idTrack: existing && existing.idTrack ? existing.idTrack : '',
-        };
-
-        const net = computeWiseEurNet(entry);
-        if (net < 0) {
-          const po = buildReconciliationOrderFromWiseEurEntry(entry, year);
-          if (po) {
-            ensurePaymentOrdersReconciliationListExistsForYear(year);
-            upsertReconciliationOrderBySource(po, year);
+        try {
+          if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+          if (!hasIncomeFullAccess && !currentWiseEurId) {
+            window.alert('Requires Full access for Income to create a new wiseEUR entry.');
+            return;
           }
-          if (existing) deleteWiseEurEntryById(entry.id, year);
-        } else {
-          removeReconciliationOrderBySource('wiseEUR', entry.id, year);
-          upsertWiseEurEntry(entry, year);
-          if (!existing) {
-            void fireNotificationEvent('new_wise_eur', {
-              date: String(entry.date || ''),
-              party: String(entry.receivedFromDisbursedTo || ''),
-              amount: String(entry.totalAmountInEuro || entry.euroAmount || ''),
-              year: String(year),
-              directLink: String(window.location.href || ''),
-            });
+          clearWiseEurModalErrors();
+          const res = validateWiseEurModalValues();
+          if (!res.ok) {
+            showWiseEurModalErrors(res.errors);
+            return;
           }
+
+          const nowIso = new Date().toISOString();
+          const id =
+            currentWiseEurId ||
+            (crypto?.randomUUID ? crypto.randomUUID() : `we_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+          const existing = currentWiseEurId ? loadWiseEur(year).find((x) => x && x.id === currentWiseEurId) : null;
+
+          const entry = {
+            id,
+            createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
+            updatedAt: nowIso,
+            ...res.values,
+            idTrack: existing && existing.idTrack ? existing.idTrack : '',
+          };
+
+          const net = computeWiseEurNet(entry);
+          if (net < 0) {
+            const po = buildReconciliationOrderFromWiseEurEntry(entry, year);
+            if (po) {
+              ensurePaymentOrdersReconciliationListExistsForYear(year);
+              upsertReconciliationOrderBySource(po, year);
+            }
+            if (existing) deleteWiseEurEntryById(entry.id, year);
+          } else {
+            removeReconciliationOrderBySource('wiseEUR', entry.id, year);
+            upsertWiseEurEntry(entry, year);
+            if (!existing) {
+              void fireNotificationEvent('new_wise_eur', {
+                date: String(entry.date || ''),
+                party: String(entry.receivedFromDisbursedTo || ''),
+                amount: String(entry.totalAmountInEuro || entry.euroAmount || ''),
+                year: String(year),
+                directLink: String(window.location.href || ''),
+              });
+            }
+          }
+          closeWiseEurModal();
+          applyWiseEurView();
+        } catch (err) {
+          console.error('[WiseEUR Save] Failed', err);
+          window.alert(`Unable to save wiseEUR entry. ${err && err.message ? err.message : 'Check console for details.'}`);
         }
-        applyWiseEurView();
-        closeWiseEurModal();
       });
     }
 
@@ -21001,54 +21025,59 @@
     if (wiseUsdSaveBtn && !wiseUsdSaveBtn.dataset.bound) {
       wiseUsdSaveBtn.dataset.bound = '1';
       wiseUsdSaveBtn.addEventListener('click', () => {
-        if (!requireIncomeEditAccess('Income is read only for your account.')) return;
-        if (!hasIncomeFullAccess && !currentWiseUsdId) {
-          window.alert('Requires Full access for Income to create a new wiseUSD entry.');
-          return;
-        }
-        clearWiseUsdModalErrors();
-        const res = validateWiseUsdModalValues();
-        if (!res.ok) {
-          showWiseUsdModalErrors(res.errors);
-          return;
-        }
-
-        const nowIso = new Date().toISOString();
-        const id =
-          currentWiseUsdId ||
-          (crypto?.randomUUID ? crypto.randomUUID() : `wu_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-        const existing = currentWiseUsdId ? loadWiseUsd(year).find((x) => x && x.id === currentWiseUsdId) : null;
-
-        const entry = {
-          id,
-          createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
-          updatedAt: nowIso,
-          ...res.values,
-        };
-
-        const net = computeWiseUsdNet(entry);
-        if (net < 0) {
-          const po = buildReconciliationOrderFromWiseUsdEntry(entry, year);
-          if (po) {
-            ensurePaymentOrdersReconciliationListExistsForYear(year);
-            upsertReconciliationOrderBySource(po, year);
+        try {
+          if (!requireIncomeEditAccess('Income is read only for your account.')) return;
+          if (!hasIncomeFullAccess && !currentWiseUsdId) {
+            window.alert('Requires Full access for Income to create a new wiseUSD entry.');
+            return;
           }
-          if (existing) deleteWiseUsdEntryById(entry.id, year);
-        } else {
-          removeReconciliationOrderBySource('wiseUSD', entry.id, year);
-          upsertWiseUsdEntry(entry, year);
-          if (!existing) {
-            void fireNotificationEvent('new_wise_usd', {
-              date: String(entry.date || ''),
-              party: String(entry.receivedFromDisbursedTo || ''),
-              amount: String(entry.totalAmountInUsd || entry.usdAmount || ''),
-              year: String(year),
-              directLink: String(window.location.href || ''),
-            });
+          clearWiseUsdModalErrors();
+          const res = validateWiseUsdModalValues();
+          if (!res.ok) {
+            showWiseUsdModalErrors(res.errors);
+            return;
           }
+
+          const nowIso = new Date().toISOString();
+          const id =
+            currentWiseUsdId ||
+            (crypto?.randomUUID ? crypto.randomUUID() : `wu_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+          const existing = currentWiseUsdId ? loadWiseUsd(year).find((x) => x && x.id === currentWiseUsdId) : null;
+
+          const entry = {
+            id,
+            createdAt: existing && existing.createdAt ? existing.createdAt : nowIso,
+            updatedAt: nowIso,
+            ...res.values,
+          };
+
+          const net = computeWiseUsdNet(entry);
+          if (net < 0) {
+            const po = buildReconciliationOrderFromWiseUsdEntry(entry, year);
+            if (po) {
+              ensurePaymentOrdersReconciliationListExistsForYear(year);
+              upsertReconciliationOrderBySource(po, year);
+            }
+            if (existing) deleteWiseUsdEntryById(entry.id, year);
+          } else {
+            removeReconciliationOrderBySource('wiseUSD', entry.id, year);
+            upsertWiseUsdEntry(entry, year);
+            if (!existing) {
+              void fireNotificationEvent('new_wise_usd', {
+                date: String(entry.date || ''),
+                party: String(entry.receivedFromDisbursedTo || ''),
+                amount: String(entry.totalAmountInUsd || entry.usdAmount || ''),
+                year: String(year),
+                directLink: String(window.location.href || ''),
+              });
+            }
+          }
+          closeWiseUsdModal();
+          applyWiseUsdView();
+        } catch (err) {
+          console.error('[WiseUSD Save] Failed', err);
+          window.alert(`Unable to save wiseUSD entry. ${err && err.message ? err.message : 'Check console for details.'}`);
         }
-        applyWiseUsdView();
-        closeWiseUsdModal();
       });
     }
 
@@ -26307,6 +26336,8 @@
 
           // Fire notification events for status/with transitions.
           {
+            const nextWith = getOrderWithLabel(updated);
+            const nextStatus = normalizeOrderStatus(getOrderStatusLabel(updated));
             const baseVars = {
               paymentOrderNo: String(updated.paymentOrderNo || ''),
               year: String(year),
@@ -27073,6 +27104,30 @@
     const canViewExistingOrderItems = Boolean(currentUser && canOrdersItemizeRead(currentUser));
     const isExistingOrderView = Boolean(!target.isDraft && target.orderId);
     const itemizeReadOnly = Boolean(isExistingOrderView && !canEditExistingOrderItems);
+
+    if (backToFormLink) {
+      const year = getActiveBudgetYear();
+      if (target.isDraft) {
+        const href = `index.html?resumeDraft=1&year=${encodeURIComponent(String(year))}`;
+        backToFormLink.href = href;
+      } else if (target.orderId) {
+        const orderId = String(target.orderId || '').trim();
+        const href = `index.html?year=${encodeURIComponent(String(year))}`;
+        backToFormLink.href = href;
+        backToFormLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (orderId) {
+            const order = getOrderById(orderId, year);
+            if (order) {
+              beginEditingOrder(order);
+            } else {
+              setEditOrderId(orderId);
+            }
+          }
+          window.location.href = href;
+        });
+      }
+    }
 
     if (target.isDraft) {
       const draft = loadDraft();

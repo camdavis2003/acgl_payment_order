@@ -16,6 +16,7 @@ const OUT_REQUEST = path.join(ROOT, 'app-request.js');
 const OUT_WORKFLOWS = path.join(ROOT, 'app-workflows.js');
 const OUT_SETTINGS = path.join(ROOT, 'app-settings.js');
 const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
+const OUT_BANKING = path.join(ROOT, 'app-banking.js');
 
 const M_RECON = '// ---- Payment Orders Reconciliation (year-scoped) ----';
 const M_SETTINGS = '// ---- Roles / Users (settings page) ----';
@@ -23,6 +24,8 @@ const M_INCOME = '// ---- Income (year-scoped) ----';
 const M_PAYMENT_ORDERS = 'const PAYMENT_ORDERS_COL_TYPES = {';
 const M_BACKUP_FN = 'function initBackupPage() {';
 const M_ITEMIZE = '// ---- Itemize page logic ----';
+const M_MT_LIST = '// ---- Money Transfers list page ----';
+const M_INCOME_COL_TYPES = 'const INCOME_COL_TYPES = {';
 const M_CATCH = '\n})().catch((err) => {';
 const M_REQUEST_BLOCK = '\n  if (form) {';
 const M_KEYDOWN = "\n  document.addEventListener('keydown', (e) => {";
@@ -170,6 +173,15 @@ function buildItemizeBundle(source) {
   return banner('itemize') + out;
 }
 
+function buildBankingBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'banking-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'banking-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'banking-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_INCOME_COL_TYPES, 'banking-remove-money-transfers');
+  return banner('banking') + out;
+}
+
 function main() {
   const source = fs.readFileSync(SOURCE, 'utf8');
 
@@ -177,11 +189,13 @@ function main() {
   const workflows = buildWorkflowBundle(source);
   const settings = buildSettingsBundle(source);
   const itemize = buildItemizeBundle(source);
+  const banking = buildBankingBundle(source);
 
   writeBundle(OUT_REQUEST, request);
   writeBundle(OUT_WORKFLOWS, workflows);
   writeBundle(OUT_SETTINGS, settings);
   writeBundle(OUT_ITEMIZE, itemize);
+  writeBundle(OUT_BANKING, banking);
 
   console.log('Page bundles generated successfully.');
 }

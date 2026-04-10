@@ -15,7 +15,8 @@ const SOURCE = path.join(ROOT, 'app.js');
 const OUT_REQUEST = path.join(ROOT, 'app-request.js');
 const OUT_SETTINGS = path.join(ROOT, 'app-settings.js');
 const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
-const OUT_INCOME_LEDGER = path.join(ROOT, 'app-income-ledger.js');
+const OUT_INCOME = path.join(ROOT, 'app-income.js');
+const OUT_GS_LEDGER = path.join(ROOT, 'app-gs-ledger.js');
 const OUT_WISE = path.join(ROOT, 'app-wise.js');
 const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
 const OUT_MENU = path.join(ROOT, 'app-menu.js');
@@ -178,14 +179,26 @@ function buildItemizeBundle(source) {
   return banner('itemize') + out;
 }
 
-function buildIncomeLedgerBundle(source) {
+function buildIncomeBundle(source) {
   let out = source;
-  out = removeBetween(out, M_SETTINGS, M_INCOME, 'income-ledger-remove-settings');
-  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'income-ledger-remove-request-form');
-  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'income-ledger-remove-itemize');
-  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'income-ledger-remove-money-transfers');
-  out = removeBetween(out, M_WISE_EUR_INIT_FN, M_BUDGET_EDITOR_FN, 'income-ledger-remove-wise-pages');
-  return banner('income-ledger') + out;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'income-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'income-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'income-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'income-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_INCOME_INIT_FN, 'income-remove-gs-ledger-page');
+  out = removeBetween(out, M_WISE_EUR_INIT_FN, M_BUDGET_EDITOR_FN, 'income-remove-wise-pages');
+  return banner('income') + out;
+}
+
+function buildGsLedgerBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'gs-ledger-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'gs-ledger-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'gs-ledger-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'gs-ledger-remove-money-transfers');
+  out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'gs-ledger-remove-income-page');
+  out = removeBetween(out, M_WISE_EUR_INIT_FN, M_BUDGET_EDITOR_FN, 'gs-ledger-remove-wise-pages');
+  return banner('gs-ledger') + out;
 }
 
 function buildWiseBundle(source) {
@@ -271,7 +284,8 @@ function main() {
   const request = buildRequestBundle(source);
   const settings = buildSettingsBundle(source);
   const itemize = buildItemizeBundle(source);
-  const incomeLedger = buildIncomeLedgerBundle(source);
+  const income = buildIncomeBundle(source);
+  const gsLedger = buildGsLedgerBundle(source);
   const wise = buildWiseBundle(source);
   const transfers = buildTransfersBundle(source);
   const menu = buildMenuBundle(source);
@@ -283,7 +297,8 @@ function main() {
   writeBundle(OUT_REQUEST, request);
   writeBundle(OUT_SETTINGS, settings);
   writeBundle(OUT_ITEMIZE, itemize);
-  writeBundle(OUT_INCOME_LEDGER, incomeLedger);
+  writeBundle(OUT_INCOME, income);
+  writeBundle(OUT_GS_LEDGER, gsLedger);
   writeBundle(OUT_WISE, wise);
   writeBundle(OUT_TRANSFERS, transfers);
   writeBundle(OUT_MENU, menu);

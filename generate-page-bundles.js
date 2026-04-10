@@ -17,7 +17,8 @@ const OUT_SETTINGS = path.join(ROOT, 'app-settings.js');
 const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
 const OUT_INCOME = path.join(ROOT, 'app-income.js');
 const OUT_GS_LEDGER = path.join(ROOT, 'app-gs-ledger.js');
-const OUT_WISE = path.join(ROOT, 'app-wise.js');
+const OUT_WISE_EUR = path.join(ROOT, 'app-wise-eur.js');
+const OUT_WISE_USD = path.join(ROOT, 'app-wise-usd.js');
 const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
 const OUT_MENU = path.join(ROOT, 'app-menu.js');
 const OUT_ARCHIVE = path.join(ROOT, 'app-archive.js');
@@ -37,6 +38,7 @@ const M_LOAD_INCOME_FN = 'function loadIncome(year) {';
 const M_GS_LEDGER_INIT_FN = 'function initGsLedgerListPage() {';
 const M_INCOME_INIT_FN = 'function initIncomeListPage() {';
 const M_WISE_EUR_INIT_FN = 'function initWiseEurListPage() {';
+const M_WISE_USD_INIT_FN = 'function initWiseUsdListPage() {';
 const M_BUDGET_EDITOR_FN = 'function initBudgetEditor() {';
 const M_BUDGET_DASHBOARD_FN = 'function initBudgetDashboard() {';
 const M_ARCHIVE_FN = 'function initArchivePage() {';
@@ -201,16 +203,30 @@ function buildGsLedgerBundle(source) {
   return banner('gs-ledger') + out;
 }
 
-function buildWiseBundle(source) {
+function buildWiseEurBundle(source) {
   let out = source;
-  out = removeBetween(out, M_SETTINGS, M_INCOME, 'wise-remove-settings');
-  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'wise-remove-request-form');
-  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'wise-remove-itemize');
-  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'wise-remove-money-transfers');
-  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_INCOME_INIT_FN, 'wise-remove-ledger-page');
-  out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'wise-remove-income-page');
-  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'wise-remove-budget-editor');
-  return banner('wise') + out;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'wise-eur-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'wise-eur-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'wise-eur-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'wise-eur-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_INCOME_INIT_FN, 'wise-eur-remove-ledger-page');
+  out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'wise-eur-remove-income-page');
+  out = removeBetween(out, M_WISE_USD_INIT_FN, M_BUDGET_EDITOR_FN, 'wise-eur-remove-wise-usd-page');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'wise-eur-remove-budget-editor');
+  return banner('wise-eur') + out;
+}
+
+function buildWiseUsdBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'wise-usd-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'wise-usd-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'wise-usd-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'wise-usd-remove-money-transfers');
+  out = removeBetween(out, M_GS_LEDGER_INIT_FN, M_INCOME_INIT_FN, 'wise-usd-remove-ledger-page');
+  out = removeBetween(out, M_INCOME_INIT_FN, M_WISE_EUR_INIT_FN, 'wise-usd-remove-income-page');
+  out = removeBetween(out, M_WISE_EUR_INIT_FN, M_WISE_USD_INIT_FN, 'wise-usd-remove-wise-eur-page');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'wise-usd-remove-budget-editor');
+  return banner('wise-usd') + out;
 }
 
 function buildTransfersBundle(source) {
@@ -286,7 +302,8 @@ function main() {
   const itemize = buildItemizeBundle(source);
   const income = buildIncomeBundle(source);
   const gsLedger = buildGsLedgerBundle(source);
-  const wise = buildWiseBundle(source);
+  const wiseEur = buildWiseEurBundle(source);
+  const wiseUsd = buildWiseUsdBundle(source);
   const transfers = buildTransfersBundle(source);
   const menu = buildMenuBundle(source);
   const archive = buildArchiveBundle(source);
@@ -299,7 +316,8 @@ function main() {
   writeBundle(OUT_ITEMIZE, itemize);
   writeBundle(OUT_INCOME, income);
   writeBundle(OUT_GS_LEDGER, gsLedger);
-  writeBundle(OUT_WISE, wise);
+  writeBundle(OUT_WISE_EUR, wiseEur);
+  writeBundle(OUT_WISE_USD, wiseUsd);
   writeBundle(OUT_TRANSFERS, transfers);
   writeBundle(OUT_MENU, menu);
   writeBundle(OUT_ARCHIVE, archive);

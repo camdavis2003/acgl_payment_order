@@ -18,7 +18,9 @@ const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
 const OUT_INCOME_LEDGER = path.join(ROOT, 'app-income-ledger.js');
 const OUT_WISE = path.join(ROOT, 'app-wise.js');
 const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
-const OUT_OPERATIONS = path.join(ROOT, 'app-operations.js');
+const OUT_MENU = path.join(ROOT, 'app-menu.js');
+const OUT_ARCHIVE = path.join(ROOT, 'app-archive.js');
+const OUT_RECONCILIATION = path.join(ROOT, 'app-reconciliation.js');
 const OUT_BUDGET_EDITOR = path.join(ROOT, 'app-budget-editor.js');
 const OUT_BUDGET_DASHBOARD = path.join(ROOT, 'app-budget-dashboard.js');
 
@@ -207,14 +209,38 @@ function buildTransfersBundle(source) {
   return banner('transfers') + out;
 }
 
-function buildOperationsBundle(source) {
+function buildMenuBundle(source) {
   let out = source;
-  out = removeBetween(out, M_SETTINGS, M_INCOME, 'operations-remove-settings');
-  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'operations-remove-request-form');
-  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'operations-remove-itemize');
-  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'operations-remove-money-transfers');
-  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'operations-remove-budget-editor');
-  return banner('operations') + out;
+  out = removeBetween(out, M_RECON, M_SETTINGS, 'menu-remove-reconciliation-page');
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'menu-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'menu-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'menu-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'menu-remove-money-transfers');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'menu-remove-budget-editor');
+  out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'menu-remove-archive-page');
+  return banner('menu') + out;
+}
+
+function buildArchiveBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_PAYMENT_ORDERS, M_SETTINGS, 'archive-remove-orders-and-reconciliation');
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'archive-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'archive-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'archive-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'archive-remove-money-transfers');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'archive-remove-budget-editor');
+  return banner('archive') + out;
+}
+
+function buildReconciliationBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'reconciliation-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'reconciliation-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'reconciliation-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'reconciliation-remove-money-transfers');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_ARCHIVE_FN, 'reconciliation-remove-budget-editor');
+  out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'reconciliation-remove-archive-page');
+  return banner('reconciliation') + out;
 }
 
 function buildBudgetEditorBundle(source) {
@@ -248,7 +274,9 @@ function main() {
   const incomeLedger = buildIncomeLedgerBundle(source);
   const wise = buildWiseBundle(source);
   const transfers = buildTransfersBundle(source);
-  const operations = buildOperationsBundle(source);
+  const menu = buildMenuBundle(source);
+  const archive = buildArchiveBundle(source);
+  const reconciliation = buildReconciliationBundle(source);
   const budgetEditor = buildBudgetEditorBundle(source);
   const budgetDashboard = buildBudgetDashboardBundle(source);
 
@@ -258,7 +286,9 @@ function main() {
   writeBundle(OUT_INCOME_LEDGER, incomeLedger);
   writeBundle(OUT_WISE, wise);
   writeBundle(OUT_TRANSFERS, transfers);
-  writeBundle(OUT_OPERATIONS, operations);
+  writeBundle(OUT_MENU, menu);
+  writeBundle(OUT_ARCHIVE, archive);
+  writeBundle(OUT_RECONCILIATION, reconciliation);
   writeBundle(OUT_BUDGET_EDITOR, budgetEditor);
   writeBundle(OUT_BUDGET_DASHBOARD, budgetDashboard);
 

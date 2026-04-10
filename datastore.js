@@ -235,9 +235,24 @@
         pageYear = Number(String(activeRaw || '').trim());
       }
 
-      // Do not guess the current calendar year for year-scoped datasets.
-      // Pages should use explicit URL year or the configured Active Budget year.
-      if (!Number.isInteger(pageYear)) return;
+      if (!Number.isInteger(pageYear)) {
+        try {
+          const yearsRaw = mem.get('payment_order_budget_years_v1') || nativeGet('payment_order_budget_years_v1') || '[]';
+          const years = JSON.parse(String(yearsRaw || '[]'));
+          if (Array.isArray(years)) {
+            const numericYears = years
+              .map((v) => Number(v))
+              .filter((v) => Number.isInteger(v));
+            if (numericYears.length > 0) pageYear = Math.max(...numericYears);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Final fallback keeps year-scoped pages from rendering empty when no
+      // active year has been configured yet.
+      if (!Number.isInteger(pageYear)) pageYear = new Date().getFullYear();
       const keys = getPageDatasetKeys(page, pageYear);
       if (keys.length < 1) return;
       await preloadKeys(keys, { force: Boolean(options.force), reason: `page:${page}` });

@@ -19,7 +19,8 @@ const OUT_INCOME_LEDGER = path.join(ROOT, 'app-income-ledger.js');
 const OUT_WISE = path.join(ROOT, 'app-wise.js');
 const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
 const OUT_OPERATIONS = path.join(ROOT, 'app-operations.js');
-const OUT_BUDGET = path.join(ROOT, 'app-budget.js');
+const OUT_BUDGET_EDITOR = path.join(ROOT, 'app-budget-editor.js');
+const OUT_BUDGET_DASHBOARD = path.join(ROOT, 'app-budget-dashboard.js');
 
 const M_RECON = '// ---- Payment Orders Reconciliation (year-scoped) ----';
 const M_SETTINGS = '// ---- Roles / Users (settings page) ----';
@@ -34,6 +35,7 @@ const M_GS_LEDGER_INIT_FN = 'function initGsLedgerListPage() {';
 const M_INCOME_INIT_FN = 'function initIncomeListPage() {';
 const M_WISE_EUR_INIT_FN = 'function initWiseEurListPage() {';
 const M_BUDGET_EDITOR_FN = 'function initBudgetEditor() {';
+const M_BUDGET_DASHBOARD_FN = 'function initBudgetDashboard() {';
 const M_ARCHIVE_FN = 'function initArchivePage() {';
 const M_CATCH = '\n})().catch((err) => {';
 const M_REQUEST_BLOCK = '\n  if (form) {';
@@ -215,14 +217,26 @@ function buildOperationsBundle(source) {
   return banner('operations') + out;
 }
 
-function buildBudgetBundle(source) {
+function buildBudgetEditorBundle(source) {
   let out = source;
   out = removeBetween(out, M_SETTINGS, M_INCOME, 'budget-remove-settings');
   out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'budget-remove-request-form');
   out = removeBetween(out, M_ITEMIZE, M_CATCH, 'budget-remove-itemize');
   out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'budget-remove-money-transfers');
+  out = removeBetween(out, M_BUDGET_DASHBOARD_FN, M_ARCHIVE_FN, 'budget-remove-dashboard');
   out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'budget-remove-archive-and-backup');
-  return banner('budget') + out;
+  return banner('budget-editor') + out;
+}
+
+function buildBudgetDashboardBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'budget-dashboard-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'budget-dashboard-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'budget-dashboard-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_LOAD_INCOME_FN, 'budget-dashboard-remove-money-transfers');
+  out = removeBetween(out, M_BUDGET_EDITOR_FN, M_BUDGET_DASHBOARD_FN, 'budget-dashboard-remove-editor');
+  out = removeBetween(out, M_ARCHIVE_FN, M_BACKUP_FN, 'budget-dashboard-remove-archive-and-backup');
+  return banner('budget-dashboard') + out;
 }
 
 function main() {
@@ -235,7 +249,8 @@ function main() {
   const wise = buildWiseBundle(source);
   const transfers = buildTransfersBundle(source);
   const operations = buildOperationsBundle(source);
-  const budget = buildBudgetBundle(source);
+  const budgetEditor = buildBudgetEditorBundle(source);
+  const budgetDashboard = buildBudgetDashboardBundle(source);
 
   writeBundle(OUT_REQUEST, request);
   writeBundle(OUT_SETTINGS, settings);
@@ -244,7 +259,8 @@ function main() {
   writeBundle(OUT_WISE, wise);
   writeBundle(OUT_TRANSFERS, transfers);
   writeBundle(OUT_OPERATIONS, operations);
-  writeBundle(OUT_BUDGET, budget);
+  writeBundle(OUT_BUDGET_EDITOR, budgetEditor);
+  writeBundle(OUT_BUDGET_DASHBOARD, budgetDashboard);
 
   console.log('Page bundles generated successfully.');
 }

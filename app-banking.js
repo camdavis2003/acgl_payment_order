@@ -11562,7 +11562,56 @@
 
   
   // [bundle-strip:banking-remove-money-transfers] removed in page-specific build.
-const INCOME_COL_TYPES = {
+function loadIncome(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** @param {Array<Object>} entries */
+  function saveIncome(entries, year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(entries || []));
+
+    // Budget updates are ledger-driven only.
+    syncBudgetFromLedgerSafe(resolvedYear, 'income');
+  }
+
+  function upsertIncomeEntry(entry, year) {
+    if (!entry || !entry.id) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const all = loadIncome(y);
+    const idx = all.findIndex((e) => e && e.id === entry.id);
+    const next = idx >= 0 ? all.map((e) => (e && e.id === entry.id ? entry : e)) : [entry, ...all];
+    saveIncome(next, y);
+  }
+
+  function deleteIncomeEntryById(id, year) {
+    if (!id) return;
+    const y = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const all = loadIncome(y);
+    const target = all.find((e) => e && e.id === id);
+    const next = all.filter((e) => e && e.id !== id);
+    saveIncome(next, y);
+    if (target) {
+      const tx = formatDate(target.date);
+      const remitter = String(target.remitter || '').trim();
+      const record = `${tx}${remitter ? ` — ${remitter}` : ''}`.trim() || String(id || 'Income');
+      appendAppAuditEvent(`Income (${y})`, record, 'Deleted', []);
+    }
+  }
+
+  const INCOME_COL_TYPES = {
     date: 'date',
     remitter: 'text',
     budgetNumber: 'text',

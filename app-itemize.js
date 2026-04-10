@@ -1,4 +1,4 @@
-/* Generated from app.js by generate-page-bundles.js: request. Do not edit manually. */
+/* Generated from app.js by generate-page-bundles.js: itemize. Do not edit manually. */
 /*
   Payment Order Request app (no backend)
   - Validates required fields
@@ -9844,771 +9844,621 @@
     applyAppTabTitle();
   }
 
-  
-  // [bundle-strip:request-remove-reconciliation] removed in page-specific build.
+  // ---- Payment Orders Reconciliation (year-scoped) ----
 
-  // [bundle-strip:request-remove-settings] removed in page-specific build.
+  const reconciliationViewState = {
+    globalFilter: '',
+  };
 
-  // [bundle-strip:request-remove-workflows] removed in page-specific build.
+  const RECONCILE_MERGE_FIELDS = [
+    { key: 'date', label: 'Date', format: (v) => formatDate(v) },
+    { key: 'name', label: 'Name' },
+    { key: 'address', label: 'Address' },
+    { key: 'iban', label: 'IBAN' },
+    { key: 'bic', label: 'BIC' },
+    { key: 'usAccountType', label: 'US Account Type' },
+    { key: 'specialInstructions', label: 'Special Instructions' },
+    { key: 'bankDetailsMode', label: 'Bank Details Mode' },
+    { key: 'budgetNumber', label: 'Budget Nr.' },
+    { key: 'purpose', label: 'Purpose' },
+    { key: 'euro', label: 'Euro (EUR)', format: (v) => formatCurrency(v, 'EUR') },
+    { key: 'usd', label: 'USD (USD)', format: (v) => formatCurrency(v, 'USD') },
+    { key: 'items', label: 'Items', format: (v) => summarizeMergeItems(v) },
+    { key: 'source', label: 'Source' },
+    { key: 'sourceEntryId', label: 'Source Entry ID' },
+    { key: 'sourceEntryYear', label: 'Source Entry Year' },
+    { key: 'with', label: 'With', format: (v) => normalizeWith(v) },
+    { key: 'status', label: 'Status', format: (v) => normalizeOrderStatus(v) },
+  ];
 
-  if (form) {
-    const base = getBasename(window.location.pathname);
-    // Do not rely on the URL path for detection (WP embeds may not end in index.html).
-    const isRequestForm = Boolean(form && form.id === 'paymentOrderForm');
-    const params = new URLSearchParams(window.location.search);
-    const forceNew = params.get('new') === '1';
-    const resumeDraft = params.get('resumeDraft') === '1';
-    const doLogout = params.get('logout') === '1';
+  let reconcileMergeState = null;
 
-    if (isRequestForm && doLogout) {
-      await performLogout();
-      setEditOrderId(null);
-      form.reset();
-      clearDraft();
-      void clearDraftAttachments();
-      window.location.href = withWpEmbedParams('index.html?new=1');
+  function getReconcileMergeElements() {
+    return {
+      modalEl: document.getElementById('reconcileMergeModal'),
+      bodyEl: document.getElementById('reconcileMergeBody'),
+      confirmBtn: document.getElementById('reconcileMergeConfirmBtn'),
+      subtitleEl: document.getElementById('reconcileMergeSubtitle'),
+    };
+  }
+
+  function summarizeMergeItems(items) {
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return '—';
+
+    const totals = sumItems(list);
+    const hasEuro = Number.isFinite(totals.euro) && totals.euro > 0;
+    const hasUsd = Number.isFinite(totals.usd) && totals.usd > 0;
+    const currency = hasEuro
+      ? formatCurrency(totals.euro, 'EUR')
+      : (hasUsd ? formatCurrency(totals.usd, 'USD') : '');
+
+    const titles = list
+      .map((it) => String(it && it.title ? it.title : '').trim())
+      .filter(Boolean);
+    const preview = titles.slice(0, 3).join(', ');
+    const extra = titles.length > 3 ? ` +${titles.length - 3} more` : '';
+    const titleText = preview ? `: ${preview}${extra}` : '';
+    const currencyText = currency ? ` (${currency})` : '';
+
+    return `${list.length} item${list.length === 1 ? '' : 's'}${currencyText}${titleText}`;
+  }
+
+  function mergeValueHasData(value) {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value === 'string') return value.trim() !== '';
+    return true;
+  }
+
+  function mergeValuesEqual(a, b) {
+    if (Array.isArray(a) || Array.isArray(b)) {
+      const left = Array.isArray(a) ? a : [];
+      const right = Array.isArray(b) ? b : [];
+      return JSON.stringify(left) === JSON.stringify(right);
+    }
+
+    const aStr = a === null || a === undefined ? '' : String(a).trim();
+    const bStr = b === null || b === undefined ? '' : String(b).trim();
+    if (!aStr && !bStr) return true;
+    const aNum = Number(aStr);
+    const bNum = Number(bStr);
+    if (Number.isFinite(aNum) && Number.isFinite(bNum) && aStr !== '' && bStr !== '') {
+      return aNum === bNum;
+    }
+    return aStr === bStr;
+  }
+
+  function formatMergeValue(field, value) {
+    if (!field) return '—';
+    const formatted = field.format ? field.format(value) : String(value ?? '').trim();
+    return formatted ? String(formatted).trim() : '—';
+  }
+
+  function findOrderByPaymentOrderNo(paymentOrderNo, year) {
+    const canon = canonicalizePaymentOrderNo(paymentOrderNo);
+    if (!canon) return null;
+    const orders = loadOrders(year);
+    return orders.find((o) => canonicalizePaymentOrderNo(o && o.paymentOrderNo) === canon) || null;
+  }
+
+  function buildReconcileMergeState(existing, incoming, year) {
+    const resolveFields = [];
+    for (const field of RECONCILE_MERGE_FIELDS) {
+      const existingValue = existing ? existing[field.key] : null;
+      const incomingValue = incoming ? incoming[field.key] : null;
+      const existingHas = mergeValueHasData(existingValue);
+      const incomingHas = mergeValueHasData(incomingValue);
+      if (existingHas) {
+        resolveFields.push({
+          ...field,
+          existingValue,
+          incomingValue,
+          existingHas,
+          incomingHas,
+        });
+      }
+    }
+
+    return {
+      id: incoming && incoming.id ? incoming.id : null,
+      year,
+      existing,
+      incoming,
+      resolveFields,
+    };
+  }
+
+  function mergeReconciliationOrders(state, selections) {
+    const existing = state && state.existing ? state.existing : {};
+    const incoming = state && state.incoming ? state.incoming : {};
+    const merged = { ...existing };
+
+    const resolveKeys = new Set((state && state.resolveFields ? state.resolveFields : []).map((f) => f.key));
+    for (const field of RECONCILE_MERGE_FIELDS) {
+      const existingValue = existing[field.key];
+      const incomingValue = incoming[field.key];
+      const existingHas = mergeValueHasData(existingValue);
+      const incomingHas = mergeValueHasData(incomingValue);
+
+      if (resolveKeys.has(field.key)) {
+        const choice = selections && selections[field.key] ? selections[field.key] : 'existing';
+        merged[field.key] = choice === 'incoming' ? incomingValue : existingValue;
+        continue;
+      }
+
+      if (!existingHas && incomingHas) {
+        merged[field.key] = incomingValue;
+      }
+    }
+
+    return merged;
+  }
+
+  function commitReconcileMerge(state, selections) {
+    if (!state || !state.existing || !state.incoming) return false;
+    const year = state.year || getActiveBudgetYear();
+    const nowIso = new Date().toISOString();
+    const mergedBase = mergeReconciliationOrders(state, selections);
+
+    const mergedWithMeta = {
+      ...mergedBase,
+      id: state.existing.id,
+      createdAt: state.existing.createdAt,
+      paymentOrderNo: state.existing.paymentOrderNo || state.incoming.paymentOrderNo,
+      updatedAt: nowIso,
+    };
+
+    const changes = computeOrderAuditChanges(state.existing, mergedWithMeta);
+    const merged = changes.length > 0
+      ? {
+        ...mergedWithMeta,
+        timeline: appendTimelineEvent(state.existing, {
+          at: nowIso,
+          with: getOrderWithLabel(mergedWithMeta),
+          status: getOrderStatusLabel(mergedWithMeta),
+          user: getTimelineUsername(),
+          action: 'Reconciled Merge',
+          changes,
+        }),
+      }
+      : mergedWithMeta;
+
+    upsertOrder(merged, year);
+    deleteReconciliationOrderById(state.incoming.id);
+    updateWiseEntryIdTrackFromReconciliation(merged, merged.paymentOrderNo, year, nowIso);
+    updateWiseEntryBudgetNoFromReconciliation(merged, year, nowIso);
+    return true;
+  }
+
+  function openReconcileMergeModal(state) {
+    const { modalEl, bodyEl, confirmBtn, subtitleEl } = getReconcileMergeElements();
+    if (!modalEl || !bodyEl || !confirmBtn) return;
+    if (!state || !state.existing || !state.incoming) return;
+
+    reconcileMergeState = state;
+
+    const poLabel = formatPaymentOrderNoForDisplay(state.existing.paymentOrderNo || state.incoming.paymentOrderNo);
+    if (subtitleEl) subtitleEl.textContent = poLabel ? `Payment Order No. ${poLabel}` : '';
+    if (!modalEl.dataset.bound) {
+      modalEl.dataset.bound = 'true';
+      modalEl.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeReconcileMergeModal();
+      });
+    }
+
+    if (!confirmBtn.dataset.bound) {
+      confirmBtn.dataset.bound = 'true';
+      confirmBtn.addEventListener('click', () => {
+        const elements = getReconcileMergeElements();
+        if (!reconcileMergeState || !elements.bodyEl) return;
+
+        const selections = {};
+        const missing = [];
+        for (const field of reconcileMergeState.resolveFields) {
+          const name = `merge-${field.key}`;
+          const selected = elements.bodyEl.querySelector(`input[name="${CSS.escape(name)}"]:checked`);
+          if (!selected) {
+            missing.push(field.label);
+            continue;
+          }
+          selections[field.key] = selected.value;
+        }
+
+        const errEl = elements.bodyEl.querySelector('#reconcileMergeError');
+        if (missing.length > 0) {
+          if (errEl) errEl.textContent = `Select a value for: ${missing.join(', ')}.`;
+          return;
+        }
+        if (errEl) errEl.textContent = '';
+
+        const merged = commitReconcileMerge(reconcileMergeState, selections);
+        if (merged && typeof showFlashToken === 'function') {
+          showFlashToken('Reconciled: merged entry into Payment Orders.');
+        }
+        closeReconcileMergeModal();
+        applyReconciliationView();
+      });
+    }
+
+    const rowsHtml = state.resolveFields
+      .map((field) => {
+        const name = `merge-${field.key}`;
+        const existingText = formatMergeValue(field, field.existingValue);
+        const incomingText = formatMergeValue(field, field.incomingValue);
+        return `
+          <div class="mergeGrid__label">${escapeHtml(field.label)}</div>
+          <label class="mergeOption">
+            <input type="radio" name="${escapeHtml(name)}" value="existing" />
+            <span class="mergeOption__value">${escapeHtml(existingText)}</span>
+          </label>
+          <label class="mergeOption">
+            <input type="radio" name="${escapeHtml(name)}" value="incoming" />
+            <span class="mergeOption__value">${escapeHtml(incomingText)}</span>
+          </label>
+        `.trim();
+      })
+      .join('');
+
+    bodyEl.innerHTML = `
+      <p class="mergeNote">Choose which value to keep for each field already on the Payment Orders entry.</p>
+      ${state.resolveFields.length > 0 ? `
+        <div class="mergeGrid">
+          <div class="mergeGrid__head">Field</div>
+          <div class="mergeGrid__head">Payment Orders</div>
+          <div class="mergeGrid__head">Reconciliation</div>
+          ${rowsHtml}
+        </div>
+      ` : '<p class="muted">No existing fields require deconflict. You can merge to continue.</p>'}
+      <p id="reconcileMergeError" class="error" role="status" aria-live="polite"></p>
+    `.trim();
+
+    openSimpleModal(modalEl);
+  }
+
+  function closeReconcileMergeModal() {
+    const { modalEl, bodyEl, subtitleEl } = getReconcileMergeElements();
+    if (!modalEl) return;
+    closeSimpleModal(modalEl);
+    if (bodyEl) bodyEl.innerHTML = '';
+    if (subtitleEl) subtitleEl.textContent = '';
+    reconcileMergeState = null;
+  }
+
+  /** @param {Array<Object>} orders */
+  function renderReconciliationOrders(orders) {
+    if (!reconcileTbody || !reconcileEmptyState) return;
+    reconcileTbody.innerHTML = '';
+
+    const currentUser = getCurrentUser();
+    const canEditReconciliation = currentUser ? canWriteOrCreate(currentUser, 'orders_reconciliation') : false;
+    const canDeleteReconciliation = currentUser ? canDelete(currentUser, 'orders_reconciliation') : false;
+    const editDisabledAttr = '';
+    const editAriaDisabled = canEditReconciliation ? 'false' : 'true';
+    const editTooltipAttr = canEditReconciliation ? '' : ' data-tooltip="Edit and create access required for Reconciliation."';
+    const deleteDisabledAttr = '';
+    const deleteAriaDisabled = canDeleteReconciliation ? 'false' : 'true';
+    const deleteTooltipAttr = canDeleteReconciliation ? '' : ' data-tooltip="Requires Delete access for Reconciliation."';
+
+    if (!orders || orders.length === 0) {
+      reconcileEmptyState.hidden = false;
       return;
     }
 
-    const currentUser = getCurrentUser();
-    const editId = getEditOrderId();
+    reconcileEmptyState.hidden = true;
+
     const year = getActiveBudgetYear();
-    const existingRec = editId ? getReconciliationOrderById(editId, year) : null;
-    const isReconciliationEdit = Boolean(editId && existingRec && !getOrderById(editId, year));
-    if (isReconciliationEdit) {
-      form.dataset.reconciliationEdit = '1';
-      replacePaymentOrderNoWithSelect(String(existingRec.paymentOrderNo || '').trim(), year);
-    } else {
-      delete form.dataset.reconciliationEdit;
+
+    const rowsHtml = orders
+      .map((o) => {
+        const isMissingRequired = hasOrderMissingRequiredValues(o);
+        const rowClass = isMissingRequired ? ' class="ordersRow--missingRequired"' : '';
+        return `
+          <tr${rowClass} data-id="${escapeHtml(o.id)}">
+            <td><a href="#" class="poNoDownloadLink" data-action="downloadPdf" title="Download PDF">${escapeHtml(formatPaymentOrderNoForDisplay(o.paymentOrderNo) || '—')}</a></td>
+            <td>${escapeHtml(formatDate(o.date))}</td>
+            <td>${escapeHtml(String(o.source || '').trim())}</td>
+            <td>${escapeHtml(o.name)}</td>
+            <td class="num">${escapeHtml(formatCurrency(o.euro, 'EUR'))}</td>
+            <td class="num">${escapeHtml(formatCurrency(o.usd, 'USD'))}</td>
+            <td>${renderOutBudgetNumberHtml(o.budgetNumber || '', year)}</td>
+            <td>${escapeHtml(o.purpose || '')}</td>
+            <td>${escapeHtml(getOrderWithLabel(o))}</td>
+            <td>${escapeHtml(getOrderStatusLabel(o))}</td>
+            <td class="actions">
+              <button type="button" class="btn btn--editIcon" data-action="edit" aria-label="Edit" title="${canEditReconciliation ? 'Edit' : 'Read-only access for Reconciliation.'}" aria-disabled="${editAriaDisabled}"${editDisabledAttr}${editTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
+              <button type="button" class="btn btn--reconcileIcon" data-action="reconcile" aria-label="Reconcile" title="Reconcile">${RECONCILE_PUZZLE_ICON_SVG}</button>
+              <button type="button" class="btn btn--x" data-action="delete" aria-label="Delete request" title="${canDeleteReconciliation ? 'Delete' : 'Requires Delete access for Reconciliation.'}" aria-disabled="${deleteAriaDisabled}"${deleteDisabledAttr}${deleteTooltipAttr}><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.5 5.5A.5.5 0 0 1 6 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0A.5.5 0 0 1 8.5 6v5a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v5a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13l-.777 9.33A2 2 0 0 1 10.23 15H5.77a2 2 0 0 1-1.993-1.67L3 4h-.5a1 1 0 1 1 0-2H5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1h2.5a1 1 0 0 1 1 1M6 2v1h4V2zm-2 2 .774 9.287A1 1 0 0 0 5.77 14h4.46a1 1 0 0 0 .996-.713L12 4z"/></svg></button>
+            </td>
+          </tr>
+        `.trim();
+      })
+      .join('');
+
+    reconcileTbody.innerHTML = rowsHtml;
+  }
+
+  function updateReconciliationHeaderIndicators() {
+    const globalInput = document.getElementById('reconcileOrdersGlobalSearch');
+    if (globalInput) {
+      globalInput.classList.toggle('input-active', normalizeTextForSearch(reconciliationViewState.globalFilter) !== '');
     }
 
-    // Budget Nr. behavior:
-    // - Only users with Full Payment Orders access may change it.
-    // - If not Full access, hide the Budget Nr. field in this form.
-    const canEditBudgetNumber = Boolean(currentUser && hasModuleAccessLevel(currentUser, 'orders', 'full'));
-    const budgetNumberEl = form.elements.namedItem('budgetNumber');
-    if (budgetNumberEl) {
-      budgetNumberEl.disabled = !canEditBudgetNumber;
-      const budgetFieldWrap = budgetNumberEl.closest('.field');
-      if (budgetFieldWrap) budgetFieldWrap.hidden = !canEditBudgetNumber;
-    }
-
-    if (isRequestForm && forceNew) {
-      setEditOrderId(null);
-      form.reset();
-      clearDraft();
-      void clearDraftAttachments();
-      updateItemsStatus();
-      syncCurrencyFieldsFromItems();
-    }
-
-    // New Request Form should start blank every time (except auto-filled PO No.).
-    // Only restore a draft when:
-    // - editing an existing order, or
-    // - explicitly resuming from the Itemize draft flow.
-    if (isRequestForm && !forceNew && !editId && !resumeDraft) {
-      form.reset();
-      clearDraft();
-      void clearDraftAttachments();
-      updateItemsStatus();
-      syncCurrencyFieldsFromItems();
-    }
-
-    // Restore draft fields when allowed (so Itemize -> back to form doesn't lose work).
-    const shouldRestoreDraft = !forceNew && Boolean(editId || resumeDraft);
-    const draft = shouldRestoreDraft ? loadDraft() : null;
-    if (draft) {
-      if (draft.bankDetailsMode) {
-        setBankDetailsModeOnForm(String(draft.bankDetailsMode || ''));
-      }
-
-      if (draft.usAccountType) {
-        setUsAccountTypeOnForm(String(draft.usAccountType || ''));
-      }
-
-      applyBankDetailsModeToUi(getBankDetailsModeFromForm());
-
-      const keys = [
-        // paymentOrderNo is auto-filled for new requests; only restore for edits.
-        ...(editId ? ['paymentOrderNo'] : []),
-        'date',
-        'name',
-        'euro',
-        'usd',
-        'address',
-        'iban',
-        'bic',
-        'specialInstructions',
-        ...(draft.bankDetailsMode ? ['bankDetailsMode'] : []),
-        ...(canEditBudgetNumber ? ['budgetNumber'] : []),
-        'purpose',
-      ];
-
-      const draftMode = String(draft.bankDetailsMode || '').trim() === 'US' ? 'US' : 'INTL';
-      for (const key of keys) {
-        const el = form.elements.namedItem(key);
-        if (!el || draft[key] === undefined) continue;
-
-        if (key === 'iban') {
-          if (draftMode === 'US') {
-            el.value = String(draft[key] || '');
-          } else {
-            const ibanUtils = getIbanUtils();
-            if (ibanUtils) {
-              const res = ibanUtils.validateIban(String(draft[key] || ''));
-              el.value = res.normalized ? ibanUtils.formatIban(res.normalized) : '';
-            } else {
-              el.value = String(draft[key] || '');
-            }
-          }
-          continue;
-        }
-
-        if (key === 'bic') {
-          if (draftMode === 'US') {
-            el.value = String(draft[key] || '');
-          } else {
-            const bicUtils = getBicUtils();
-            if (bicUtils) {
-              const res = bicUtils.validateBic(String(draft[key] || ''));
-              el.value = res.normalized ? bicUtils.formatBic(res.normalized) : '';
-            } else {
-              el.value = String(draft[key] || '');
-            }
-          }
-          continue;
-        }
-
-        if (key === 'bankDetailsMode') continue;
-
-        el.value = draft[key];
-      }
-    }
-
-    // Ensure Payment Order No. always follows the configured pattern
-    maybeAutofillPaymentOrderNo();
-
-    // Captcha must be solved before submitting
-    generateRequestCaptcha();
-
-    // Bank details mode toggle
-    {
-      const toggle = form.elements.namedItem('bankDetailsToggle');
-      if (toggle && !toggle.dataset.boundBankMode) {
-        toggle.dataset.boundBankMode = 'true';
-        toggle.addEventListener('change', () => {
-          applyBankDetailsModeToUi(getBankDetailsModeFromForm());
-
-          // Re-normalize the fields to match the current mode
-          const ibanEl = form.elements.namedItem('iban');
-          const bicEl = form.elements.namedItem('bic');
-          if (ibanEl && ibanEl.dispatchEvent) ibanEl.dispatchEvent(new Event('blur'));
-          if (bicEl && bicEl.dispatchEvent) bicEl.dispatchEvent(new Event('blur'));
-        });
-      }
-
-      // Ensure UI reflects the initial selection
-      applyBankDetailsModeToUi(getBankDetailsModeFromForm());
-    }
-
-    // US account type (Checking/Savings) - mutually exclusive checkboxes
-    {
-      const checkingEl = form.elements.namedItem('usAccountTypeChecking');
-      const savingsEl = form.elements.namedItem('usAccountTypeSavings');
-
-      const bind = (el) => {
-        if (!el || el.dataset.boundUsAccountType) return;
-        el.dataset.boundUsAccountType = 'true';
-        el.addEventListener('change', () => {
-          if (el === checkingEl && checkingEl && checkingEl.checked && savingsEl) savingsEl.checked = false;
-          if (el === savingsEl && savingsEl && savingsEl.checked && checkingEl) checkingEl.checked = false;
-
-          const errEl = document.getElementById('error-usAccountType');
-          if (errEl && getUsAccountTypeFromForm()) errEl.textContent = '';
-          if (checkingEl && checkingEl.classList) checkingEl.classList.remove('input-error');
-          if (savingsEl && savingsEl.classList) savingsEl.classList.remove('input-error');
-
-          saveFormToDraft();
-        });
-      };
-
-      bind(checkingEl);
-      bind(savingsEl);
-    }
-
-    // IBAN normalization/formatting on blur (keeps validation logic separate in iban.js)
-    {
-      const ibanEl = form.elements.namedItem('iban');
-      const ibanUtils = getIbanUtils();
-      if (ibanEl && ibanUtils) {
-        // Normalize any pre-filled value (e.g., when editing)
-        if (getBankDetailsModeFromForm() !== 'US') {
-          const initial = ibanUtils.validateIban(String(ibanEl.value || ''));
-          if (initial.normalized) ibanEl.value = ibanUtils.formatIban(initial.normalized);
-        }
-
-        if (!ibanEl.dataset.boundIban) {
-          ibanEl.dataset.boundIban = 'true';
-          ibanEl.addEventListener('blur', () => {
-            const mode = getBankDetailsModeFromForm();
-            if (mode === 'US') {
-              const normalized = normalizeUsBankText(String(ibanEl.value || ''));
-              ibanEl.value = normalized;
-              const errEl = document.getElementById('error-iban');
-              if (errEl) errEl.textContent = '';
-              if (ibanEl.classList) ibanEl.classList.remove('input-error');
-              return;
-            }
-
-            const res = ibanUtils.validateIban(String(ibanEl.value || ''));
-            ibanEl.value = res.normalized ? ibanUtils.formatIban(res.normalized) : '';
-
-            const errEl = document.getElementById('error-iban');
-            if (errEl) errEl.textContent = res.isValid ? '' : String(res.error || '');
-            if (ibanEl.classList) {
-              if (res.isValid) ibanEl.classList.remove('input-error');
-              else ibanEl.classList.add('input-error');
-            }
-          });
-        }
-      }
-    }
-
-    // BIC normalization/formatting on blur (keeps validation logic separate in bic.js)
-    {
-      const bicEl = form.elements.namedItem('bic');
-      const bicUtils = getBicUtils();
-      if (bicEl && bicUtils) {
-        if (getBankDetailsModeFromForm() !== 'US') {
-          const initial = bicUtils.validateBic(String(bicEl.value || ''));
-          if (initial.normalized) bicEl.value = bicUtils.formatBic(initial.normalized);
-        }
-
-        if (!bicEl.dataset.boundBic) {
-          bicEl.dataset.boundBic = 'true';
-          bicEl.addEventListener('blur', () => {
-            const mode = getBankDetailsModeFromForm();
-            if (mode === 'US') {
-              const normalized = normalizeUsBankText(String(bicEl.value || ''));
-              bicEl.value = normalized;
-              const errEl = document.getElementById('error-bic');
-              if (errEl) errEl.textContent = '';
-              if (bicEl.classList) bicEl.classList.remove('input-error');
-              return;
-            }
-
-            const res = bicUtils.validateBic(String(bicEl.value || ''));
-            bicEl.value = res.normalized ? bicUtils.formatBic(res.normalized) : '';
-
-            const errEl = document.getElementById('error-bic');
-            if (errEl) errEl.textContent = res.isValid ? '' : String(res.error || '');
-            if (bicEl.classList) {
-              if (res.isValid) bicEl.classList.remove('input-error');
-              else bicEl.classList.add('input-error');
-            }
-          });
-        }
-      }
-    }
-
-    updateItemsStatus();
-    syncCurrencyFieldsFromItems();
-
-    // If we are editing, tweak submit button label
-    const submitBtn = form.querySelector('button[type="submit"]');
-    if (submitBtn) {
-      submitBtn.textContent = getEditOrderId() ? 'Save Changes' : 'Submit';
-    }
-
-    // Cancel edit button only appears in edit mode
-    if (cancelEditBtn) {
-      cancelEditBtn.hidden = !getEditOrderId();
-      cancelEditBtn.addEventListener('click', () => {
-        clearFieldErrors();
-        clearItemsError();
-        showSubmitToken('');
-        clearDraft();
-        void clearDraftAttachments();
-        setEditOrderId(null);
-        {
-          const year = getActiveBudgetYear();
-          window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
-        }
-      });
-    }
-
-    // Open itemize page when clicking Euro or USD fields
-    if (euroField) {
-      euroField.addEventListener('click', openItemizeDraft);
-      euroField.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          openItemizeDraft();
-        }
-      });
-    }
-    if (usdField) {
-      usdField.addEventListener('click', openItemizeDraft);
-      usdField.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          openItemizeDraft();
-        }
-      });
-    }
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const isPublicSubmit = IS_WP_SHARED_MODE && !getWpToken() && !editId;
-
-      // In WP shared mode, allow public (logged-out) submissions via the server endpoint.
-      if (!isPublicSubmit) {
-        const requiredLevel = editId ? 'write' : 'create';
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.', requiredLevel)) return;
-      }
-
-      clearFieldErrors();
-      clearItemsError();
-      showSubmitToken('');
-
-      const result = validateForm();
-      if (!result.ok) {
-        showErrors(result.errors);
-        // Rotate challenge after a failed attempt
-        generateRequestCaptcha();
-        return;
-      }
-
-      const items = loadDraftItems();
-      if (items.length < 1) {
-        showItemsError('At least one item is required. Click the Euro or USD field to add items.');
-        return;
-      }
-
-      const totals = sumItems(items);
-      const mode = inferCurrencyModeFromItems(items);
-      if (mode === 'MIXED') {
-        showItemsError('Use only one currency for all items (Euro or USD).');
-        return;
-      }
-      const usingEuro = mode === 'EUR';
-      const usingUsd = mode === 'USD';
-
-      const orderValues = {
-        ...result.values,
-        euro: usingEuro ? totals.euro : null,
-        usd: usingUsd ? totals.usd : null,
-        items,
-      };
-
-      if (!editId && !String(orderValues.source || '').trim()) {
-        orderValues.source = 'Form Submission';
-      }
-
-      const year = getActiveBudgetYear();
-
-      if (editId) {
-        const existing = getOrderById(editId, year);
-        const existingRec = existing ? null : getReconciliationOrderById(editId, year);
-        if (!existing && !existingRec) {
-          showItemsError('Could not find the submission to edit.');
-          return;
-        }
-
-        const preferReconciliation = form.dataset.reconciliationEdit === '1' || params.get('return') === 'reconciliation';
-        const baseOrder = preferReconciliation && existingRec ? existingRec : (existing || existingRec);
-        const isReconciliationEdit = Boolean(preferReconciliation && existingRec);
-
-        // If this user cannot edit Budget Nr., preserve the existing value.
-        if (!canEditBudgetNumber) {
-          orderValues.budgetNumber = String(baseOrder.budgetNumber || '').trim();
-        }
-
-        // Do not allow Payment Order No. to change during standard edits
-        if (!isReconciliationEdit) {
-          orderValues.paymentOrderNo = baseOrder.paymentOrderNo;
-        } else {
-          orderValues.paymentOrderNo = String(orderValues.paymentOrderNo || '').trim();
-        }
-
-        const nowIso = new Date().toISOString();
-        const updatedBase = {
-          ...baseOrder,
-          ...orderValues,
-          id: baseOrder.id,
-          createdAt: baseOrder.createdAt,
-          updatedAt: nowIso,
-        };
-
-        const changes = computeOrderAuditChanges(baseOrder, updatedBase);
-        const updated = changes.length > 0
-          ? {
-            ...updatedBase,
-            timeline: appendTimelineEvent(baseOrder, {
-              at: nowIso,
-              with: getOrderWithLabel(updatedBase),
-              status: getOrderStatusLabel(updatedBase),
-              user: getTimelineUsername(),
-              action: 'Edited',
-              changes,
-            }),
-          }
-          : updatedBase;
-
-        if (isReconciliationEdit) {
-          const prevBudget = String(baseOrder.budgetNumber || '').trim();
-          const nextBudget = String(updated.budgetNumber || '').trim();
-          const prevPo = String(baseOrder.paymentOrderNo || '').trim();
-          const nextPo = String(updated.paymentOrderNo || '').trim();
-
-          const recOrders = loadReconciliationOrders(year);
-          const next = recOrders.map((o) => (o.id === updated.id ? updated : o));
-          saveReconciliationOrders(next, year);
-
-          if (prevBudget !== nextBudget) {
-            updateWiseEntryBudgetNoFromOrderEdit(updated, year, nowIso);
-          }
-          if (prevPo !== nextPo) {
-            updateWiseEntryIdTrackFromOrderEdit(updated, year, nowIso);
-          }
-        } else {
-          upsertOrder(updated, year);
-
-          // Fire notification events for status/with transitions.
-          {
-            const nextWith = getOrderWithLabel(updated);
-            const nextStatus = normalizeOrderStatus(getOrderStatusLabel(updated));
-            const baseVars = {
-              paymentOrderNo: String(updated.paymentOrderNo || ''),
-              year: String(year),
-              paymentOrderLink: '',
-              directLink: String(window.location.href || ''),
-            };
-            if (nextWith === 'Grand Secretary' && nextStatus === 'Review') {
-              void fireNotificationEvent('gs_review', baseVars);
-            } else if (nextWith === 'Grand Master' && nextStatus === 'Review') {
-              void fireNotificationEvent('gm_review', baseVars);
-            } else if (nextWith === 'Grand Treasurer' && nextStatus === 'Approved') {
-              void fireNotificationEvent('gt_processing', baseVars);
-            }
-          }
-        }
-        updateWiseEntryBudgetNoFromOrderEdit(updated, year, nowIso);
-        updateWiseEntryIdTrackFromOrderEdit(updated, year, nowIso);
-
-        // In WP shared mode, writes are debounced; if we immediately redirect back to
-        // the Payment Orders list the debounced flush may be canceled. Force flush now.
-        if (IS_WP_SHARED_MODE && typeof window.acglFmsWpFlushNow === 'function') {
-          try {
-            await window.acglFmsWpFlushNow();
-          } catch {
-            // ignore
-          }
-        }
-
-        // Show the same token after Save Changes (displayed on Payment Orders page)
-        setFlashToken('Thank you, your update has been saved.');
-      } else {
-        if (isPublicSubmit) {
-          try {
-            const payload = await wpPublicSubmitPaymentOrder(year, orderValues, items);
-            if (payload && payload.paymentOrderNo) {
-              setPaymentOrderNoField(String(payload.paymentOrderNo));
-            }
-
-            form.reset();
-            clearDraft();
-            void clearDraftAttachments();
-            setEditOrderId(null);
-            updateItemsStatus();
-            generateRequestCaptcha();
-            if (euroField) euroField.value = '';
-            if (usdField) usdField.value = '';
-            maybeAutofillPaymentOrderNo();
-
-            showSubmitToken('Thank you, your request has been submitted.');
-            return;
-          } catch (err) {
-            showItemsError(`Could not submit request: ${String(err && err.message ? err.message : err)}`);
-            return;
-          }
-        }
-
-        // Keep numbering aligned to the active budget year before generating.
-        syncNumberingSettingsToBudgetYear(year);
-
-        // Enforce next Payment Order No. from settings
-        const generatedPo = getNextPaymentOrderNo();
-        const generatedCanon = canonicalizePaymentOrderNo(generatedPo);
-        const existingPos = loadOrders(year).some((o) => canonicalizePaymentOrderNo(o && o.paymentOrderNo) === generatedCanon);
-        if (existingPos) {
-          showItemsError('Next Payment Order No. is already used. Update Settings to set the year/starting number.');
-          return;
-        }
-
-        orderValues.paymentOrderNo = generatedPo;
-        const order = buildPaymentOrder(orderValues);
-        const orders = loadOrders(year);
-
-        // Save newest first
-        orders.unshift(order);
-        saveOrders(orders, year);
-
-        // Increment sequence for the next new request
-        advancePaymentOrderSequence();
-      }
-
-      form.reset();
-      clearDraft();
-      void clearDraftAttachments();
-      setEditOrderId(null);
-      updateItemsStatus();
-
-      // New captcha for the next submission
-      generateRequestCaptcha();
-
-      // Clear the auto-filled currency fields too
-      if (euroField) euroField.value = '';
-      if (usdField) usdField.value = '';
-
-      // Prepare the next Payment Order No. after submitting a new request
-      maybeAutofillPaymentOrderNo();
-
-      if (!editId) {
-        showSubmitToken('Thank you, your request has been submitted.');
-      }
-
-      // Return to list after editing
-      if (getEditOrderId() === null) {
-        // no-op
-      }
-        if (editId) {
-          if (isReconciliationEdit) {
-            window.location.href = `reconciliation.html?year=${encodeURIComponent(String(year))}`;
-          } else {
-            window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
-          }
-        }
-
-      // Optional: you can navigate to the menu page manually using the header link.
-    });
-
-    if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
-        clearFieldErrors();
-        clearItemsError();
-        showSubmitToken('');
-        form.reset();
-        clearDraft();
-        void clearDraftAttachments();
-        setEditOrderId(null);
-        updateItemsStatus();
-        syncCurrencyFieldsFromItems();
-        const submitBtn = form.querySelector('button[type="submit"]');
-        if (submitBtn) submitBtn.textContent = 'Submit';
-
-        maybeAutofillPaymentOrderNo();
-
-        generateRequestCaptcha();
-      });
+    if (reconcileClearSearchBtn) {
+      const hasSearch = normalizeTextForSearch(reconciliationViewState.globalFilter) !== '';
+      reconcileClearSearchBtn.hidden = !hasSearch;
+      reconcileClearSearchBtn.disabled = !hasSearch;
     }
   }
 
-  if (editOrderBtn) {
-    editOrderBtn.addEventListener('click', () => {
-      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
-      const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
-      if (!id) return;
-      const year = getActiveBudgetYear();
-      const order = getOrderById(id, year);
-      if (!order) return;
-      beginEditingOrder(order);
-      closeModal();
-      window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
-    });
+  function updateReconciliationTotals(orders) {
+    const euroEl = document.getElementById('reconcileTotalEuro');
+    const usdEl = document.getElementById('reconcileTotalUsd');
+    if (!euroEl && !usdEl) return;
+
+    let totalEuro = 0;
+    let totalUsd = 0;
+    for (const o of orders || []) {
+      const e = Number(o && o.euro);
+      const u = Number(o && o.usd);
+      if (Number.isFinite(e)) totalEuro += e;
+      if (Number.isFinite(u)) totalUsd += u;
+    }
+
+    if (euroEl) euroEl.textContent = formatCurrency(totalEuro, 'EUR');
+    if (usdEl) usdEl.textContent = formatCurrency(totalUsd, 'USD');
   }
 
-  if (saveOrderBtn) {
-    saveOrderBtn.addEventListener('click', () => {
-      if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;
-      const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
-      const year = getActiveBudgetYear();
-      const latest = id ? getOrderById(id, year) : null;
+  function applyReconciliationView() {
+    if (!reconcileTbody || !reconcileEmptyState) return;
+    const year = getActiveBudgetYear();
+    const all = loadReconciliationOrders(year);
+    const filtered = filterOrdersForView(all, {}, reconciliationViewState.globalFilter);
+    const sorted = sortOrdersForView(filtered, null, 'asc');
+    renderReconciliationOrders(sorted);
+    updateReconciliationTotals(sorted);
+    updateReconciliationHeaderIndicators();
+  }
 
-      const withSelect = modalBody ? modalBody.querySelector('#modalWithSelect') : null;
-      const statusSelect = modalBody ? modalBody.querySelector('#modalStatusSelect') : null;
-      const budgetNumberSelect = modalBody ? modalBody.querySelector('#modalBudgetNumberSelect') : null;
-      const sourceSelect = modalBody ? modalBody.querySelector('#modalSourceSelect') : null;
-      const commentsEl = modalBody ? modalBody.querySelector('#modalComments') : null;
-      const commentsErrEl = modalBody ? modalBody.querySelector('#error-modalComments') : null;
+  function deleteReconciliationOrderById(id) {
+    const year = getActiveBudgetYear();
+    const orders = loadReconciliationOrders(year);
+    const next = orders.filter((o) => o.id !== id);
+    saveReconciliationOrders(next, year);
+    applyReconciliationView();
+  }
 
-      if (latest && withSelect && statusSelect) {
-        const comment = commentsEl ? String(commentsEl.value || '').trim() : '';
-        if (commentsErrEl) commentsErrEl.textContent = '';
+  function handleReconcileAction(id) {
+    const year = getActiveBudgetYear();
+    const order = getReconciliationOrderById(id, year);
+    if (!order) return;
 
-        const prevWith = getOrderWithLabel(latest);
-        const prevStatus = normalizeOrderStatus(getOrderStatusLabel(latest));
-        const prevBudgetNumber = extractOutCodeFromBudgetNumberText(latest.budgetNumber);
-
-        const rawWith = String(withSelect.value || '').trim();
-        const requestedWith = rawWith ? normalizeWith(rawWith) : '';
-        const requestedStatus = normalizeOrderStatus(statusSelect.value);
-        const requestedBudgetNumber = budgetNumberSelect
-          ? extractOutCodeFromBudgetNumberText(budgetNumberSelect.value)
-          : prevBudgetNumber;
-
-        // Role-based approval workflow permission guard (defence-in-depth; UI selects are
-        // also disabled for unauthorized users, but we validate here on save as well).
-        const currentUserForSave = getCurrentUser();
-        const withChanging = Boolean(requestedWith && requestedWith !== prevWith);
-        const statusChanging = requestedStatus !== prevStatus;
-        if (withChanging && !canChangeWithField(currentUserForSave, prevWith)) {
-          window.alert('You do not have permission to change the "With" field for the current workflow stage.');
-          return;
-        }
-        if (statusChanging && !canChangeStatusField(currentUserForSave, prevWith)) {
-          window.alert('You do not have permission to change the "Status" field for the current workflow stage.');
-          return;
-        }
-
-        // IMPORTANT: capture what the user selected BEFORE any workflow auto-changes.
-        // The modal stores these as attributes when the user changes Status/With.
-        const actorWithPreWorkflow = modal ? normalizeWith(modal.getAttribute('data-pending-actor-with') || '') : '';
-        const actorStatusPreWorkflow = modal ? normalizeOrderStatus(modal.getAttribute('data-pending-actor-status') || '') : '';
-
-        const originalWith = modal ? normalizeWith(modal.getAttribute('data-original-with') || '') : '';
-        const originalStatus = modal ? normalizeOrderStatus(modal.getAttribute('data-original-status') || '') : '';
-
-        const actorWithForLog = actorWithPreWorkflow || originalWith || prevWith || requestedWith;
-
-        // If With-driven workflow changes Status, the UI select may already show the post-workflow value.
-        // To match the progress-bubble behavior, prefer the pre-workflow status captured by the modal.
-        const actorStatusForLog = actorStatusPreWorkflow || originalStatus || prevStatus || requestedStatus;
-
-        let nextWith = requestedWith;
-        let nextStatus = requestedStatus;
-        const becameApproved = prevStatus !== 'Approved' && nextStatus === 'Approved';
-
-        // If the user selects the placeholder (blank), keep the previous value
-        // except for Returned where the selection is mandatory.
-        if (!nextWith && nextStatus !== 'Returned') nextWith = prevWith;
-
-        // ---- With workflow rules ----
-        if (nextStatus === 'Rejected') {
-          nextWith = 'Requestor';
-        } else if (nextStatus === 'Returned') {
-          // With must be selected explicitly (who it is returned to).
-        } else if (nextStatus === 'Paid') {
-          nextWith = 'Archives';
-        } else {
-          if (nextWith === 'Grand Secretary' && becameApproved) {
-            nextWith = 'Grand Master';
-            nextStatus = 'Review';
-          } else if (nextWith === 'Grand Secretary' && nextStatus !== 'Review' && nextStatus !== 'Approved') {
-            nextStatus = 'Review';
-          } else if (nextWith === 'Grand Master' && becameApproved) {
-            nextWith = 'Grand Treasurer';
-            nextStatus = 'Review';
-          }
-        }
-
-        // Enforce Returned selection
-        if (nextStatus === 'Returned' && !String(nextWith || '').trim()) {
-          window.alert('Select who this request is returned to.');
-          try {
-            withSelect.focus();
-          } catch {
-            // ignore
-          }
-          return;
-        }
-
-        // Require comments for Returned/Rejected
-        const commentRequired = nextStatus === 'Returned' || nextStatus === 'Rejected';
-        if (commentRequired && !comment) {
-          if (commentsErrEl) commentsErrEl.textContent = 'Comments are required for Returned or Rejected.';
-          try {
-            if (commentsEl) commentsEl.focus();
-          } catch {
-            // ignore
-          }
-          return;
-        }
-
-        const prevSource = normalizeOrderSource(latest.source);
-        const nextSource = sourceSelect ? (normalizeOrderSource(sourceSelect.value) || prevSource) : prevSource;
-        const nextBudgetNumber = requestedBudgetNumber || prevBudgetNumber;
-
-        // Guardrail: cannot change Status to Approved/Paid unless Budget Nr. is set.
-        const changingToImpact = (nextStatus === 'Approved' || nextStatus === 'Paid') && nextStatus !== getOrderStatusLabel(latest);
-        if (changingToImpact) {
-          const outCode = extractOutCodeFromBudgetNumberText(nextBudgetNumber || latest.budgetNumber);
-          if (!/^\d{4}$/.test(outCode)) {
-            window.alert('Budget Nr. is required before setting Status to Approved or Paid. Edit the order and set Budget Nr. first.');
-            statusSelect.value = prevStatus;
-            modal.removeAttribute('data-pending-status');
-            return;
-          }
-        }
-
-        const changed =
-          nextWith !== getOrderWithLabel(latest) ||
-          nextStatus !== getOrderStatusLabel(latest) ||
-          nextBudgetNumber !== prevBudgetNumber ||
-          nextSource !== prevSource ||
-          Boolean(comment);
-        if (changed) {
-          const nowIso = new Date().toISOString();
-          const draftNext = {
-            ...latest,
-            with: nextWith,
-            status: nextStatus,
-            budgetNumber: nextBudgetNumber,
-            source: nextSource || latest.source,
-            updatedAt: nowIso,
-          };
-          const changes = computeOrderAuditChanges(latest, draftNext);
-          if (comment) {
-            changes.push({ field: 'Comments', from: '—', to: comment });
-          }
-          let updated = {
-            ...draftNext,
-            timeline: appendTimelineEvent(latest, {
-              at: nowIso,
-              with: nextWith,
-              status: nextStatus,
-              actorWith: actorWithForLog,
-              actorStatus: actorStatusForLog,
-              user: getTimelineUsername(),
-              action: 'Edited',
-              changes,
-              comment: comment || undefined,
-            }),
-          };
-
-          // Budget impacts are derived from the Ledger only.
-          // Remove any legacy stored budget deduction marker so it cannot be mistaken as source-of-truth.
-          if (updated && updated.budgetDeduction) {
-            const { budgetDeduction, ...rest } = updated;
-            updated = rest;
-          }
-
-          upsertOrder(updated, year);
-          applyPaymentOrdersView();
-        }
+    const poNo = String(order.paymentOrderNo || '').trim();
+    if (poNo) {
+      const existing = findOrderByPaymentOrderNo(poNo, year);
+      if (existing) {
+        const state = buildReconcileMergeState(existing, order, year);
+        openReconcileMergeModal(state);
+        return;
       }
+    }
 
-      // Close the view modal after saving
-      closeModal();
-    });
+    const ok = window.confirm('Reconcile this entry and move it to Payment Orders?');
+    if (!ok) return;
+    const moved = reconcileOrderById(id);
+    if (moved && typeof showFlashToken === 'function') {
+      showFlashToken('Reconciled: moved entry to Payment Orders.');
+    }
+    applyReconciliationView();
   }
 
-  // Note: "Clear All" button removed from UI.
+  function reconcileOrderById(id) {
+    const year = getActiveBudgetYear();
+    const rec = loadReconciliationOrders(year);
+    const idx = rec.findIndex((o) => o && o.id === id);
+    if (idx === -1) return false;
 
-  if (tbody) {
-    // Delegate View/Delete buttons
-    tbody.addEventListener('click', (e) => {
+    const [order] = rec.splice(idx, 1);
+    saveReconciliationOrders(rec, year);
+
+    ensurePaymentOrdersListExistsForYear(year);
+    syncNumberingSettingsToBudgetYear(year);
+
+    const nowIso = new Date().toISOString();
+    const needsNo = !String(order && order.paymentOrderNo || '').trim();
+    const paymentOrderNo = needsNo ? getNextPaymentOrderNo() : String(order.paymentOrderNo).trim();
+
+    const moved = {
+      ...order,
+      paymentOrderNo,
+      updatedAt: nowIso,
+    };
+
+    const existing = loadOrders(year);
+    saveOrders([moved, ...(Array.isArray(existing) ? existing : [])], year);
+
+    updateWiseEntryIdTrackFromReconciliation(moved, paymentOrderNo, year, nowIso);
+    updateWiseEntryBudgetNoFromReconciliation(moved, year, nowIso);
+
+    if (needsNo) advancePaymentOrderSequence();
+    return true;
+  }
+
+  function updateWiseEntryIdTrackFromReconciliation(order, paymentOrderNo, year, nowIso) {
+    const source = String(order && order.source ? order.source : '').trim();
+    if (source !== 'wiseEUR' && source !== 'wiseUSD') return;
+    const entryId = String(order && order.sourceEntryId ? order.sourceEntryId : '').trim();
+    if (!entryId) return;
+    const targetYear = Number.isInteger(Number(order && order.sourceEntryYear)) ? Number(order.sourceEntryYear) : year;
+    const stamp = nowIso || new Date().toISOString();
+    const poNo = String(paymentOrderNo || '').trim();
+    if (!poNo) return;
+
+    if (source === 'wiseEUR') {
+      const all = loadWiseEur(targetYear);
+      const entry = (all || []).find((x) => x && x.id === entryId);
+      if (!entry) return;
+      entry.idTrack = poNo;
+      entry.updatedAt = stamp;
+      upsertWiseEurEntry(entry, targetYear);
+      return;
+    }
+
+    const all = loadWiseUsd(targetYear);
+    const entry = (all || []).find((x) => x && x.id === entryId);
+    if (!entry) return;
+    entry.idTrack = poNo;
+    entry.updatedAt = stamp;
+    upsertWiseUsdEntry(entry, targetYear);
+  }
+
+  function updateWiseEntryBudgetNoFromReconciliation(order, year, nowIso) {
+    const source = String(order && order.source ? order.source : '').trim();
+    if (source !== 'wiseEUR' && source !== 'wiseUSD') return;
+    const entryId = String(order && order.sourceEntryId ? order.sourceEntryId : '').trim();
+    if (!entryId) return;
+    const budgetNo = String(order && order.budgetNumber ? order.budgetNumber : '').trim();
+    if (!budgetNo) return;
+
+    const targetYear = Number.isInteger(Number(order && order.sourceEntryYear)) ? Number(order.sourceEntryYear) : year;
+    const stamp = nowIso || new Date().toISOString();
+
+    if (source === 'wiseEUR') {
+      const all = loadWiseEur(targetYear);
+      const entry = (all || []).find((x) => x && x.id === entryId);
+      if (!entry) return;
+      entry.budgetNo = budgetNo;
+      entry.updatedAt = stamp;
+      upsertWiseEurEntry(entry, targetYear);
+      return;
+    }
+
+    const all = loadWiseUsd(targetYear);
+    const entry = (all || []).find((x) => x && x.id === entryId);
+    if (!entry) return;
+    entry.budgetNo = budgetNo;
+    entry.updatedAt = stamp;
+    upsertWiseUsdEntry(entry, targetYear);
+  }
+
+  function updateWiseEntryBudgetNoFromOrderEdit(order, year, nowIso) {
+    const source = String(order && order.source ? order.source : '').trim();
+    if (source !== 'wiseEUR' && source !== 'wiseUSD') return;
+    const budgetNo = String(order && order.budgetNumber ? order.budgetNumber : '').trim();
+    if (!budgetNo) return;
+
+    const targetYear = Number.isInteger(Number(order && order.sourceEntryYear)) ? Number(order.sourceEntryYear) : year;
+    const stamp = nowIso || new Date().toISOString();
+    const entryId = String(order && order.sourceEntryId ? order.sourceEntryId : '').trim();
+
+    if (source === 'wiseEUR') {
+      const all = loadWiseEur(targetYear);
+      const entry = entryId
+        ? (all || []).find((x) => x && x.id === entryId)
+        : findUniqueWiseEntryMatch(all, { date: order.date, party: order.name, amount: order.euro }, 'eur');
+      if (!entry) return;
+      entry.budgetNo = budgetNo;
+      entry.updatedAt = stamp;
+      upsertWiseEurEntry(entry, targetYear);
+      return;
+    }
+
+    const all = loadWiseUsd(targetYear);
+    const entry = entryId
+      ? (all || []).find((x) => x && x.id === entryId)
+      : findUniqueWiseEntryMatch(all, { date: order.date, party: order.name, amount: order.usd }, 'usd');
+    if (!entry) return;
+    entry.budgetNo = budgetNo;
+    entry.updatedAt = stamp;
+    upsertWiseUsdEntry(entry, targetYear);
+  }
+
+  function updateWiseEntryIdTrackFromOrderEdit(order, year, nowIso) {
+    const source = String(order && order.source ? order.source : '').trim();
+    if (source !== 'wiseEUR' && source !== 'wiseUSD') return;
+    const poNo = String(order && order.paymentOrderNo ? order.paymentOrderNo : '').trim();
+    if (!poNo) return;
+
+    const targetYear = Number.isInteger(Number(order && order.sourceEntryYear)) ? Number(order.sourceEntryYear) : year;
+    const stamp = nowIso || new Date().toISOString();
+    const entryId = String(order && order.sourceEntryId ? order.sourceEntryId : '').trim();
+
+    if (source === 'wiseEUR') {
+      const all = loadWiseEur(targetYear);
+      const entry = entryId
+        ? (all || []).find((x) => x && x.id === entryId)
+        : findUniqueWiseEntryMatch(all, { date: order.date, party: order.name, amount: order.euro }, 'eur');
+      if (!entry || String(entry.idTrack || '').trim() === poNo) return;
+      entry.idTrack = poNo;
+      entry.updatedAt = stamp;
+      upsertWiseEurEntry(entry, targetYear);
+      return;
+    }
+
+    const all = loadWiseUsd(targetYear);
+    const entry = entryId
+      ? (all || []).find((x) => x && x.id === entryId)
+      : findUniqueWiseEntryMatch(all, { date: order.date, party: order.name, amount: order.usd }, 'usd');
+    if (!entry || String(entry.idTrack || '').trim() === poNo) return;
+    entry.idTrack = poNo;
+    entry.updatedAt = stamp;
+    upsertWiseUsdEntry(entry, targetYear);
+  }
+
+  function initReconciliationListPage() {
+    if (!reconcileTbody) return;
+    const year = getActiveBudgetYear();
+    seedMockReconciliationIfDev(year);
+
+    // Ensure the year is present in the URL for consistent nav highlighting.
+    const fromUrl = getBudgetYearFromUrl();
+    if (!fromUrl && getBasename(window.location.pathname) === 'reconciliation.html') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('year', String(year));
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+
+    const titleEl = document.querySelector('[data-reconciliation-title]');
+    if (titleEl) titleEl.textContent = `${year} Reconciliation`;
+
+    const listTitleEl = document.querySelector('[data-reconciliation-list-title]');
+    if (listTitleEl) listTitleEl.textContent = `${year} Reconciliation`;
+
+    applyAppTabTitle();
+
+    if (reconcileToPaymentOrdersBtn) {
+      reconcileToPaymentOrdersBtn.textContent = `← Back to ${year} Payment Orders`;
+      reconcileToPaymentOrdersBtn.setAttribute('href', `menu.html?year=${encodeURIComponent(String(year))}`);
+      reconcileToPaymentOrdersBtn.setAttribute('aria-label', `Back to ${year} Payment Orders`);
+      reconcileToPaymentOrdersBtn.removeAttribute('title');
+    }
+
+    const globalInput = document.getElementById('reconcileOrdersGlobalSearch');
+    if (globalInput) {
+      globalInput.value = reconciliationViewState.globalFilter || '';
+      globalInput.addEventListener('input', () => {
+        reconciliationViewState.globalFilter = globalInput.value;
+        applyReconciliationView();
+      });
+    }
+
+    if (reconcileClearSearchBtn && globalInput && !reconcileClearSearchBtn.dataset.bound) {
+      reconcileClearSearchBtn.dataset.bound = 'true';
+      reconcileClearSearchBtn.addEventListener('click', () => {
+        globalInput.value = '';
+        reconciliationViewState.globalFilter = '';
+        applyReconciliationView();
+        if (globalInput.focus) globalInput.focus();
+      });
+    }
+
+    reconcileTbody.addEventListener('click', (e) => {
       const actionEl = e.target.closest('[data-action]');
       if (!actionEl) return;
       if (actionEl.tagName === 'A') e.preventDefault();
@@ -10619,215 +10469,1020 @@
       const id = row.getAttribute('data-id');
       const action = actionEl.getAttribute('data-action');
 
-      const year = getActiveBudgetYear();
-      const orders = loadOrders(year);
-      const order = orders.find((o) => o.id === id);
-      if (!order) return;
-
       if (action === 'downloadPdf') {
+        const order = getReconciliationOrderById(id, year);
+        if (!order) return;
         if (hasOrderMissingRequiredValues(order)) {
           window.alert('Complete all required fields before downloading a PDF.');
           return;
         }
         generatePaymentOrderPdfFromTemplate({ order });
-      } else if (action === 'view') {
-        openModalWithOrder(order);
-      } else if (action === 'items') {
+        return;
+      }
+
+      if (action === 'delete') {
+        if (!requireDeleteAccess('orders_reconciliation', 'Delete access is required for Reconciliation.')) return;
+        const ok = window.confirm('Delete this reconciliation entry?');
+        if (!ok) return;
+        deleteReconciliationOrderById(id);
+        return;
+      }
+
+      if (action === 'edit') {
+        if (!requireWriteOrCreateAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
+        const order = getReconciliationOrderById(id, year);
+        if (!order) return;
+        beginEditingOrder(order);
+        window.location.href = withWpEmbedParams(`index.html?year=${encodeURIComponent(String(year))}&return=reconciliation&resumeDraft=1`);
+        return;
+      }
+
+      if (action === 'reconcile') {
+        if (!requireWriteOrCreateAccess('orders_reconciliation', 'Reconciliation is read only for your account.')) return;
+        handleReconcileAction(id);
+      }
+    });
+
+    applyReconciliationView();
+  }
+
+  
+  // [bundle-strip:itemize-remove-settings] removed in page-specific build.
+
+  // [bundle-strip:itemize-remove-non-itemize-workflows] removed in page-specific build.
+// ---- Itemize page logic ----
+
+  function getMilageRate(vehicleTypeRaw) {
+    const v = String(vehicleTypeRaw || '').trim().toLowerCase();
+    if (v === 'car') return 0.3;
+    return 0.2;
+  }
+
+  function roundMoney(n) {
+    const num = Number(n);
+    if (!Number.isFinite(num)) return NaN;
+    return Math.round(num * 100) / 100;
+  }
+
+  function computeMilageTotal(vehicleTypeRaw, kmRaw) {
+    const km = Number(kmRaw);
+    if (!Number.isFinite(km) || km < 0) return NaN;
+    const total = km * getMilageRate(vehicleTypeRaw);
+    return roundMoney(total);
+  }
+
+  function clearMilageErrors() {
+    const keys = [
+      'milageDate',
+      'milageVehicleType',
+      'milageStart',
+      'milageDestination',
+      'milageKilometers',
+      'milageTotalCost',
+      'milageAttachment',
+    ];
+    for (const k of keys) {
+      const errEl = document.getElementById(`error-${k}`);
+      if (errEl) errEl.textContent = '';
+      const input = document.getElementById(k);
+      if (input) input.classList.remove('input-error');
+    }
+    const viewErr = document.getElementById('milageViewError');
+    if (viewErr) viewErr.textContent = '';
+  }
+
+  function showMilageErrors(errors) {
+    for (const [k, msg] of Object.entries(errors || {})) {
+      const errEl = document.getElementById(`error-${k}`);
+      if (errEl) errEl.textContent = String(msg || '');
+      const input = document.getElementById(k);
+      if (input) input.classList.add('input-error');
+    }
+  }
+
+  function updateMilageTotalCostField() {
+    const vehicleEl = document.getElementById('milageVehicleType');
+    const kmEl = document.getElementById('milageKilometers');
+    const totalEl = document.getElementById('milageTotalCost');
+    if (!vehicleEl || !kmEl || !totalEl) return;
+    const total = computeMilageTotal(vehicleEl.value, kmEl.value);
+    if (!Number.isFinite(total)) {
+      totalEl.value = '';
+      return;
+    }
+    totalEl.value = total.toFixed(2);
+  }
+
+  function closeMilageModal() {
+    const modalEl = document.getElementById('milageModal');
+    const formEl = document.getElementById('milageForm');
+    const hintEl = document.getElementById('milageAttachmentHint');
+    if (formEl) {
+      formEl.reset();
+      const editIdEl = document.getElementById('milageEditingId');
+      const attIdEl = document.getElementById('milageAttachmentId');
+      if (editIdEl) editIdEl.value = '';
+      if (attIdEl) attIdEl.value = '';
+      const fileEl = document.getElementById('milageAttachment');
+      if (fileEl) {
+        fileEl.value = '';
+        fileEl.required = true;
+      }
+    }
+    if (hintEl) hintEl.hidden = true;
+    clearMilageErrors();
+    closeSimpleModal(modalEl);
+  }
+
+  function closeMilageViewModal() {
+    const modalEl = document.getElementById('milageViewModal');
+    const bodyEl = document.getElementById('milageViewBody');
+    if (bodyEl) bodyEl.innerHTML = '';
+    if (modalEl) modalEl.removeAttribute('data-item-id');
+    clearMilageErrors();
+    closeSimpleModal(modalEl);
+  }
+
+  function readItemizeTarget() {
+    const params = new URLSearchParams(window.location.search);
+    const orderId = params.get('orderId');
+    const isDraft = params.get('draft') === '1';
+    return { orderId, isDraft };
+  }
+
+  function currencyModeFromOrderLike(orderLike) {
+    if (!orderLike) return null;
+    if (orderLike.euro !== null && orderLike.euro !== undefined && orderLike.euro !== '') return 'EUR';
+    if (orderLike.usd !== null && orderLike.usd !== undefined && orderLike.usd !== '') return 'USD';
+    return null;
+  }
+
+  function getOrderById(orderId, year) {
+    const orders = loadOrders(year);
+    return orders.find((o) => o.id === orderId) || null;
+  }
+
+  function getReconciliationOrderById(orderId, year) {
+    const orders = loadReconciliationOrders(year);
+    return orders.find((o) => o.id === orderId) || null;
+  }
+
+  function upsertOrder(updatedOrder, year) {
+    const orders = loadOrders(year);
+    const existing = orders.find((o) => o.id === updatedOrder.id) || null;
+    const next = orders.map((o) => (o.id === updatedOrder.id ? updatedOrder : o));
+    saveOrders(next, year);
+
+    if (existing) {
+      const prevBudget = String(existing.budgetNumber || '').trim();
+      const nextBudget = String(updatedOrder.budgetNumber || '').trim();
+      const prevPo = String(existing.paymentOrderNo || '').trim();
+      const nextPo = String(updatedOrder.paymentOrderNo || '').trim();
+      const nowIso = new Date().toISOString();
+
+      if (prevBudget !== nextBudget) {
+        updateWiseEntryBudgetNoFromOrderEdit(updatedOrder, year, nowIso);
+      }
+      if (prevPo !== nextPo) {
+        updateWiseEntryIdTrackFromOrderEdit(updatedOrder, year, nowIso);
+      }
+    }
+  }
+
+  function clearItemErrors() {
+    if (!itemForm) return;
+    ['itemTitle', 'itemEuro', 'itemUsd'].forEach((k) => {
+      const el = document.getElementById(`error-${k}`);
+      if (el) el.textContent = '';
+    });
+    const inputs = itemForm.querySelectorAll('input');
+    inputs.forEach((el) => el.classList.remove('input-error'));
+  }
+
+  function showItemErrors(errors) {
+    if (!itemForm) return;
+    for (const [key, msg] of Object.entries(errors)) {
+      const errEl = document.getElementById(`error-${key}`);
+      if (errEl) errEl.textContent = msg;
+      const input = document.getElementById(key);
+      if (input) input.classList.add('input-error');
+    }
+  }
+
+  function validateItemInput(mode) {
+    if (!itemForm) return { ok: false, errors: { itemTitle: 'Form not found.' } };
+
+    const title = document.getElementById('itemTitle').value.trim();
+    const euroRaw = document.getElementById('itemEuro').value.trim();
+    const usdRaw = document.getElementById('itemUsd').value.trim();
+
+    const hasEuro = euroRaw !== '';
+    const hasUsd = usdRaw !== '';
+
+    const errors = {};
+    if (!title) errors.itemTitle = 'Title is required.';
+
+    // Exactly one currency per item
+    if (!hasEuro && !hasUsd) {
+      errors.itemEuro = 'Enter Euro or USD.';
+      errors.itemUsd = 'Enter Euro or USD.';
+    }
+    if (hasEuro && hasUsd) {
+      errors.itemEuro = 'Enter only one currency.';
+      errors.itemUsd = 'Enter only one currency.';
+    }
+
+    let euro = null;
+    let usd = null;
+
+    if (hasEuro) {
+      const n = Number(euroRaw);
+      if (!Number.isFinite(n) || n < 0) errors.itemEuro = 'Enter a valid non-negative number.';
+      euro = n;
+    }
+    if (hasUsd) {
+      const n = Number(usdRaw);
+      if (!Number.isFinite(n) || n < 0) errors.itemUsd = 'Enter a valid non-negative number.';
+      usd = n;
+    }
+
+    if (mode === 'EUR' && hasUsd) {
+      errors.itemUsd = 'This order is Euro-only.';
+    }
+    if (mode === 'USD' && hasEuro) {
+      errors.itemEuro = 'This order is USD-only.';
+    }
+
+    if (Object.keys(errors).length > 0) return { ok: false, errors };
+    return { ok: true, value: { title, euro, usd } };
+  }
+
+  function renderItems(items, options = {}) {
+    if (!itemsTbody || !itemsEmptyState || !totalEuroEl || !totalUsdEl) return;
+
+    const readOnly = Boolean(options && options.readOnly);
+
+    itemsTbody.innerHTML = '';
+    if (!items || items.length === 0) {
+      itemsEmptyState.hidden = false;
+    } else {
+      itemsEmptyState.hidden = true;
+      itemsTbody.innerHTML = items
+        .map((it, idx) => {
+          const isMilage = Boolean(it && typeof it === 'object' && it.milage && typeof it.milage === 'object');
+          return `
+            <tr data-item-id="${escapeHtml(it.id)}">
+              <td class="num">${idx + 1}</td>
+              <td>${escapeHtml(it.title)}</td>
+              <td class="num">${escapeHtml(formatCurrency(it.euro, 'EUR'))}</td>
+              <td class="num">${escapeHtml(formatCurrency(it.usd, 'USD'))}</td>
+              <td class="actions">
+                ${isMilage ? '<button type="button" class="btn btn--ghost" data-item-action="viewMilage">View Milage</button>' : ''}
+                ${readOnly ? '' : '<button type="button" class="btn btn--editIcon" data-item-action="edit" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>'}
+                ${readOnly ? '' : '<button type="button" class="btn btn--danger" data-item-action="delete">Delete</button>'}
+              </td>
+            </tr>
+          `.trim();
+        })
+        .join('');
+    }
+
+    const totals = sumItems(items);
+    totalEuroEl.textContent = formatCurrency(totals.euro, 'EUR') || '€ 0.00';
+    totalUsdEl.textContent = formatCurrency(totals.usd, 'USD') || '$ 0.00';
+  }
+
+  function resetItemEditor() {
+    if (!itemForm) return;
+    if (editingItemIdEl) editingItemIdEl.value = '';
+    document.getElementById('itemTitle').value = '';
+    document.getElementById('itemEuro').value = '';
+    document.getElementById('itemUsd').value = '';
+    if (addOrUpdateItemBtn) addOrUpdateItemBtn.textContent = 'Add Item';
+    const modalTitleEl = document.getElementById('itemModalTitle');
+    if (modalTitleEl) modalTitleEl.textContent = 'Add Item';
+    clearItemErrors();
+  }
+
+  function populateItemEditor(item) {
+    if (!itemForm) return;
+    if (editingItemIdEl) editingItemIdEl.value = item.id;
+    document.getElementById('itemTitle').value = item.title || '';
+    document.getElementById('itemEuro').value = item.euro === null || item.euro === undefined ? '' : String(item.euro);
+    document.getElementById('itemUsd').value = item.usd === null || item.usd === undefined ? '' : String(item.usd);
+    if (addOrUpdateItemBtn) addOrUpdateItemBtn.textContent = 'Update Item';
+    const modalTitleEl = document.getElementById('itemModalTitle');
+    if (modalTitleEl) modalTitleEl.textContent = 'Edit Item';
+    clearItemErrors();
+  }
+
+  function closeItemModal() {
+    if (itemForm) itemForm.reset();
+    resetItemEditor();
+    clearItemErrors();
+    closeSimpleModal(itemModal);
+  }
+
+  if (itemForm && itemsTbody) {
+    const target = readItemizeTarget();
+    const attachmentTargetKey = getAttachmentTargetKey(target);
+    let mode = null;
+    let items = [];
+    let boundOrderId = null;
+    const milageModal = document.getElementById('milageModal');
+    const milageForm = document.getElementById('milageForm');
+    const milageViewModal = document.getElementById('milageViewModal');
+    const currentUser = getCurrentUser();
+    const canEditExistingOrderItems = Boolean(currentUser && canOrdersItemizeWrite(currentUser));
+    const canViewExistingOrderItems = Boolean(currentUser && canOrdersItemizeRead(currentUser));
+    const isExistingOrderView = Boolean(!target.isDraft && target.orderId);
+    const itemizeReadOnly = Boolean(isExistingOrderView && !canEditExistingOrderItems);
+
+    if (backToFormLink) {
+      const year = getActiveBudgetYear();
+      if (target.isDraft) {
+        const href = `index.html?resumeDraft=1&year=${encodeURIComponent(String(year))}`;
+        backToFormLink.href = href;
+      } else if (target.orderId) {
+        const orderId = String(target.orderId || '').trim();
+        const href = `index.html?year=${encodeURIComponent(String(year))}`;
+        backToFormLink.href = href;
+        backToFormLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (orderId) {
+            const order = getOrderById(orderId, year);
+            if (order) {
+              beginEditingOrder(order);
+            } else {
+              setEditOrderId(orderId);
+            }
+          }
+          window.location.href = href;
+        });
+      }
+    }
+
+    if (target.isDraft) {
+      const draft = loadDraft();
+      mode = currencyModeFromOrderLike(draft);
+      items = loadDraftItems();
+      if (itemizeContext) {
+        const label = draft?.paymentOrderNo ? `Draft: ${draft.paymentOrderNo}` : 'Draft payment order';
+        itemizeContext.textContent = `${label}. Add line items below.`;
+      }
+    } else if (target.orderId) {
+      if (!canViewExistingOrderItems) {
+        window.alert('Read only access.');
+        const year = getActiveBudgetYear();
+        window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
+        return;
+      }
+
+      const year = getActiveBudgetYear();
+      const order = getOrderById(target.orderId, year);
+      boundOrderId = target.orderId;
+      mode = currencyModeFromOrderLike(order);
+      items = Array.isArray(order?.items) ? order.items : [];
+      if (itemizeContext) {
+        const label = order?.paymentOrderNo ? `Payment Order: ${order.paymentOrderNo}` : 'Payment Order';
+        itemizeContext.textContent = itemizeReadOnly ? `${label}. View items below.` : `${label}. Edit items below.`;
+      }
+    }
+
+    renderItems(items, { readOnly: itemizeReadOnly });
+    if (itemizeReadOnly) {
+      if (saveItemsBtn) saveItemsBtn.hidden = true;
+      if (openItemModalBtn) openItemModalBtn.hidden = true;
+      if (addMilageBtn) addMilageBtn.hidden = true;
+    } else {
+      resetItemEditor();
+    }
+
+    function requireItemizeEditAccess(message) {
+      // Existing order itemize requires WP sign-in and at least partial access.
+      if (isExistingOrderView) {
         const u = getCurrentUser();
         if (!u) {
           window.alert('Please sign in.');
-          return;
+          return false;
         }
-        if (!canOrdersItemizeRead(u)) {
-          window.alert('Itemize Payment Order is read only for your account.');
-          return;
+        if (!canOrdersItemizeWrite(u)) {
+          window.alert(message || 'Itemize Payment Order is read only for your account.');
+          return false;
         }
-        window.location.href = `itemize.html?orderId=${encodeURIComponent(id)}&year=${encodeURIComponent(String(year))}`;
-      } else if (action === 'edit') {
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
-        beginEditingOrder(order);
-        window.location.href = `index.html?year=${encodeURIComponent(String(year))}`;
-      } else if (action === 'delete') {
-        if (!requireDeleteAccess('orders', 'Delete access is required for Payment Orders.')) return;
-        const ok = window.confirm('Delete this request?');
-        if (!ok) return;
-        deleteOrderById(id);
+        return true;
       }
-    });
-  }
 
-  if (modal) {
-    // Modal close handlers (backdrop, buttons)
-    modal.addEventListener('click', (e) => {
-      const closeTarget = e.target.closest('[data-modal-close]');
-      if (closeTarget) closeModal();
-    });
-  }
-
-  // Close modal on Escape (only relevant if a modal exists)
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-
-    const milageViewModal = document.getElementById('milageViewModal');
-    if (milageViewModal && milageViewModal.classList.contains('is-open')) {
-      closeMilageViewModal();
-      return;
-    }
-    const milageModal = document.getElementById('milageModal');
-    if (milageModal && milageModal.classList.contains('is-open')) {
-      closeMilageModal();
-      return;
+      // Draft itemize is part of the public request flow:
+      // - anonymous users may draft
+      // - signed-in users need at least partial access
+      const u = getCurrentUser();
+      if (!u) return true;
+      if (!canOrdersViewEdit(u)) {
+        window.alert(message || 'Read only access.');
+        return false;
+      }
+      return true;
     }
 
-    const itemModal = document.getElementById('itemModal');
-    if (itemModal && itemModal.classList.contains('is-open')) {
-      closeItemModal();
-      return;
+    function openItemModalForAdd() {
+      if (!itemModal || !itemForm) return;
+      resetItemEditor();
+      openSimpleModal(itemModal, '#itemTitle');
     }
 
-    const backlogCommentModal = document.getElementById('backlogCommentModal');
-    if (backlogCommentModal && backlogCommentModal.classList.contains('is-open')) {
-      closeBacklogCommentModal();
-      return;
-    }
-    const backlogItemModal = document.getElementById('backlogItemModal');
-    if (backlogItemModal && backlogItemModal.classList.contains('is-open')) {
-      closeBacklogItemModal();
-      return;
+    function openItemModalForEdit(item) {
+      if (!itemModal || !itemForm) return;
+      populateItemEditor(item);
+      openSimpleModal(itemModal, '#itemTitle');
     }
 
-    if (modal && modal.classList.contains('is-open')) closeModal();
-  });
+    if (itemModal && !itemModal.dataset.bound) {
+      itemModal.dataset.bound = '1';
+      itemModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeItemModal();
+      });
+    }
 
-  // Initial render for list page
-  if (tbody) {
-    initPaymentOrdersListPage();
-    initPaymentOrdersHeaderFilters();
-    seedMockOrdersIfDev();
-    applyPaymentOrdersView();
+    if (openItemModalBtn && !openItemModalBtn.dataset.bound) {
+      openItemModalBtn.dataset.bound = '1';
+      openItemModalBtn.disabled = itemizeReadOnly;
+      if (itemizeReadOnly) openItemModalBtn.setAttribute('data-tooltip', 'Read only access.');
+      openItemModalBtn.addEventListener('click', () => {
+        if (itemizeReadOnly) return;
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+        openItemModalForAdd();
+      });
+    }
 
-    try {
-      const params = new URLSearchParams(window.location.search || '');
-      const targetId = String(params.get('orderId') || '').trim();
-      const targetYearRaw = String(params.get('year') || '').trim();
-      const targetYear = /^\d{4}$/.test(targetYearRaw) ? Number(targetYearRaw) : getActiveBudgetYear();
-      if (targetId) {
-        const order = loadOrders(targetYear).find((o) => String((o && o.id) || '') === targetId);
-        if (order) {
-          openModalWithOrder(order);
+    const attachmentUploadContext = (() => {
+      const year = String(getActiveBudgetYear() || '').trim();
+      if (target.isDraft) {
+        const draft = loadDraft();
+        return {
+          year,
+          paymentOrderNo: String(draft && draft.paymentOrderNo ? draft.paymentOrderNo : '').trim(),
+          orderId: '',
+        };
+      }
+      if (target.orderId) {
+        const y = getActiveBudgetYear();
+        const order = getOrderById(target.orderId, y);
+        return {
+          year,
+          paymentOrderNo: String(order && order.paymentOrderNo ? order.paymentOrderNo : '').trim(),
+          orderId: String(target.orderId || '').trim(),
+        };
+      }
+      return { year, paymentOrderNo: '', orderId: '' };
+    })();
+
+    function openMilageModalForAdd() {
+      if (!milageModal || !milageForm) return;
+      clearMilageErrors();
+      milageForm.reset();
+      const titleEl = document.getElementById('milageModalTitle');
+      if (titleEl) titleEl.textContent = 'Add Milage';
+      const editIdEl = document.getElementById('milageEditingId');
+      const attIdEl = document.getElementById('milageAttachmentId');
+      const fileEl = document.getElementById('milageAttachment');
+      const hintEl = document.getElementById('milageAttachmentHint');
+      if (editIdEl) editIdEl.value = '';
+      if (attIdEl) attIdEl.value = '';
+      if (fileEl) {
+        fileEl.value = '';
+        fileEl.required = true;
+      }
+      if (hintEl) hintEl.hidden = true;
+
+      const dateEl = document.getElementById('milageDate');
+      if (dateEl && !String(dateEl.value || '').trim()) {
+        dateEl.value = new Date().toISOString().slice(0, 10);
+      }
+
+      updateMilageTotalCostField();
+      openSimpleModal(milageModal, '#milageDate');
+    }
+
+    function openMilageModalForEdit(item) {
+      if (!milageModal || !milageForm) return;
+      const m = item && item.milage && typeof item.milage === 'object' ? item.milage : null;
+      if (!m) return;
+      clearMilageErrors();
+      milageForm.reset();
+      const titleEl = document.getElementById('milageModalTitle');
+      if (titleEl) titleEl.textContent = 'Edit Milage';
+      const editIdEl = document.getElementById('milageEditingId');
+      const attIdEl = document.getElementById('milageAttachmentId');
+      const hintEl = document.getElementById('milageAttachmentHint');
+      const fileEl = document.getElementById('milageAttachment');
+      if (editIdEl) editIdEl.value = String(item.id || '');
+      if (attIdEl) attIdEl.value = String(m.attachmentId || '');
+      if (fileEl) {
+        fileEl.value = '';
+        fileEl.required = false;
+      }
+      if (hintEl) hintEl.hidden = !Boolean(m.attachmentId);
+
+      const dateEl = document.getElementById('milageDate');
+      const vehicleEl = document.getElementById('milageVehicleType');
+      const startEl = document.getElementById('milageStart');
+      const destEl = document.getElementById('milageDestination');
+      const kmEl = document.getElementById('milageKilometers');
+      if (dateEl) dateEl.value = String(m.date || '').slice(0, 10);
+      if (vehicleEl) vehicleEl.value = String(m.vehicleType || '');
+      if (startEl) startEl.value = String(m.start || '');
+      if (destEl) destEl.value = String(m.destination || '');
+      if (kmEl) kmEl.value = m.kilometers === null || m.kilometers === undefined ? '' : String(m.kilometers);
+      updateMilageTotalCostField();
+      openSimpleModal(milageModal, '#milageDate');
+    }
+
+    function formatMilageVehicleLabel(vehicleTypeRaw) {
+      const v = String(vehicleTypeRaw || '').trim().toLowerCase();
+      if (v === 'car') return 'Car';
+      if (v === 'motorcycle') return 'Motorcycle';
+      return vehicleTypeRaw ? String(vehicleTypeRaw) : '—';
+    }
+
+    function openMilageView(item) {
+      if (!milageViewModal) return;
+      clearMilageErrors();
+      const m = item && item.milage && typeof item.milage === 'object' ? item.milage : null;
+      if (!m) return;
+      const titleEl = document.getElementById('milageViewModalTitle');
+      if (titleEl) titleEl.textContent = String(item.title || 'Milage');
+      milageViewModal.setAttribute('data-item-id', String(item.id || ''));
+      const bodyEl = document.getElementById('milageViewBody');
+      const currency = item && item.euro !== null && item.euro !== undefined ? 'EUR' : 'USD';
+      const symbol = currency === 'EUR' ? '€' : '$';
+      const rate = getMilageRate(m.vehicleType);
+      const total = computeMilageTotal(m.vehicleType, m.kilometers);
+      if (bodyEl) {
+        const attId = String(m.attachmentId || '').trim();
+        bodyEl.innerHTML = `
+          <div class="grid">
+            <div class="field">
+              <div class="subhead">Date</div>
+              <div><strong>${escapeHtml(formatDate(m.date))}</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Vehicle Type</div>
+              <div><strong>${escapeHtml(formatMilageVehicleLabel(m.vehicleType))}</strong></div>
+            </div>
+            <div class="field field--span2">
+              <div class="subhead">Start (Departure Location)</div>
+              <div><strong>${escapeHtml(String(m.start || ''))}</strong></div>
+            </div>
+            <div class="field field--span2">
+              <div class="subhead">Destination</div>
+              <div><strong>${escapeHtml(String(m.destination || ''))}</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Kilometers</div>
+              <div><strong>${escapeHtml(String(m.kilometers ?? ''))}</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Rate</div>
+              <div><strong>${escapeHtml(symbol)} ${escapeHtml(rate.toFixed(2))} / km</strong></div>
+            </div>
+            <div class="field">
+              <div class="subhead">Total</div>
+              <div><strong>${escapeHtml(formatCurrency(total, currency) || '')}</strong></div>
+            </div>
+
+            <div class="field field--span2">
+              <div class="subhead">ADAC Route Planner Attachment</div>
+              ${attId
+                ? `<div><a href="#" data-milage-attachment-link="1" data-attachment-id="${escapeHtml(attId)}">${escapeHtml(String(m.attachmentName || 'View / download attachment'))}</a></div>`
+                : '<div class="muted">—</div>'}
+            </div>
+          </div>
+        `.trim();
+      }
+
+      const downloadBtn = document.getElementById('milageDownloadBtn');
+      if (downloadBtn) downloadBtn.disabled = !Boolean(m.attachmentId);
+
+      const editBtn = document.getElementById('milageEditBtn');
+      const delBtn = document.getElementById('milageDeleteBtn');
+      if (editBtn) editBtn.disabled = itemizeReadOnly;
+      if (delBtn) delBtn.disabled = itemizeReadOnly;
+
+      openSimpleModal(milageViewModal, '#milageDownloadBtn');
+    }
+
+    async function deleteMilageItem(itemId) {
+      const current = items.find((it) => it.id === itemId);
+      if (!current) return;
+      const m = current && current.milage && typeof current.milage === 'object' ? current.milage : null;
+      const ok = window.confirm('Delete this milage report?');
+      if (!ok) return;
+      items = items.filter((it) => it.id !== itemId);
+      renderItems(items, { readOnly: itemizeReadOnly });
+      resetItemEditor();
+      if (m && m.attachmentId) {
+        try {
+          await deleteAttachmentById(m.attachmentId);
+          if (attachmentTargetKey) await refreshAttachments(attachmentTargetKey);
+        } catch {
+          // ignore
         }
       }
-    } catch {
-      // ignore
     }
-  }
 
-  if (newPoBtn) {
-    newPoBtn.addEventListener('click', () => {
-      window.location.href = withWpEmbedParams('index.html?new=1');
-    });
-  }
+    if (addMilageBtn && !addMilageBtn.dataset.bound) {
+      addMilageBtn.dataset.bound = '1';
+      addMilageBtn.disabled = itemizeReadOnly;
+      if (itemizeReadOnly) addMilageBtn.setAttribute('data-tooltip', 'Read only access.');
+      addMilageBtn.addEventListener('click', () => {
+        if (itemizeReadOnly) return;
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+        openMilageModalForAdd();
+      });
+    }
 
-  if (reconcileTbody) {
-    initReconciliationListPage();
-  }
+    if (milageModal && !milageModal.dataset.bound) {
+      milageModal.dataset.bound = '1';
+      milageModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeMilageModal();
+      });
+    }
 
-  if (incomeTbody) {
-    initIncomeListPage();
-  }
+    if (milageViewModal && !milageViewModal.dataset.bound) {
+      milageViewModal.dataset.bound = '1';
+      milageViewModal.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-modal-close]');
+        if (closeTarget) closeMilageViewModal();
+      });
+    }
 
-  if (wiseEurTbody) {
-    initWiseEurListPage();
-  }
+    {
+      const vehicleEl = document.getElementById('milageVehicleType');
+      const kmEl = document.getElementById('milageKilometers');
+      if (vehicleEl && !vehicleEl.dataset.bound) {
+        vehicleEl.dataset.bound = '1';
+        vehicleEl.addEventListener('change', updateMilageTotalCostField);
+      }
+      if (kmEl && !kmEl.dataset.bound) {
+        kmEl.dataset.bound = '1';
+        kmEl.addEventListener('input', updateMilageTotalCostField);
+      }
+    }
 
-  if (wiseUsdTbody) {
-    initWiseUsdListPage();
-  }
-
-  if (gsLedgerTbody) {
-    initGsLedgerListPage();
-  }
-
-  if (moneyTransfersTbody) {
-    initMoneyTransfersListPage();
-  }
-
-  if (mtBuilderTbody) {
-    initMoneyTransferBuilderPage();
-  }
-
-  await initSharedTableEnhancements();
-
-  
-  // [bundle-strip:request-remove-itemize] removed in page-specific build.
-
-
-  // [bundle-fix:income-key-helper] Income section is stripped in this bundle,
-  // but dev seeding still references this helper during startup.
-  function getIncomeKeyForYear(year) {
-    const y = Number(year);
-    if (!Number.isInteger(y)) return null;
-    return `payment_order_income_${y}_v1`;
-  }
-
-
-  // [bundle-fix:request-auth-wiring] The request bundle strips workflow wiring
-  // above, but index page still needs header auth and popout link handlers.
-  if (authHeaderBtn) {
-    syncAuthHeaderBtn();
-    if (!authHeaderBtn.dataset.bound) {
-      authHeaderBtn.dataset.bound = 'true';
-      authHeaderBtn.addEventListener('click', (e) => {
+    if (milageForm && !milageForm.dataset.bound) {
+      milageForm.dataset.bound = '1';
+      milageForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        openAuthLoginOverlay();
+        if (itemizeReadOnly) return;
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+
+        clearMilageErrors();
+
+        const editId = String(document.getElementById('milageEditingId')?.value || '').trim();
+        const existingItem = editId ? items.find((it) => it.id === editId) : null;
+        const existingMilage = existingItem && existingItem.milage && typeof existingItem.milage === 'object' ? existingItem.milage : null;
+        const existingAttachmentId = String(document.getElementById('milageAttachmentId')?.value || '').trim();
+        const existingAttachmentName = existingMilage && existingMilage.attachmentName ? String(existingMilage.attachmentName) : '';
+
+        const date = String(document.getElementById('milageDate')?.value || '').trim();
+        const vehicleType = String(document.getElementById('milageVehicleType')?.value || '').trim();
+        const start = String(document.getElementById('milageStart')?.value || '').trim();
+        const destination = String(document.getElementById('milageDestination')?.value || '').trim();
+        const kmRaw = String(document.getElementById('milageKilometers')?.value || '').trim();
+        const km = Number(kmRaw);
+        const total = computeMilageTotal(vehicleType, km);
+
+        const errors = {};
+        if (!date) errors.milageDate = 'Date is required.';
+        if (!vehicleType) errors.milageVehicleType = 'Vehicle type is required.';
+        if (!start) errors.milageStart = 'Start is required.';
+        if (!destination) errors.milageDestination = 'Destination is required.';
+        if (!kmRaw) errors.milageKilometers = 'Kilometers is required.';
+        if (!Number.isFinite(km) || km <= 0) errors.milageKilometers = 'Enter a valid number greater than 0.';
+        if (!Number.isFinite(total) || total < 0) errors.milageTotalCost = 'Total cost could not be calculated.';
+
+        const fileEl = document.getElementById('milageAttachment');
+        const file = fileEl && fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
+        const mustHaveAttachment = !existingAttachmentId;
+        if (mustHaveAttachment && !file) errors.milageAttachment = 'Attachment is required.';
+        if (!attachmentTargetKey) errors.milageAttachment = 'Attachments are not available for this payment order.';
+
+        if (Object.keys(errors).length > 0) {
+          showMilageErrors(errors);
+          return;
+        }
+
+        let attachmentId = existingAttachmentId;
+        let attachmentName = existingAttachmentName;
+        if (file && attachmentTargetKey) {
+          try {
+            const uploaded = await addAttachment(attachmentTargetKey, file, attachmentUploadContext);
+            attachmentId = uploaded && uploaded.id ? String(uploaded.id) : '';
+            attachmentName = uploaded && uploaded.name ? String(uploaded.name) : (file && file.name ? String(file.name) : '');
+            if (existingAttachmentId) {
+              try {
+                await deleteAttachmentById(existingAttachmentId);
+              } catch {
+                // ignore
+              }
+            }
+            await refreshAttachments(attachmentTargetKey);
+          } catch {
+            showMilageErrors({ milageAttachment: 'Failed to upload attachment.' });
+            return;
+          }
+        }
+
+        const currency = mode || (existingItem && existingItem.euro !== null ? 'EUR' : (existingItem && existingItem.usd !== null ? 'USD' : 'EUR'));
+        const title = `Milage ${formatDate(date)}`;
+
+        const nextItem = {
+          id: editId || (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          title,
+          euro: currency === 'EUR' ? total : null,
+          usd: currency === 'USD' ? total : null,
+          milage: {
+            date,
+            vehicleType,
+            start,
+            destination,
+            kilometers: km,
+            rate: getMilageRate(vehicleType),
+            attachmentId,
+            attachmentName,
+          },
+        };
+
+        if (editId) {
+          items = items.map((it) => (it.id === editId ? nextItem : it));
+        } else {
+          items = [...items, nextItem];
+        }
+
+        if (!mode) mode = currency;
+
+        closeMilageModal();
+        renderItems(items, { readOnly: itemizeReadOnly });
+      });
+    }
+
+    if (milageViewModal && !milageViewModal.dataset.actionsBound) {
+      milageViewModal.dataset.actionsBound = '1';
+      const downloadBtn = document.getElementById('milageDownloadBtn');
+      const editBtn = document.getElementById('milageEditBtn');
+      const delBtn = document.getElementById('milageDeleteBtn');
+
+      milageViewModal.addEventListener('click', async (e) => {
+        const link = e.target && e.target.closest ? e.target.closest('a[data-milage-attachment-link="1"]') : null;
+        if (!link) return;
+        e.preventDefault();
+        const attId = String(link.getAttribute('data-attachment-id') || '').trim();
+        if (!attId) return;
+        try {
+          const att = await getAttachmentById(attId);
+          if (!att) return;
+          openAttachmentInNewTab(att);
+        } catch {
+          const viewErr = document.getElementById('milageViewError');
+          if (viewErr) viewErr.textContent = 'Could not open attachment.';
+        }
+      });
+
+      if (downloadBtn) {
+        downloadBtn.addEventListener('click', async () => {
+          const id = String(milageViewModal.getAttribute('data-item-id') || '').trim();
+          const item = items.find((it) => it.id === id);
+          const m = item && item.milage && typeof item.milage === 'object' ? item.milage : null;
+          if (!m || !m.attachmentId) return;
+          try {
+            const att = await getAttachmentById(m.attachmentId);
+            if (!att) return;
+            downloadAttachment(att);
+          } catch {
+            const viewErr = document.getElementById('milageViewError');
+            if (viewErr) viewErr.textContent = 'Could not download attachment.';
+          }
+        });
+      }
+
+      if (editBtn) {
+        editBtn.addEventListener('click', () => {
+          if (itemizeReadOnly) return;
+          if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+          const id = String(milageViewModal.getAttribute('data-item-id') || '').trim();
+          const item = items.find((it) => it.id === id);
+          if (!item) return;
+          closeMilageViewModal();
+          openMilageModalForEdit(item);
+        });
+      }
+
+      if (delBtn) {
+        delBtn.addEventListener('click', async () => {
+          if (itemizeReadOnly) return;
+          if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+          const id = String(milageViewModal.getAttribute('data-item-id') || '').trim();
+          closeMilageViewModal();
+          await deleteMilageItem(id);
+        });
+      }
+    }
+
+    // Attachments init (itemize page)
+    if (attachmentsDropzone && attachmentsInput && attachmentTargetKey) {
+      refreshAttachments(attachmentTargetKey);
+
+      if (!itemizeReadOnly) {
+        const openFilePicker = () => attachmentsInput.click();
+
+        attachmentsDropzone.addEventListener('click', openFilePicker);
+        attachmentsDropzone.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openFilePicker();
+          }
+        });
+
+        attachmentsDropzone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          attachmentsDropzone.classList.add('dropzone--over');
+        });
+        attachmentsDropzone.addEventListener('dragleave', () => {
+          attachmentsDropzone.classList.remove('dropzone--over');
+        });
+        attachmentsDropzone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          attachmentsDropzone.classList.remove('dropzone--over');
+          handleAddedFiles(attachmentTargetKey, e.dataTransfer?.files, attachmentUploadContext);
+        });
+
+        attachmentsInput.addEventListener('change', () => {
+          handleAddedFiles(attachmentTargetKey, attachmentsInput.files, attachmentUploadContext);
+          attachmentsInput.value = '';
+        });
+      } else {
+        attachmentsInput.disabled = true;
+        attachmentsDropzone.setAttribute('aria-disabled', 'true');
+      }
+
+      if (attachmentsTbody) {
+        attachmentsTbody.addEventListener('click', async (e) => {
+          const btn = e.target.closest('button[data-attachment-action]');
+          if (!btn) return;
+          const row = btn.closest('tr[data-attachment-id]');
+          if (!row) return;
+          const id = row.getAttribute('data-attachment-id');
+          const action = btn.getAttribute('data-attachment-action');
+
+          if (action === 'delete') {
+            if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+            const ok = window.confirm('Remove this attachment?');
+            if (!ok) return;
+            await deleteAttachmentById(id);
+            await refreshAttachments(attachmentTargetKey);
+            return;
+          }
+
+          if (action === 'view') {
+            const att = await getAttachmentById(id);
+            if (!att) return;
+            openAttachmentInNewTab(att);
+            return;
+          }
+
+          if (action === 'download') {
+            const att = await getAttachmentById(id);
+            if (!att) return;
+            downloadAttachment(att);
+          }
+        });
+      }
+    }
+
+    itemForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+      clearItemErrors();
+
+      const result = validateItemInput(mode);
+      if (!result.ok) {
+        showItemErrors(result.errors);
+        return;
+      }
+
+      const id = editingItemIdEl ? editingItemIdEl.value : '';
+      if (id) {
+        items = items.map((it) => (it.id === id ? { ...it, ...result.value } : it));
+      } else {
+        const newItem = {
+          id: (crypto?.randomUUID ? crypto.randomUUID() : `it_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+          ...result.value,
+        };
+        items = [...items, newItem];
+      }
+
+      // If mode wasn't chosen yet (draft), infer from the first added item
+      if (!mode) {
+        mode = result.value.euro !== null ? 'EUR' : 'USD';
+      }
+
+      renderItems(items, { readOnly: itemizeReadOnly });
+      closeItemModal();
+    });
+
+    itemsTbody.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-item-action]');
+      if (!btn) return;
+      const row = btn.closest('tr[data-item-id]');
+      if (!row) return;
+
+      const itemId = row.getAttribute('data-item-id');
+      const action = btn.getAttribute('data-item-action');
+      const current = items.find((it) => it.id === itemId);
+      if (!current) return;
+
+      if (action === 'viewMilage') {
+        openMilageView(current);
+        return;
+      }
+
+      if (itemizeReadOnly) return;
+
+      if (action === 'edit') {
+        if (current && current.milage && typeof current.milage === 'object') {
+          openMilageModalForEdit(current);
+          return;
+        }
+        openItemModalForEdit(current);
+      } else if (action === 'delete') {
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+        if (current && current.milage && typeof current.milage === 'object') {
+          await deleteMilageItem(itemId);
+          return;
+        }
+        {
+          const ok = window.confirm('Delete this item?');
+          if (!ok) return;
+          items = items.filter((it) => it.id !== itemId);
+          renderItems(items, { readOnly: itemizeReadOnly });
+          resetItemEditor();
+        }
+      }
+    });
+
+    if (saveItemsBtn) {
+      saveItemsBtn.addEventListener('click', () => {
+        if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
+        if (items.length < 1) {
+          window.alert('Add at least one item before saving.');
+          return;
+        }
+
+        const totals = sumItems(items);
+
+        if (target.isDraft) {
+          const draft = loadDraft() || {};
+          const inferredMode = mode || (totals.euro > 0 ? 'EUR' : 'USD');
+          if (inferredMode === 'EUR') {
+            draft.euro = String(totals.euro);
+            draft.usd = '';
+          } else {
+            draft.usd = String(totals.usd);
+            draft.euro = '';
+          }
+          saveDraft(draft);
+          saveDraftItems(items);
+          updateItemsStatus();
+          {
+            const year = getActiveBudgetYear();
+            window.location.href = `index.html?resumeDraft=1&year=${encodeURIComponent(String(year))}`;
+          }
+          return;
+        }
+
+        if (boundOrderId) {
+          const year = getActiveBudgetYear();
+          const order = getOrderById(boundOrderId, year);
+          if (!order) {
+            window.alert('Could not find the payment order to update.');
+            return;
+          }
+          const orderMode = mode || currencyModeFromOrderLike(order) || (totals.euro > 0 ? 'EUR' : 'USD');
+          const updated = {
+            ...order,
+            items,
+            euro: orderMode === 'EUR' ? totals.euro : null,
+            usd: orderMode === 'USD' ? totals.usd : null,
+          };
+          upsertOrder(updated, year);
+          window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
+        }
       });
     }
   }
-
-  // Populate the side-nav tree (stripped with workflow wiring block).
-  initBudgetYearNav();
-
-  // Ensure the request-page nav toggle is shown/hidden based on auth state.
-  syncRequestFormHamburgerVisibility();
-
-  if (appShell && navToggleBtn && !navToggleBtn.dataset.requestNavBound) {
-    navToggleBtn.dataset.requestNavBound = '1';
-    updateNavToggleUi();
-    navToggleBtn.addEventListener('click', () => {
-      appShell.classList.toggle('appShell--navClosed');
-      updateNavToggleUi();
-    });
-  }
-
-  for (const popoutLink of requestHeaderPopoutLinks) {
-    if (!popoutLink || popoutLink.dataset.bound) continue;
-    popoutLink.dataset.bound = 'true';
-    popoutLink.addEventListener('click', (e) => {
-      e.preventDefault();
-
-      const rawHref = String(popoutLink.getAttribute('href') || '').trim();
-      if (!rawHref) return;
-
-      const isExternal = popoutLink.getAttribute('data-popout-external') === '1';
-      const href = isExternal ? rawHref : withWpEmbedParams(rawHref);
-      const winName = String(popoutLink.getAttribute('data-popout-name') || 'acglInfoPopout').trim() || 'acglInfoPopout';
-
-      const w = 1120;
-      const h = 820;
-      const screenLeft = Number(window.screenLeft ?? window.screenX ?? 0) || 0;
-      const screenTop = Number(window.screenTop ?? window.screenY ?? 0) || 0;
-      const screenH = Number(window.screen?.height) || window.outerHeight || h;
-      const left = screenLeft + 20;
-      const top = Math.max(0, Math.round(screenTop + (screenH - h) / 2));
-      const features = 
-        'popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes'
-        + ',width=' + w + ',height=' + h + ',left=' + left + ',top=' + top;
-
-      const win = window.open(href, winName, features);
-      if (win && typeof win.focus === 'function') win.focus();
-    });
-  }
-
 })().catch((err) => {
   try {
     console.error('App bootstrap failed', err);

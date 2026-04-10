@@ -347,154 +347,35 @@
   const WP_TOKEN_KEY = 'acgl_fms_wp_token_v1';
   const WP_PERMS_KEY = 'acgl_fms_wp_perms_v1';
 
-  function getLocalMirrorKey(key) {
-    return `acgl_fms_ls_${String(key || '').trim()}`;
-  }
-
-  function getSessionValue(key) {
-    const k = String(key || '').trim();
-    if (!k) return '';
-
-    let value = '';
-    try {
-      value = String(sessionStorage.getItem(k) || '').trim();
-    } catch {
-      // ignore
-    }
-    if (value) return value;
-
-    try {
-      if (window.top && window.top !== window && window.top.sessionStorage) {
-        value = String(window.top.sessionStorage.getItem(k) || '').trim();
-        if (value) {
-          try {
-            sessionStorage.setItem(k, value);
-          } catch {
-            // ignore
-          }
-          return value;
-        }
-      }
-    } catch {
-      // ignore (cross-origin access)
-    }
-
-    // Final fallback for hosts that recreate iframes and clear sessionStorage.
-    try {
-      value = String(localStorage.getItem(getLocalMirrorKey(k)) || '').trim();
-      if (value) {
-        try {
-          sessionStorage.setItem(k, value);
-        } catch {
-          // ignore
-        }
-        return value;
-      }
-    } catch {
-      // ignore
-    }
-
-    return '';
-  }
-
-  function setSessionValue(key, value) {
-    const k = String(key || '').trim();
-    if (!k) return;
-    const v = String(value || '').trim();
-
-    try {
-      sessionStorage.setItem(k, v);
-    } catch {
-      // ignore
-    }
-
-    try {
-      if (window.top && window.top !== window && window.top.sessionStorage) {
-        window.top.sessionStorage.setItem(k, v);
-      }
-    } catch {
-      // ignore (cross-origin access)
-    }
-
-    try {
-      localStorage.setItem(getLocalMirrorKey(k), v);
-    } catch {
-      // ignore
-    }
-  }
-
-  function removeSessionValue(key) {
-    const k = String(key || '').trim();
-    if (!k) return;
-
-    try {
-      sessionStorage.removeItem(k);
-    } catch {
-      // ignore
-    }
-
-    try {
-      if (window.top && window.top !== window && window.top.sessionStorage) {
-        window.top.sessionStorage.removeItem(k);
-      }
-    } catch {
-      // ignore (cross-origin access)
-    }
-
-    try {
-      localStorage.removeItem(getLocalMirrorKey(k));
-    } catch {
-      // ignore
-    }
-  }
-
   function getWpToken() {
-    const token = getSessionValue(WP_TOKEN_KEY);
-    if (!token) return '';
-
-    const parts = token.split('.');
-    if (parts.length < 2) {
-      clearWpToken();
-      removeSessionValue(CURRENT_USER_KEY);
-      removeSessionValue(LOGIN_AT_KEY);
-      removeSessionValue(LAST_ACTIVITY_AT_KEY);
-      return '';
-    }
-
     try {
-      const payloadJson = decodeBase64UrlUtf8(parts[0]);
-      const payload = payloadJson ? JSON.parse(payloadJson) : null;
-      const exp = Number(payload && payload.exp);
-      if (Number.isFinite(exp) && (Date.now() / 1000) >= exp) {
-        clearWpToken();
-        removeSessionValue(CURRENT_USER_KEY);
-        removeSessionValue(LOGIN_AT_KEY);
-        removeSessionValue(LAST_ACTIVITY_AT_KEY);
-        return '';
-      }
+      const raw = String(sessionStorage.getItem(WP_TOKEN_KEY) || '').trim();
+      return raw || '';
     } catch {
-      clearWpToken();
-      removeSessionValue(CURRENT_USER_KEY);
-      removeSessionValue(LOGIN_AT_KEY);
-      removeSessionValue(LAST_ACTIVITY_AT_KEY);
       return '';
     }
-
-    return token;
   }
 
   function setWpToken(token) {
-    setSessionValue(WP_TOKEN_KEY, token);
+    try {
+      sessionStorage.setItem(WP_TOKEN_KEY, String(token || '').trim());
+    } catch {
+      // ignore
+    }
   }
 
   function clearWpToken() {
-    removeSessionValue(WP_TOKEN_KEY);
-    removeSessionValue(WP_PERMS_KEY);
+    try {
+      sessionStorage.removeItem(WP_TOKEN_KEY);
+      sessionStorage.removeItem(WP_PERMS_KEY);
+    } catch {
+      // ignore
+    }
   }
 
   function getWpPerms() {
     try {
-      const raw = getSessionValue(WP_PERMS_KEY);
+      const raw = String(sessionStorage.getItem(WP_PERMS_KEY) || '').trim();
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === 'object' ? parsed : null;
@@ -546,7 +427,11 @@
   }
 
   function setWpPerms(perms) {
-    setSessionValue(WP_PERMS_KEY, JSON.stringify(perms && typeof perms === 'object' ? perms : {}));
+    try {
+      sessionStorage.setItem(WP_PERMS_KEY, JSON.stringify(perms && typeof perms === 'object' ? perms : {}));
+    } catch {
+      // ignore
+    }
   }
 
   function wpJoin(path) {
@@ -1002,26 +887,36 @@
   }
 
   function getCurrentUsername() {
-    return getSessionValue(CURRENT_USER_KEY);
+    try {
+      const raw = String(sessionStorage.getItem(CURRENT_USER_KEY) || '').trim();
+      return raw;
+    } catch {
+      return '';
+    }
   }
 
   function getCurrentLoginAtIso() {
-    return getSessionValue(LOGIN_AT_KEY);
+    try {
+      const raw = String(sessionStorage.getItem(LOGIN_AT_KEY) || '').trim();
+      return raw;
+    } catch {
+      return '';
+    }
   }
 
   function setCurrentUsername(username) {
     const u = String(username || '').trim();
     try {
       if (!u) {
-        removeSessionValue(CURRENT_USER_KEY);
-        removeSessionValue(LOGIN_AT_KEY);
-        removeSessionValue(LAST_ACTIVITY_AT_KEY);
+        sessionStorage.removeItem(CURRENT_USER_KEY);
+        sessionStorage.removeItem(LOGIN_AT_KEY);
+        sessionStorage.removeItem(LAST_ACTIVITY_AT_KEY);
       } else {
-        setSessionValue(CURRENT_USER_KEY, u);
+        sessionStorage.setItem(CURRENT_USER_KEY, u);
         // Capture the time of successful sign-in for this session.
         const nowIso = new Date().toISOString();
-        setSessionValue(LOGIN_AT_KEY, nowIso);
-        setSessionValue(LAST_ACTIVITY_AT_KEY, nowIso);
+        sessionStorage.setItem(LOGIN_AT_KEY, nowIso);
+        sessionStorage.setItem(LAST_ACTIVITY_AT_KEY, nowIso);
       }
     } catch {
       // ignore
@@ -1059,7 +954,7 @@
 
   function getLastActivityMs() {
     try {
-      const raw = getSessionValue(LAST_ACTIVITY_AT_KEY);
+      const raw = String(sessionStorage.getItem(LAST_ACTIVITY_AT_KEY) || '').trim();
       const ms = raw ? Date.parse(raw) : NaN;
       return Number.isFinite(ms) ? ms : null;
     } catch {
@@ -1070,7 +965,11 @@
   function markUserActivityNow() {
     const current = getCurrentUser();
     if (!current) return;
-    setSessionValue(LAST_ACTIVITY_AT_KEY, new Date().toISOString());
+    try {
+      sessionStorage.setItem(LAST_ACTIVITY_AT_KEY, new Date().toISOString());
+    } catch {
+      // ignore
+    }
   }
 
   async function performAutoLogout() {
@@ -1492,9 +1391,6 @@
     const storedUser = getUserByUsername(normalizedUsername);
 
     if (IS_WP_SHARED_MODE) {
-      const token = getWpToken();
-      if (!token) return null;
-
       const perms = getEffectiveWpPerms();
       if (perms) {
         return {
@@ -1504,9 +1400,12 @@
         };
       }
 
-      // In WordPress shared mode, a user is considered signed in only when
-      // token-backed permissions are present.
-      return null;
+      if (storedUser) {
+        return {
+          ...storedUser,
+          username: normalizedUsername,
+        };
+      }
     }
     return storedUser;
   }
@@ -2616,10 +2515,7 @@
             const user = getCurrentUser();
             const currentRequired = requiredPermissionForPage(window.location.pathname);
             if (!currentRequired || hasPermission(user, currentRequired)) {
-              // Navigate explicitly with WP embed params preserved so
-              // IS_WP_SHARED_MODE is guaranteed on the landing page.
-              const base = getBasename(window.location.pathname) || 'index.html';
-              window.location.replace(withWpEmbedParams(base));
+              window.location.reload();
               return;
             }
             const _year = getLoginLandingBudgetYear();
@@ -2831,8 +2727,7 @@
           const user = getCurrentUser();
           const currentRequired = requiredPermissionForPage(window.location.pathname);
           if (!currentRequired || hasPermission(user, currentRequired)) {
-            const base = getBasename(window.location.pathname) || 'index.html';
-            window.location.replace(withWpEmbedParams(base));
+            window.location.reload();
             return;
           }
           const _year = getLoginLandingBudgetYear();
@@ -2883,20 +2778,18 @@
 
   function syncAuthHeaderBtn() {
     if (!authHeaderBtn) return;
-    const isSignedIn = Boolean(getCurrentUser()) || (IS_WP_SHARED_MODE && Boolean(getWpToken()) && Boolean(getCurrentUsername()));
-    if (isSignedIn) {
+    const user = getCurrentUser();
+    if (user) {
+      // When signed in, hide the header Sign in button.
       authHeaderBtn.hidden = true;
       authHeaderBtn.setAttribute('aria-hidden', 'true');
-      authHeaderBtn.tabIndex = -1;
-      return;
+    } else {
+      authHeaderBtn.hidden = false;
+      authHeaderBtn.setAttribute('aria-hidden', 'false');
+      authHeaderBtn.textContent = 'Sign in';
+      authHeaderBtn.title = 'Sign in';
+      authHeaderBtn.setAttribute('aria-label', 'Sign in');
     }
-
-    authHeaderBtn.hidden = false;
-    authHeaderBtn.setAttribute('aria-hidden', 'false');
-    authHeaderBtn.tabIndex = 0;
-    authHeaderBtn.textContent = 'Sign in';
-    authHeaderBtn.title = 'Sign in';
-    authHeaderBtn.setAttribute('aria-label', 'Sign in');
   }
 
   function syncRequestFormHamburgerVisibility() {
@@ -4231,6 +4124,19 @@
     return { ok: true, changed: true };
   }
 
+  function syncBudgetFromLedgerSafe(year, sourceLabel) {
+    try {
+      return syncBudgetFromLedger(year);
+    } catch (err) {
+      console.error('[Budget Sync] Failed', {
+        source: sourceLabel || 'unknown',
+        year,
+        error: err,
+      });
+      return { ok: false, reason: 'exception' };
+    }
+  }
+
   function initMasonicYearSelectFromBudgets(preferredYear2) {
     if (!masonicYearInput) return;
     if (String(masonicYearInput.tagName || '').toUpperCase() !== 'SELECT') return;
@@ -4359,72 +4265,6 @@
   const authHeaderBtn = document.getElementById('authHeaderBtn');
   const requestHeaderPopoutLinks = Array.from(document.querySelectorAll('[data-popout-link="1"]'));
 
-  function consumeShowLoginFlag() {
-    try {
-      const params = new URLSearchParams(window.location.search || '');
-      if (params.get('showLogin') !== '1') return;
-      // Always strip the flag from URL first.
-      params.delete('showLogin');
-      const nextQs = params.toString();
-      const nextUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
-      if (window.history && typeof window.history.replaceState === 'function') {
-        window.history.replaceState(null, '', nextUrl);
-      }
-      // Do NOT open the overlay if the user is already authenticated:
-      // this prevents a stale showLogin=1 in the URL from re-showing
-      // the login dialog after a successful sign-in + reload.
-      if (IS_WP_SHARED_MODE && getWpToken() && getCurrentUsername()) return;
-      if (!IS_WP_SHARED_MODE && getCurrentUser()) return;
-      openAuthLoginOverlay();
-    } catch {
-      // ignore
-    }
-  }
-
-  function bindRequestHeaderInteractions() {
-    if (authHeaderBtn) {
-      syncAuthHeaderBtn();
-      if (!authHeaderBtn.dataset.bound) {
-        authHeaderBtn.dataset.bound = 'true';
-        authHeaderBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          openAuthLoginOverlay();
-        });
-      }
-
-      // Keep this fallback near the request-header wiring too.
-    }
-
-    for (const popoutLink of requestHeaderPopoutLinks) {
-      if (!popoutLink || popoutLink.dataset.bound) continue;
-      popoutLink.dataset.bound = 'true';
-      popoutLink.addEventListener('click', (e) => {
-        e.preventDefault();
-
-        const rawHref = String(popoutLink.getAttribute('href') || '').trim();
-        if (!rawHref) return;
-
-        const isExternal = popoutLink.getAttribute('data-popout-external') === '1';
-        const href = isExternal ? rawHref : withWpEmbedParams(rawHref);
-        const winName = String(popoutLink.getAttribute('data-popout-name') || 'acglInfoPopout').trim() || 'acglInfoPopout';
-
-        const w = 1120;
-        const h = 820;
-        const screenLeft = Number(window.screenLeft ?? window.screenX ?? 0) || 0;
-        const screenTop = Number(window.screenTop ?? window.screenY ?? 0) || 0;
-        const screenH = Number(window.screen?.height) || window.outerHeight || h;
-        const left = screenLeft + 20;
-        const top = Math.max(0, Math.round(screenTop + (screenH - h) / 2));
-        const features =
-          'popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes'
-          + ',width=' + w + ',height=' + h + ',left=' + left + ',top=' + top;
-
-        const win = window.open(href, winName, features);
-        if (win && typeof win.focus === 'function') win.focus();
-      });
-    }
-  }
-
   // Request form submission token
   const submitToken = document.getElementById('submitToken');
   const cancelEditBtn = document.getElementById('cancelEditBtn');
@@ -4466,8 +4306,6 @@
   // Remember where the user is in this session so a refresh/login can return here.
   await preloadBootstrapSharedData();
   rememberLastPageNow();
-
-  bindRequestHeaderInteractions();
 
   const authGateResult = renderAuthGate();
   if (authGateResult && authGateResult.blocked) return;
@@ -4794,6 +4632,7 @@
   const openItemModalBtn = document.getElementById('openItemModalBtn');
   const addMilageBtn = document.getElementById('addMilageBtn');
   const itemizeContext = document.getElementById('itemizeContext');
+  const backToFormLink = document.getElementById('backToFormLink');
 
   // Attachments (itemize page)
   const attachmentsDropzone = document.getElementById('attachmentsDropzone');
@@ -10438,6 +10277,8 @@
 
           // Fire notification events for status/with transitions.
           {
+            const nextWith = getOrderWithLabel(updated);
+            const nextStatus = normalizeOrderStatus(getOrderStatusLabel(updated));
             const baseVars = {
               paymentOrderNo: String(updated.paymentOrderNo || ''),
               year: String(year),
@@ -10930,8 +10771,18 @@
   }
 
 
-  // [bundle-fix:request-auth-wiring] Binding moved earlier so it runs even
-  // when auth gate blocks unauthenticated startup.
+  // [bundle-fix:request-auth-wiring] The request bundle strips workflow wiring
+  // above, but index page still needs header auth and popout link handlers.
+  if (authHeaderBtn) {
+    syncAuthHeaderBtn();
+    if (!authHeaderBtn.dataset.bound) {
+      authHeaderBtn.dataset.bound = 'true';
+      authHeaderBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        openAuthLoginOverlay();
+      });
+    }
+  }
 
   // Populate the side-nav tree (stripped with workflow wiring block).
   initBudgetYearNav();
@@ -10948,7 +10799,34 @@
     });
   }
 
-  // Popout links are also bound via bindRequestHeaderInteractions() above.
+  for (const popoutLink of requestHeaderPopoutLinks) {
+    if (!popoutLink || popoutLink.dataset.bound) continue;
+    popoutLink.dataset.bound = 'true';
+    popoutLink.addEventListener('click', (e) => {
+      e.preventDefault();
+
+      const rawHref = String(popoutLink.getAttribute('href') || '').trim();
+      if (!rawHref) return;
+
+      const isExternal = popoutLink.getAttribute('data-popout-external') === '1';
+      const href = isExternal ? rawHref : withWpEmbedParams(rawHref);
+      const winName = String(popoutLink.getAttribute('data-popout-name') || 'acglInfoPopout').trim() || 'acglInfoPopout';
+
+      const w = 1120;
+      const h = 820;
+      const screenLeft = Number(window.screenLeft ?? window.screenX ?? 0) || 0;
+      const screenTop = Number(window.screenTop ?? window.screenY ?? 0) || 0;
+      const screenH = Number(window.screen?.height) || window.outerHeight || h;
+      const left = screenLeft + 20;
+      const top = Math.max(0, Math.round(screenTop + (screenH - h) / 2));
+      const features = 
+        'popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes'
+        + ',width=' + w + ',height=' + h + ',left=' + left + ',top=' + top;
+
+      const win = window.open(href, winName, features);
+      if (win && typeof win.focus === 'function') win.focus();
+    });
+  }
 
 })().catch((err) => {
   try {

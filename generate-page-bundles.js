@@ -15,6 +15,7 @@ const SOURCE = path.join(ROOT, 'app.js');
 const OUT_REQUEST = path.join(ROOT, 'app-request.js');
 const OUT_WORKFLOWS = path.join(ROOT, 'app-workflows.js');
 const OUT_SETTINGS = path.join(ROOT, 'app-settings.js');
+const OUT_ITEMIZE = path.join(ROOT, 'app-itemize.js');
 
 const M_RECON = '// ---- Payment Orders Reconciliation (year-scoped) ----';
 const M_SETTINGS = '// ---- Roles / Users (settings page) ----';
@@ -162,16 +163,25 @@ function buildSettingsBundle(source) {
   return banner('settings') + out;
 }
 
+function buildItemizeBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'itemize-remove-settings');
+  out = removeBetween(out, M_INCOME, M_ITEMIZE, 'itemize-remove-non-itemize-workflows');
+  return banner('itemize') + out;
+}
+
 function main() {
   const source = fs.readFileSync(SOURCE, 'utf8');
 
   const request = buildRequestBundle(source);
   const workflows = buildWorkflowBundle(source);
   const settings = buildSettingsBundle(source);
+  const itemize = buildItemizeBundle(source);
 
   writeBundle(OUT_REQUEST, request);
   writeBundle(OUT_WORKFLOWS, workflows);
   writeBundle(OUT_SETTINGS, settings);
+  writeBundle(OUT_ITEMIZE, itemize);
 
   console.log('Page bundles generated successfully.');
 }

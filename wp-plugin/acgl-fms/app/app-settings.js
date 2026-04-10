@@ -4124,6 +4124,19 @@
     return { ok: true, changed: true };
   }
 
+  function syncBudgetFromLedgerSafe(year, sourceLabel) {
+    try {
+      return syncBudgetFromLedger(year);
+    } catch (err) {
+      console.error('[Budget Sync] Failed', {
+        source: sourceLabel || 'unknown',
+        year,
+        error: err,
+      });
+      return { ok: false, reason: 'exception' };
+    }
+  }
+
   function initMasonicYearSelectFromBudgets(preferredYear2) {
     if (!masonicYearInput) return;
     if (String(masonicYearInput.tagName || '').toUpperCase() !== 'SELECT') return;
@@ -4619,6 +4632,7 @@
   const openItemModalBtn = document.getElementById('openItemModalBtn');
   const addMilageBtn = document.getElementById('addMilageBtn');
   const itemizeContext = document.getElementById('itemizeContext');
+  const backToFormLink = document.getElementById('backToFormLink');
 
   // Attachments (itemize page)
   const attachmentsDropzone = document.getElementById('attachmentsDropzone');
@@ -12210,8 +12224,30 @@ function initBackupPage() {
       authHeaderBtn.dataset.bound = 'true';
       authHeaderBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        openAuthLoginOverlay();
+        try {
+          openAuthLoginOverlay();
+        } catch {
+          // Hard fallback: force a reload route that auto-opens login.
+          window.location.href = withWpEmbedParams('index.html?showLogin=1');
+        }
       });
+    }
+
+    // URL-flag fallback for environments where direct overlay open can be blocked
+    // by stale UI state. Trigger once, then clean the URL.
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.get('showLogin') === '1') {
+        openAuthLoginOverlay();
+        params.delete('showLogin');
+        const nextQs = params.toString();
+        const nextUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
+        if (window.history && typeof window.history.replaceState === 'function') {
+          window.history.replaceState(null, '', nextUrl);
+        }
+      }
+    } catch {
+      // ignore
     }
   }
 

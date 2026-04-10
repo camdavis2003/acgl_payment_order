@@ -2883,8 +2883,17 @@
 
   function syncAuthHeaderBtn() {
     if (!authHeaderBtn) return;
+    const isSignedIn = Boolean(getCurrentUser()) || (IS_WP_SHARED_MODE && Boolean(getWpToken()) && Boolean(getCurrentUsername()));
+    if (isSignedIn) {
+      authHeaderBtn.hidden = true;
+      authHeaderBtn.setAttribute('aria-hidden', 'true');
+      authHeaderBtn.tabIndex = -1;
+      return;
+    }
+
     authHeaderBtn.hidden = false;
     authHeaderBtn.setAttribute('aria-hidden', 'false');
+    authHeaderBtn.tabIndex = 0;
     authHeaderBtn.textContent = 'Sign in';
     authHeaderBtn.title = 'Sign in';
     authHeaderBtn.setAttribute('aria-label', 'Sign in');

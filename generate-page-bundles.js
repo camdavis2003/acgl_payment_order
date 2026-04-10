@@ -19,7 +19,8 @@ const OUT_INCOME = path.join(ROOT, 'app-income.js');
 const OUT_GS_LEDGER = path.join(ROOT, 'app-gs-ledger.js');
 const OUT_WISE_EUR = path.join(ROOT, 'app-wise-eur.js');
 const OUT_WISE_USD = path.join(ROOT, 'app-wise-usd.js');
-const OUT_TRANSFERS = path.join(ROOT, 'app-transfers.js');
+const OUT_MONEY_TRANSFERS = path.join(ROOT, 'app-money-transfers.js');
+const OUT_MONEY_TRANSFER = path.join(ROOT, 'app-money-transfer.js');
 const OUT_MENU = path.join(ROOT, 'app-menu.js');
 const OUT_ARCHIVE = path.join(ROOT, 'app-archive.js');
 const OUT_RECONCILIATION = path.join(ROOT, 'app-reconciliation.js');
@@ -33,6 +34,7 @@ const M_PAYMENT_ORDERS = 'const PAYMENT_ORDERS_COL_TYPES = {';
 const M_BACKUP_FN = 'function initBackupPage() {';
 const M_ITEMIZE = '// ---- Itemize page logic ----';
 const M_MT_LIST = '// ---- Money Transfers list page ----';
+const M_MT_BUILDER = '// ---- Money Transfer builder page ----';
 const M_INCOME_COL_TYPES = 'const INCOME_COL_TYPES = {';
 const M_LOAD_INCOME_FN = 'function loadIncome(year) {';
 const M_GS_LEDGER_INIT_FN = 'function initGsLedgerListPage() {';
@@ -229,13 +231,24 @@ function buildWiseUsdBundle(source) {
   return banner('wise-usd') + out;
 }
 
-function buildTransfersBundle(source) {
+function buildMoneyTransfersBundle(source) {
   let out = source;
-  out = removeBetween(out, M_SETTINGS, M_INCOME, 'transfers-remove-settings');
-  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'transfers-remove-request-form');
-  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'transfers-remove-itemize');
-  out = removeBetween(out, M_INCOME_COL_TYPES, M_BACKUP_FN, 'transfers-remove-income-and-banking-pages');
-  return banner('transfers') + out;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'money-transfers-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'money-transfers-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'money-transfers-remove-itemize');
+  out = removeBetween(out, M_MT_BUILDER, M_INCOME_COL_TYPES, 'money-transfers-remove-builder-page');
+  out = removeBetween(out, M_INCOME_COL_TYPES, M_BACKUP_FN, 'money-transfers-remove-income-and-banking-pages');
+  return banner('money-transfers') + out;
+}
+
+function buildMoneyTransferBundle(source) {
+  let out = source;
+  out = removeBetween(out, M_SETTINGS, M_INCOME, 'money-transfer-remove-settings');
+  out = removeBetween(out, M_REQUEST_BLOCK, M_KEYDOWN, 'money-transfer-remove-request-form');
+  out = removeBetween(out, M_ITEMIZE, M_CATCH, 'money-transfer-remove-itemize');
+  out = removeBetween(out, M_MT_LIST, M_MT_BUILDER, 'money-transfer-remove-list-page');
+  out = removeBetween(out, M_INCOME_COL_TYPES, M_BACKUP_FN, 'money-transfer-remove-income-and-banking-pages');
+  return banner('money-transfer') + out;
 }
 
 function buildMenuBundle(source) {
@@ -304,7 +317,8 @@ function main() {
   const gsLedger = buildGsLedgerBundle(source);
   const wiseEur = buildWiseEurBundle(source);
   const wiseUsd = buildWiseUsdBundle(source);
-  const transfers = buildTransfersBundle(source);
+  const moneyTransfers = buildMoneyTransfersBundle(source);
+  const moneyTransfer = buildMoneyTransferBundle(source);
   const menu = buildMenuBundle(source);
   const archive = buildArchiveBundle(source);
   const reconciliation = buildReconciliationBundle(source);
@@ -318,7 +332,8 @@ function main() {
   writeBundle(OUT_GS_LEDGER, gsLedger);
   writeBundle(OUT_WISE_EUR, wiseEur);
   writeBundle(OUT_WISE_USD, wiseUsd);
-  writeBundle(OUT_TRANSFERS, transfers);
+  writeBundle(OUT_MONEY_TRANSFERS, moneyTransfers);
+  writeBundle(OUT_MONEY_TRANSFER, moneyTransfer);
   writeBundle(OUT_MENU, menu);
   writeBundle(OUT_ARCHIVE, archive);
   writeBundle(OUT_RECONCILIATION, reconciliation);

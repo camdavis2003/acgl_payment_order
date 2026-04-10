@@ -153,14 +153,26 @@
       }
     } catch { /* ignore */ }
 
+    // Some shell pages can be opened in contexts where the WP token is not
+    // available but the signed-in username is still present.
+    if (username && !token) return true;
     if (!token || !username) return false;
 
     const parts = token.split('.');
     if (parts.length < 2) return false;
     try {
-      const b64 = parts[0].replace(/-/g, '+').replace(/_/g, '/');
-      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-      const payload = JSON.parse(decodeURIComponent(escape(atob(padded))));
+      // JWT payload is segment #2. Keep a fallback to #1 for legacy/custom tokens.
+      const decodePayloadPart = (rawPart) => {
+        try {
+          const b64 = String(rawPart || '').replace(/-/g, '+').replace(/_/g, '/');
+          const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+          return JSON.parse(decodeURIComponent(escape(atob(padded))));
+        } catch {
+          return null;
+        }
+      };
+      const payload = decodePayloadPart(parts[1]) || decodePayloadPart(parts[0]);
+      if (!payload || typeof payload !== 'object') return false;
       const exp = Number(payload && payload.exp);
       if (Number.isFinite(exp) && (Date.now() / 1000) >= exp) return false;
     } catch {
@@ -176,6 +188,38 @@
     const navTree = document.querySelector('[data-nav-tree]');
     const toggleBtn = document.getElementById('navToggle');
     if (!shell || !navTree) return;
+    const currentBase = getBasename(window.location.pathname);
+
+    const isAboutPopout = (() => {
+      if (getBasename(window.location.pathname) !== 'about.html') return false;
+      const winName = String(window.name || '').trim();
+      if (winName !== 'acglAboutPopout') return false;
+      try {
+        const params = new URLSearchParams(window.location.search || '');
+        return String(params.get('popout') || '').trim() === '1' && String(params.get('src') || '').trim() === 'request';
+      } catch {
+        return false;
+      }
+    })();
+
+    if (isAboutPopout) {
+      const siteHeader = document.querySelector('.site-header');
+      if (siteHeader) {
+        siteHeader.hidden = true;
+        siteHeader.setAttribute('aria-hidden', 'true');
+      }
+      if (nav) {
+        nav.hidden = true;
+        nav.setAttribute('aria-hidden', 'true');
+      }
+      if (toggleBtn) {
+        toggleBtn.hidden = true;
+        toggleBtn.setAttribute('aria-hidden', 'true');
+      }
+      shell.classList.remove('appShell--navOpen');
+      shell.classList.add('appShell--navClosed');
+      return;
+    }
 
     // If the user is not authenticated, only show the request form link so
     // protected pages are not reachable via the shell nav on public pages
@@ -193,16 +237,52 @@
       ul.appendChild(li);
       navTree.innerHTML = '';
       navTree.appendChild(ul);
-      if (nav) {
-        nav.hidden = true;
-        nav.setAttribute('aria-hidden', 'true');
+
+      const keepAboutNavVisible = currentBase === 'about.html';
+      if (!keepAboutNavVisible) {
+        if (nav) {
+          nav.hidden = true;
+          nav.setAttribute('aria-hidden', 'true');
+        }
+        if (toggleBtn) {
+          toggleBtn.hidden = true;
+          toggleBtn.setAttribute('aria-hidden', 'true');
+        }
+        shell.classList.remove('appShell--navOpen');
+        shell.classList.add('appShell--navClosed');
+        return;
       }
-      if (toggleBtn) {
-        toggleBtn.hidden = true;
-        toggleBtn.setAttribute('aria-hidden', 'true');
+
+      if (!toggleBtn) return;
+      toggleBtn.hidden = false;
+      toggleBtn.removeAttribute('aria-hidden');
+      if (nav) nav.hidden = false;
+
+      const setOpen = (open) => {
+        const nextOpen = Boolean(open);
+        shell.classList.toggle('appShell--navOpen', nextOpen);
+        shell.classList.toggle('appShell--navClosed', !nextOpen);
+        toggleBtn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+        toggleBtn.setAttribute('aria-label', nextOpen ? 'Close navigation' : 'Open navigation');
+        if (nav) nav.setAttribute('aria-hidden', nextOpen ? 'false' : 'true');
+      };
+
+      setOpen(false);
+
+      if (!toggleBtn.dataset.boundNavToggle) {
+        toggleBtn.dataset.boundNavToggle = '1';
+        toggleBtn.addEventListener('click', () => {
+          const isOpen = shell.classList.contains('appShell--navOpen');
+          setOpen(!isOpen);
+        });
       }
-      shell.classList.remove('appShell--navOpen');
-      shell.classList.add('appShell--navClosed');
+
+      document.addEventListener('click', (event) => {
+        if (!shell.classList.contains('appShell--navOpen')) return;
+        if (toggleBtn.contains(event.target)) return;
+        if (nav && nav.contains(event.target)) return;
+        setOpen(false);
+      });
       return;
     }
 
@@ -223,7 +303,6 @@
       { label: 'About', href: 'about.html' },
     ];
 
-    const currentBase = getBasename(window.location.pathname);
     const ul = document.createElement('ul');
     ul.className = 'appNavTree__list';
 

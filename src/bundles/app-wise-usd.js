@@ -10529,6 +10529,32 @@
     }
   }
 
+  /** @returns {Array<Object>} */
+  function loadIncome(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** @param {Array<Object>} entries */
+  function saveIncome(entries, year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(entries || []));
+
+    // Budget updates are ledger-driven only.
+    syncBudgetFromLedgerSafe(resolvedYear, 'income');
+  }
+
   // ---- wiseEUR (year-scoped) ----
 
   const WISE_EUR_DEFAULT_YEAR = 2026;
@@ -10653,7 +10679,9 @@
   }
 
   function getWiseUsdYear() {
-    return getWiseUsdYearFromUrl() ?? WISE_USD_DEFAULT_YEAR;
+    const fromUrl = getWiseUsdYearFromUrl();
+    if (fromUrl) return fromUrl;
+    return getActiveBudgetYear() || WISE_USD_DEFAULT_YEAR;
   }
 
   /** @returns {Array<Object>} */

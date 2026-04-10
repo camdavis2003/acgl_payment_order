@@ -194,6 +194,12 @@
       if (base === 'income.html') {
         return [incomeKey, ordersKey, reconciliationKey];
       }
+      if (base === 'wise_eur.html') {
+        return [wiseEurKey, ordersKey, reconciliationKey];
+      }
+      if (base === 'wise_usd.html') {
+        return [wiseUsdKey, ordersKey, reconciliationKey];
+      }
       if (base === 'money_transfers.html' || base === 'money_transfer.html') {
         return [moneyTransfersKey, incomeKey, wiseEurKey, wiseUsdKey, ordersKey, reconciliationKey, gsLedgerVerifiedKey];
       }
@@ -229,7 +235,9 @@
         pageYear = Number(String(activeRaw || '').trim());
       }
 
-      if (!Number.isInteger(pageYear)) pageYear = new Date().getFullYear();
+      // Do not guess the current calendar year for year-scoped datasets.
+      // Pages should use explicit URL year or the configured Active Budget year.
+      if (!Number.isInteger(pageYear)) return;
       const keys = getPageDatasetKeys(page, pageYear);
       if (keys.length < 1) return;
       await preloadKeys(keys, { force: Boolean(options.force), reason: `page:${page}` });

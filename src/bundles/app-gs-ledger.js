@@ -9903,7 +9903,9 @@
   }
 
   function getWiseEurYear() {
-    return getWiseEurYearFromUrl() ?? WISE_EUR_DEFAULT_YEAR;
+    const fromUrl = getWiseEurYearFromUrl();
+    if (fromUrl) return fromUrl;
+    return getActiveBudgetYear() || WISE_EUR_DEFAULT_YEAR;
   }
 
   /** @returns {Array<Object>} */
@@ -9993,7 +9995,9 @@
   }
 
   function getWiseUsdYear() {
-    return getWiseUsdYearFromUrl() ?? WISE_USD_DEFAULT_YEAR;
+    const fromUrl = getWiseUsdYearFromUrl();
+    if (fromUrl) return fromUrl;
+    return getActiveBudgetYear() || WISE_USD_DEFAULT_YEAR;
   }
 
   /** @returns {Array<Object>} */

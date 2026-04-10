@@ -221,10 +221,12 @@
       return;
     }
 
-    // If the user is not authenticated, only show the request form link so
-    // protected pages are not reachable via the shell nav on public pages
-    // such as about.html that skip the full auth gate.
-    if (!isWpAuthenticated()) {
+    const isAuthenticated = isWpAuthenticated();
+
+    // If the user is not authenticated, keep public pages minimal.
+    // Exception: About should still render the usual app navigation unless
+    // it is explicitly opened as the request popout (handled above).
+    if (!isAuthenticated && currentBase !== 'about.html') {
       const ul = document.createElement('ul');
       ul.className = 'appNavTree__list';
       const li = document.createElement('li');
@@ -238,88 +240,127 @@
       navTree.innerHTML = '';
       navTree.appendChild(ul);
 
-      const keepAboutNavVisible = currentBase === 'about.html';
-      if (!keepAboutNavVisible) {
-        if (nav) {
-          nav.hidden = true;
-          nav.setAttribute('aria-hidden', 'true');
-        }
-        if (toggleBtn) {
-          toggleBtn.hidden = true;
-          toggleBtn.setAttribute('aria-hidden', 'true');
-        }
-        shell.classList.remove('appShell--navOpen');
-        shell.classList.add('appShell--navClosed');
-        return;
-      }
-
-      if (!toggleBtn) return;
-      toggleBtn.hidden = false;
-      toggleBtn.removeAttribute('aria-hidden');
-      if (nav) nav.hidden = false;
-
-      const setOpen = (open) => {
-        const nextOpen = Boolean(open);
-        shell.classList.toggle('appShell--navOpen', nextOpen);
-        shell.classList.toggle('appShell--navClosed', !nextOpen);
-        toggleBtn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
-        toggleBtn.setAttribute('aria-label', nextOpen ? 'Close navigation' : 'Open navigation');
-        if (nav) nav.setAttribute('aria-hidden', nextOpen ? 'false' : 'true');
-      };
-
-      setOpen(false);
-
-      if (!toggleBtn.dataset.boundNavToggle) {
-        toggleBtn.dataset.boundNavToggle = '1';
-        toggleBtn.addEventListener('click', () => {
-          const isOpen = shell.classList.contains('appShell--navOpen');
-          setOpen(!isOpen);
-        });
-      }
-
-      document.addEventListener('click', (event) => {
-        if (!shell.classList.contains('appShell--navOpen')) return;
-        if (toggleBtn.contains(event.target)) return;
-        if (nav && nav.contains(event.target)) return;
-        setOpen(false);
-      });
       return;
     }
 
     const activeYear = getActiveYear();
     const links = [
       { label: 'New Request Form', href: 'index.html?new=1' },
-      { label: 'Payment Orders', href: `menu.html?year=${encodeURIComponent(String(activeYear))}` },
-      { label: 'Budget Dashboard', href: `budget_dashboard.html?year=${encodeURIComponent(String(activeYear))}` },
-      { label: 'Income', href: `income.html?year=${encodeURIComponent(String(activeYear))}` },
-      { label: 'Wise EUR', href: `wise_eur.html?year=${encodeURIComponent(String(activeYear))}` },
-      { label: 'Wise USD', href: `wise_usd.html?year=${encodeURIComponent(String(activeYear))}` },
-      { label: 'Ledger', href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(activeYear))}` },
+      {
+        label: 'Budget',
+        href: `budget.html?year=${encodeURIComponent(String(activeYear))}`,
+        children: [
+          { label: 'Dashboard', href: `budget_dashboard.html?year=${encodeURIComponent(String(activeYear))}` },
+        ],
+      },
+      {
+        label: 'Ledger',
+        href: `grand_secretary_ledger.html?year=${encodeURIComponent(String(activeYear))}`,
+        children: [
+          { label: 'BankEUR', href: `income.html?year=${encodeURIComponent(String(activeYear))}` },
+          { label: 'wiseEUR', href: `wise_eur.html?year=${encodeURIComponent(String(activeYear))}` },
+          { label: 'wiseUSD', href: `wise_usd.html?year=${encodeURIComponent(String(activeYear))}` },
+        ],
+      },
+      {
+        label: 'Payment Orders',
+        href: `menu.html?year=${encodeURIComponent(String(activeYear))}`,
+        children: [
+          { label: 'Reconciliations', href: `reconciliation.html?year=${encodeURIComponent(String(activeYear))}` },
+        ],
+      },
       { label: 'Money Transfers', href: `money_transfers.html?year=${encodeURIComponent(String(activeYear))}` },
       { label: 'Archive', href: 'archive.html' },
       { label: 'Admin Settings', href: 'settings.html' },
       { label: 'User Guide', href: 'user_guide.html' },
       { label: 'Help Center', href: 'help.html' },
       { label: 'About', href: 'about.html' },
+      { label: 'Log out', href: 'index.html?logout=1' },
     ];
 
     const ul = document.createElement('ul');
     ul.className = 'appNavTree__list';
+    let idSeq = 0;
 
     for (const item of links) {
       const li = document.createElement('li');
       li.className = 'appNavTree__item';
+      const children = Array.isArray(item.children) ? item.children : [];
+      const isParent = children.length > 0;
 
-      const a = document.createElement('a');
-      a.className = 'appNav__link appNavTree__link';
-      a.textContent = item.label;
-      a.href = withCurrentEmbedParams(item.href);
-
-      if (getBasename(item.href) === currentBase) {
-        a.setAttribute('aria-current', 'page');
+      if (!isParent) {
+        const a = document.createElement('a');
+        a.className = 'appNav__link';
+        a.textContent = item.label;
+        a.href = withCurrentEmbedParams(item.href);
+        if (getBasename(item.href) === currentBase) {
+          a.classList.add('is-active');
+          a.setAttribute('aria-current', 'page');
+        }
+        li.appendChild(a);
+        ul.appendChild(li);
+        continue;
       }
 
-      li.appendChild(a);
+      const row = document.createElement('div');
+      row.className = 'appNavTree__row';
+
+      const parentLink = document.createElement('a');
+      parentLink.className = 'appNav__link';
+      parentLink.href = withCurrentEmbedParams(item.href);
+      parentLink.textContent = item.label;
+
+      const childList = document.createElement('ul');
+      childList.className = 'appNavTree__children';
+      idSeq += 1;
+      childList.id = `shellNavChildren_${idSeq}`;
+
+      let anyChildActive = false;
+      for (const child of children) {
+        const childLi = document.createElement('li');
+        childLi.className = 'appNavTree__childItem';
+
+        const childA = document.createElement('a');
+        childA.className = 'appNav__sublink';
+        childA.href = withCurrentEmbedParams(child.href);
+        childA.textContent = child.label;
+
+        if (getBasename(child.href) === currentBase) {
+          anyChildActive = true;
+          childA.classList.add('is-active');
+          childA.setAttribute('aria-current', 'page');
+        }
+
+        childLi.appendChild(childA);
+        childList.appendChild(childLi);
+      }
+
+      if (getBasename(item.href) === currentBase || anyChildActive) {
+        parentLink.classList.add('is-active');
+      }
+
+      li.classList.remove('is-open');
+      childList.hidden = true;
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'appNavTree__toggle';
+      toggle.setAttribute('aria-label', `Toggle ${item.label}`);
+      toggle.setAttribute('aria-controls', childList.id);
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = '▸';
+      toggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        const nextOpen = !li.classList.contains('is-open');
+        li.classList.toggle('is-open', nextOpen);
+        childList.hidden = !nextOpen;
+        toggle.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+      });
+
+      row.appendChild(parentLink);
+      row.appendChild(toggle);
+      li.appendChild(row);
+      li.appendChild(childList);
       ul.appendChild(li);
     }
 

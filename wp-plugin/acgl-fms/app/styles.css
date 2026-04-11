@@ -4648,3 +4648,27 @@ body.is-modal-open {
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
+
+.notificationsTestToken {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.notificationsTestToken--ok {
+  border-color: color-mix(in srgb, #16a34a 45%, var(--border));
+  background: color-mix(in srgb, #16a34a 12%, var(--surface));
+}
+
+.notificationsTestToken--error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+}

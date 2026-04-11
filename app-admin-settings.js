@@ -4536,6 +4536,7 @@
   const notificationsSignatureInput = document.getElementById('notificationsSignature');
   const notificationsStatusEl = document.getElementById('notificationsStatus');
   const notificationsLastTestEl = document.getElementById('notificationsLastTest');
+  const notificationsTestTokenEl = document.getElementById('notificationsTestToken');
   const notificationsTestBtn = document.getElementById('notificationsTestBtn');
   const notificationsSaveBtn = document.getElementById('notificationsSaveBtn');
 
@@ -13125,6 +13126,16 @@ function initBackupPage() {
       notificationsLastTestEl.hidden = text === '';
     };
 
+    const setNotificationsTestToken = (msg, isError = false) => {
+      if (!notificationsTestTokenEl) return;
+      const text = String(msg || '').trim();
+      notificationsTestTokenEl.textContent = text;
+      notificationsTestTokenEl.hidden = text === '';
+      notificationsTestTokenEl.classList.remove('notificationsTestToken--ok', 'notificationsTestToken--error');
+      if (!text) return;
+      notificationsTestTokenEl.classList.add(isError ? 'notificationsTestToken--error' : 'notificationsTestToken--ok');
+    };
+
     const notificationsSyncModeUi = () => {
       const mode = String(notificationsRecipientsModeInput && notificationsRecipientsModeInput.value || 'all_users_with_email');
       const manual = mode === 'manual_list';
@@ -13427,11 +13438,13 @@ function initBackupPage() {
         notificationsCanEdit = false;
         notificationsSetDisabled(true);
         setNotificationsStatus('Please sign in to load notification settings.', true);
+        setNotificationsTestToken('', false);
         return;
       }
 
       setNotificationsStatus('Loading...');
       setNotificationsLastTest('');
+      setNotificationsTestToken('', false);
       try {
         const url = wpJoin('acgl-fms/v1/admin/notifications-settings');
         const res = await wpFetchJson(url, { method: 'GET' });
@@ -13607,6 +13620,7 @@ function initBackupPage() {
         notificationsSetDisabled(true);
         setNotificationsStatus('Sending test email...');
         setNotificationsLastTest('');
+        setNotificationsTestToken('Sending test email...', false);
 
         try {
           const url = wpJoin('acgl-fms/v1/admin/notifications-settings/test');
@@ -13621,15 +13635,16 @@ function initBackupPage() {
           notificationsSetDisabled(!notificationsCanEdit);
 
           if (!res.ok || !data || !data.ok) {
-            const baseMsg = data && data.error ? String(data.error) : 'Could not send test email.';
-            const detailMsg = data && data.mail_error_message ? String(data.mail_error_message) : '';
-            const msg = detailMsg ? `${baseMsg}: ${detailMsg}` : baseMsg;
+            const msg = data && data.error ? String(data.error) : 'Could not send test email.';
             setNotificationsStatus(msg, true);
+            setNotificationsLastTest(`Last test failed: ${new Date().toLocaleString()}`);
+            setNotificationsTestToken('Test email failed.', true);
             return;
           }
 
           const sent = Number(data.sent || 0);
           setNotificationsStatus(sent > 0 ? `Test email sent to ${sent} recipient(s).` : 'Test email sent.');
+          setNotificationsTestToken('Test email sent.', false);
           const recipients = Array.isArray(data.to)
             ? data.to.map((v) => String(v || '').trim()).filter(Boolean)
             : [];
@@ -13640,6 +13655,8 @@ function initBackupPage() {
         } catch {
           notificationsSetDisabled(!notificationsCanEdit);
           setNotificationsStatus('Could not send test email.', true);
+          setNotificationsLastTest(`Last test failed: ${new Date().toLocaleString()}`);
+          setNotificationsTestToken('Test email failed.', true);
         }
       });
     }

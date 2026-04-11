@@ -9936,6 +9936,20 @@
     return formatted ? String(formatted).trim() : '—';
   }
 
+  function getOrderById(id, year) {
+    const target = String(id || '').trim();
+    if (!target) return null;
+    const orders = loadOrders(year);
+    return orders.find((o) => String((o && o.id) || '').trim() === target) || null;
+  }
+
+  function getReconciliationOrderById(id, year) {
+    const target = String(id || '').trim();
+    if (!target) return null;
+    const orders = loadReconciliationOrders(year);
+    return orders.find((o) => String((o && o.id) || '').trim() === target) || null;
+  }
+
   function findOrderByPaymentOrderNo(paymentOrderNo, year) {
     const canon = canonicalizePaymentOrderNo(paymentOrderNo);
     if (!canon) return null;

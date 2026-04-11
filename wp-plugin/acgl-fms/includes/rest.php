@@ -52,6 +52,67 @@ function acgl_fms_authorize_settings_notifications($isWrite) {
     return true;
 }
 
+function acgl_fms_notifications_event_permission_key($typeId) {
+    $id = trim((string) $typeId);
+    if ($id === '') return 'settings_email_notifications';
+
+    $map = [
+        'new_payment_order' => 'orders',
+        'gs_review' => 'orders',
+        'gm_review' => 'orders',
+        'gt_processing' => 'orders',
+        'budget_update' => 'budget',
+        'new_bank_eur' => 'income_bankeur',
+        'new_wise_eur' => 'ledger_wiseeur',
+        'new_wise_usd' => 'ledger_wiseusd',
+        'mt_gs_verification' => 'ledger_money_transfers',
+        'mt_gt_verification' => 'ledger_money_transfers',
+        'new_backlog' => 'settings_backlog',
+    ];
+
+    return isset($map[$id]) ? (string) $map[$id] : 'settings_email_notifications';
+}
+
+function acgl_fms_authorize_notifications_event_send($request) {
+    // Allow WordPress users with write capability.
+    if (acgl_fms_require_write()) return true;
+
+    // Token mode: require write access to the workflow area that emitted the event.
+    $token = acgl_fms_get_bearer_token();
+    if (!$token) return false;
+    $payload = acgl_fms_verify_token($token);
+    if (!$payload) return false;
+
+    if (function_exists('acgl_fms_payload_is_admin') && acgl_fms_payload_is_admin($payload)) {
+        return true;
+    }
+
+    $typeId = '';
+    if ($request instanceof WP_REST_Request) {
+        $data = $request->get_json_params();
+        if (!is_array($data)) {
+            $data = $request->get_params();
+        }
+        if (is_array($data)) {
+            $typeId = isset($data['type']) ? trim((string) $data['type']) : '';
+        }
+    }
+
+    $permKey = acgl_fms_notifications_event_permission_key($typeId);
+    $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
+    $lvl = isset($perms[$permKey]) ? (string) $perms[$permKey] : 'none';
+
+    if ($lvl === 'none' && $permKey !== 'settings_email_notifications') {
+        $fallbackLvl = isset($perms['settings_email_notifications']) ? (string) $perms['settings_email_notifications'] : 'none';
+        if ($fallbackLvl !== 'none') {
+            return acgl_fms_level_allows_write($fallbackLvl);
+        }
+    }
+
+    if ($lvl === 'none') return false;
+    return acgl_fms_level_allows_write($lvl);
+}
+
 function acgl_fms_notifications_is_valid_email($value) {
     $email = trim((string) $value);
     if ($email === '') return false;
@@ -190,14 +251,39 @@ function acgl_fms_notifications_send_instance_email($settings, $instanceConfig, 
     $body = acgl_fms_notifications_build_body_html($bodyTpl, is_array($vars) ? $vars : [], $signature);
 
     $headers = [ 'Content-Type: text/html; charset=UTF-8' ];
+    $fromEmail = trim((string) get_option('admin_email', ''));
+    if ($fromEmail !== '' && acgl_fms_notifications_is_valid_email($fromEmail)) {
+        $siteName = function_exists('wp_specialchars_decode')
+            ? wp_specialchars_decode((string) get_bloginfo('name'), ENT_QUOTES)
+            : (string) get_bloginfo('name');
+        $siteName = trim((string) $siteName);
+        if ($siteName === '') $siteName = 'ACGL FMS';
+        $headers[] = 'From: ' . $siteName . ' <' . $fromEmail . '>';
+    }
     $replyTo = trim((string) ($settings['reply_to'] ?? ''));
     if ($replyTo !== '' && acgl_fms_notifications_is_valid_email($replyTo)) {
         $headers[] = 'Reply-To: ' . $replyTo;
     }
 
+    $mailErrorMessage = '';
+    $mailErrorCode = '';
+    $mailErrorHook = static function ($wpError) use (&$mailErrorMessage, &$mailErrorCode) {
+        if (!($wpError instanceof WP_Error)) return;
+        if ($mailErrorMessage === '') {
+            $mailErrorMessage = (string) $wpError->get_error_message();
+        }
+        if ($mailErrorCode === '') {
+            $mailErrorCode = (string) $wpError->get_error_code();
+        }
+    };
+    add_action('wp_mail_failed', $mailErrorHook, 10, 1);
     $ok = wp_mail($to, $subject, $body, $headers);
+    remove_action('wp_mail_failed', $mailErrorHook, 10);
     if (!$ok) {
-        return [ 'ok' => false, 'error' => 'mail_send_failed' ];
+        $out = [ 'ok' => false, 'error' => 'mail_send_failed' ];
+        if ($mailErrorCode !== '') $out['mail_error_code'] = $mailErrorCode;
+        if ($mailErrorMessage !== '') $out['mail_error_message'] = $mailErrorMessage;
+        return $out;
     }
 
     return [
@@ -1252,8 +1338,8 @@ function acgl_fms_register_rest_routes() {
     // Admin helper: send a configured notification event by type.
     register_rest_route('acgl-fms/v1', '/admin/notifications-send-event', [
         'methods' => 'POST',
-        'permission_callback' => function () {
-            return acgl_fms_authorize_settings_notifications(true);
+        'permission_callback' => function (WP_REST_Request $request) {
+            return acgl_fms_authorize_notifications_event_send($request);
         },
         'callback' => function (WP_REST_Request $request) {
             if (!function_exists('acgl_fms_admin_get_notification_settings')) {

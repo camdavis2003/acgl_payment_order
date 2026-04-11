@@ -13621,7 +13621,9 @@ function initBackupPage() {
           notificationsSetDisabled(!notificationsCanEdit);
 
           if (!res.ok || !data || !data.ok) {
-            const msg = data && data.error ? String(data.error) : 'Could not send test email.';
+            const baseMsg = data && data.error ? String(data.error) : 'Could not send test email.';
+            const detailMsg = data && data.mail_error_message ? String(data.mail_error_message) : '';
+            const msg = detailMsg ? `${baseMsg}: ${detailMsg}` : baseMsg;
             setNotificationsStatus(msg, true);
             return;
           }

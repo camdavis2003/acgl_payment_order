@@ -2792,6 +2792,17 @@
     }
   }
 
+  function bindAuthHeaderBtn() {
+    if (!authHeaderBtn) return;
+    syncAuthHeaderBtn();
+    if (authHeaderBtn.dataset.bound) return;
+    authHeaderBtn.dataset.bound = 'true';
+    authHeaderBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      openAuthLoginOverlay();
+    });
+  }
+
   function syncRequestFormHamburgerVisibility() {
     if (!navToggleBtn) return;
     const base = getBasename(window.location.pathname);
@@ -3937,6 +3948,176 @@
     return { ok: true, changed };
   }
 
+  function getGsLedgerVerifiedKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_gs_ledger_verified_${y}_v1`;
+  }
+
+  function loadGsLedgerVerifiedMap(year) {
+    const key = getGsLedgerVerifiedKeyForYear(year);
+    if (!key) return {};
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function buildGsLedgerRowsForYear(year) {
+    const verified = loadGsLedgerVerifiedMap(year);
+    const rows = [];
+
+    const linkedWiseEurEntryIds = new Set();
+    const linkedWiseUsdEntryIds = new Set();
+    const paymentOrderNos = new Set();
+
+    const incomeEntries = loadIncome(year);
+    for (const inc of Array.isArray(incomeEntries) ? incomeEntries : []) {
+      if (!inc || !inc.id) continue;
+
+      const euroNum = Number(inc.euro);
+      if (!(Number.isFinite(euroNum) && euroNum > 0)) continue;
+
+      const budgetCode = extractInCodeFromBudgetNumberText(inc.budgetNumber);
+      if (!/^[0-9]{4}$/.test(String(budgetCode || ''))) continue;
+
+      const ledgerId = `inc:${String(inc.id)}`;
+      rows.push({
+        ledgerId,
+        date: String(inc.date || ''),
+        budgetNumber: budgetCode,
+        source: 'Commerzbank',
+        creditorDebtor: String(inc.remitter || ''),
+        paymentOrderNo: '',
+        euro: euroNum,
+        usd: null,
+        verified: Boolean(verified[ledgerId]),
+        with: '',
+        status: '',
+        details: String(inc.description || ''),
+      });
+    }
+
+    const orders = loadOrders(year);
+    for (const o of Array.isArray(orders) ? orders : []) {
+      if (!o || !o.id) continue;
+
+      const poNoKey = String(o.paymentOrderNo || '').trim();
+      if (poNoKey) paymentOrderNos.add(poNoKey);
+
+      const src = String(o.source || '').trim();
+      const srcEntryId = String(o.sourceEntryId || '').trim();
+      if (src === 'wiseEUR' && srcEntryId) linkedWiseEurEntryIds.add(srcEntryId);
+      if (src === 'wiseUSD' && srcEntryId) linkedWiseUsdEntryIds.add(srcEntryId);
+
+      const statusLabel = normalizeOrderStatus(o.status);
+      const withLabel = normalizeWith(o.with);
+      const statusRaw = String(statusLabel || '').trim().toLowerCase();
+      const isApprovedOrPaid = statusRaw === 'approved' || statusRaw === 'paid';
+      const isGtReviewWithGmApproved = statusRaw === 'review' && withLabel === 'Grand Treasurer' && hasPaymentOrderGrandMasterApproval(o);
+      if (!isApprovedOrPaid && !isGtReviewWithGmApproved) continue;
+      const ledgerId = `po:${String(o.id)}`;
+
+      const euroRaw = String(o.euro ?? '').trim();
+      const usdRaw = String(o.usd ?? '').trim();
+      const euroNum = euroRaw === '' ? Number.NaN : Number(euroRaw);
+      const usdNum = usdRaw === '' ? Number.NaN : Number(usdRaw);
+
+      rows.push({
+        ledgerId,
+        date: String(o.date || ''),
+        budgetNumber: extractInCodeFromBudgetNumberText(o.budgetNumber),
+        source: String(o.source || '').trim() || 'Commerzbank',
+        creditorDebtor: String(o.name || ''),
+        paymentOrderNo: String(o.paymentOrderNo || ''),
+        euro: Number.isFinite(euroNum) ? -Math.abs(euroNum) : null,
+        usd: Number.isFinite(usdNum) ? -Math.abs(usdNum) : null,
+        verified: Boolean(verified[ledgerId]),
+        with: withLabel,
+        status: String(o.status || ''),
+        details: String(o.purpose || ''),
+      });
+    }
+
+    const wiseEurEntries = loadWiseEur(year);
+    for (const e of Array.isArray(wiseEurEntries) ? wiseEurEntries : []) {
+      if (!e || !e.id) continue;
+
+      const entryId = String(e.id).trim();
+      if (!entryId) continue;
+      if (linkedWiseEurEntryIds.has(entryId)) continue;
+
+      const idTrack = String(e.idTrack || '').trim();
+      if (idTrack && paymentOrderNos.has(idTrack)) continue;
+
+      const receipts = getWiseEurReceipts(e);
+      const disburse = getWiseEurDisburse(e);
+      if (!(Number.isFinite(receipts) && receipts > 0)) continue;
+      if (Number.isFinite(disburse) && disburse > 0) continue;
+
+      const budgetCode = extractInCodeFromBudgetNumberText(e.budgetNo);
+      if (!/^[0-9]{4}$/.test(String(budgetCode || ''))) continue;
+
+      const ledgerId = `weur:${entryId}`;
+      rows.push({
+        ledgerId,
+        date: String(e.datePL || e.date || ''),
+        budgetNumber: budgetCode,
+        source: 'wiseEUR',
+        creditorDebtor: String(e.receivedFromDisbursedTo || e.party || ''),
+        paymentOrderNo: idTrack ? formatPaymentOrderNoForDisplay(idTrack) : '',
+        euro: receipts,
+        usd: null,
+        verified: Boolean(verified[ledgerId]),
+        with: '',
+        status: '',
+        details: String(e.description || e.reference || ''),
+      });
+    }
+
+    const wiseUsdEntries = loadWiseUsd(year);
+    for (const e of Array.isArray(wiseUsdEntries) ? wiseUsdEntries : []) {
+      if (!e || !e.id) continue;
+
+      const entryId = String(e.id).trim();
+      if (!entryId) continue;
+      if (linkedWiseUsdEntryIds.has(entryId)) continue;
+
+      const idTrack = String(e.idTrack || '').trim();
+      if (idTrack && paymentOrderNos.has(idTrack)) continue;
+
+      const receipts = getWiseUsdReceipts(e);
+      const disburse = getWiseUsdDisburse(e);
+      if (!(Number.isFinite(receipts) && receipts > 0)) continue;
+      if (Number.isFinite(disburse) && disburse > 0) continue;
+
+      const budgetCode = extractInCodeFromBudgetNumberText(e.budgetNo);
+      if (!/^[0-9]{4}$/.test(String(budgetCode || ''))) continue;
+
+      const ledgerId = `wusd:${entryId}`;
+      rows.push({
+        ledgerId,
+        date: String(e.datePL || e.date || ''),
+        budgetNumber: budgetCode,
+        source: 'wiseUSD',
+        creditorDebtor: String(e.receivedFromDisbursedTo || e.party || ''),
+        paymentOrderNo: idTrack ? formatPaymentOrderNoForDisplay(idTrack) : '',
+        euro: null,
+        usd: receipts,
+        verified: Boolean(verified[ledgerId]),
+        with: '',
+        status: '',
+        details: String(e.description || e.reference || ''),
+      });
+    }
+
+    return rows;
+  }
+
   /**
    * Ledger-driven budget sync.
    *
@@ -3960,7 +4141,12 @@
     // If parsing would drop any <tr> elements, abort without writing.
     const expectedTrCount = (String(html).match(/<tr\b/gi) || []).length;
 
-    const ledgerRows = buildGsLedgerRowsForYear(y);
+    let ledgerRows = [];
+    try {
+      ledgerRows = buildGsLedgerRowsForYear(y);
+    } catch {
+      return { ok: false, reason: 'ledgerRowsUnavailable' };
+    }
     const receiptsEuroByCode = new Map();
     const receiptsUsdByCode = new Map();
     const expendituresEuroByCode = new Map();
@@ -4309,6 +4495,10 @@
 
   const authGateResult = renderAuthGate();
   if (authGateResult && authGateResult.blocked) return;
+
+  // Bind request-form header auth early so Sign in still works even if
+  // a later initialization step throws.
+  bindAuthHeaderBtn();
 
   await preloadCurrentPageSharedData();
 
@@ -4931,6 +5121,45 @@
     } catch {
       return [];
     }
+  }
+
+  function getOrderById(id, year) {
+    const target = String(id || '').trim();
+    if (!target) return null;
+    const orders = loadOrders(year);
+    return orders.find((o) => String((o && o.id) || '').trim() === target) || null;
+  }
+
+  function getReconciliationOrderById(id, year) {
+    const target = String(id || '').trim();
+    if (!target) return null;
+    const orders = loadReconciliationOrders(year);
+    return orders.find((o) => String((o && o.id) || '').trim() === target) || null;
+  }
+
+  function upsertOrder(updatedOrder, year) {
+    if (!updatedOrder) return;
+    const target = String(updatedOrder.id || '').trim();
+    if (!target) return;
+
+    const orders = loadOrders(year);
+    const existing = orders.find((o) => String((o && o.id) || '').trim() === target) || null;
+    if (!existing) return;
+
+    const next = orders.map((o) => (
+      String((o && o.id) || '').trim() === target ? updatedOrder : o
+    ));
+    saveOrders(next, year);
+  }
+
+  // Request-page bundles may not include ledger sync internals; keep edit-save
+  // flow resilient by no-oping these hooks when unavailable.
+  function updateWiseEntryBudgetNoFromOrderEdit(_order, _year, _nowIso) {
+    // no-op in this bundle
+  }
+
+  function updateWiseEntryIdTrackFromOrderEdit(_order, _year, _nowIso) {
+    // no-op in this bundle
   }
 
   /** @param {Array<Object>} orders */
@@ -5750,6 +5979,7 @@
     };
 
     const errors = {};
+    const isEditing = Boolean(getEditOrderId());
 
     if (values.bankDetailsMode === 'US') {
       values.iban = normalizeUsBankText(values.iban);
@@ -5796,13 +6026,13 @@
       'name',
       'address',
       'purpose',
-      'captchaAnswer',
+      ...(isEditing ? [] : ['captchaAnswer']),
     ];
     for (const key of requiredKeys) {
       if (!values[key]) errors[key] = 'This field is required.';
     }
 
-    if (!errors.captchaAnswer) {
+    if (!isEditing && !errors.captchaAnswer) {
       if (requestCaptchaExpected === null) {
         errors.captchaAnswer = 'Captcha is not ready. Please reload the page.';
       } else if (values.captchaAnswer !== requestCaptchaExpected) {
@@ -9882,6 +10112,19 @@
       delete form.dataset.reconciliationEdit;
     }
 
+    const captchaEl = form.elements.namedItem('captchaAnswer');
+    const captchaField = captchaEl && captchaEl.closest ? captchaEl.closest('.field') : null;
+    const requireCaptchaForMode = !editId;
+    if (captchaEl) {
+      captchaEl.required = requireCaptchaForMode;
+      if (!requireCaptchaForMode) {
+        captchaEl.value = '';
+        const captchaErr = document.getElementById('error-captchaAnswer');
+        if (captchaErr) captchaErr.textContent = '';
+      }
+    }
+    if (captchaField) captchaField.hidden = false;
+
     // Budget Nr. behavior:
     // - Only users with Full Payment Orders access may change it.
     // - If not Full access, hide the Budget Nr. field in this form.
@@ -9892,6 +10135,8 @@
       const budgetFieldWrap = budgetNumberEl.closest('.field');
       if (budgetFieldWrap) budgetFieldWrap.hidden = !canEditBudgetNumber;
     }
+
+    initBudgetNumberSelect();
 
     if (isRequestForm && forceNew) {
       setEditOrderId(null);
@@ -10159,13 +10404,25 @@
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      let editedReconciliationEntry = false;
 
       const isPublicSubmit = IS_WP_SHARED_MODE && !getWpToken() && !editId;
+      const editingReconciliation = Boolean(
+        editId && (form.dataset.reconciliationEdit === '1' || params.get('return') === 'reconciliation')
+      );
+
+      try {
 
       // In WP shared mode, allow public (logged-out) submissions via the server endpoint.
       if (!isPublicSubmit) {
-        const requiredLevel = editId ? 'write' : 'create';
-        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.', requiredLevel)) return;
+        const requiredLevel = editId
+          ? (editingReconciliation ? 'create' : 'write')
+          : 'create';
+        const permKey = editingReconciliation ? 'orders_reconciliation' : 'orders';
+        const denyMsg = editingReconciliation
+          ? 'Reconciliation is read only for your account.'
+          : 'Payment Orders is read only for your account.';
+        if (!requireWriteAccess(permKey, denyMsg, requiredLevel)) return;
       }
 
       clearFieldErrors();
@@ -10180,33 +10437,50 @@
         return;
       }
 
-      const items = loadDraftItems();
-      if (items.length < 1) {
+      const year = getActiveBudgetYear();
+      const existingForEdit = editId
+        ? (getOrderById(editId, year) || getReconciliationOrderById(editId, year))
+        : null;
+
+      let items = loadDraftItems();
+      if (items.length < 1 && editId && existingForEdit && Array.isArray(existingForEdit.items) && existingForEdit.items.length > 0) {
+        items = existingForEdit.items;
+      }
+
+      if (items.length < 1 && !editId) {
         showItemsError('At least one item is required. Click the Euro or USD field to add items.');
         return;
       }
 
-      const totals = sumItems(items);
-      const mode = inferCurrencyModeFromItems(items);
-      if (mode === 'MIXED') {
-        showItemsError('Use only one currency for all items (Euro or USD).');
-        return;
+      let euroValue = null;
+      let usdValue = null;
+
+      if (items.length > 0) {
+        const totals = sumItems(items);
+        const mode = inferCurrencyModeFromItems(items);
+        if (mode === 'MIXED') {
+          showItemsError('Use only one currency for all items (Euro or USD).');
+          return;
+        }
+        const usingEuro = mode === 'EUR';
+        const usingUsd = mode === 'USD';
+        euroValue = usingEuro ? totals.euro : null;
+        usdValue = usingUsd ? totals.usd : null;
+      } else if (editId && existingForEdit) {
+        euroValue = existingForEdit.euro === undefined ? null : existingForEdit.euro;
+        usdValue = existingForEdit.usd === undefined ? null : existingForEdit.usd;
       }
-      const usingEuro = mode === 'EUR';
-      const usingUsd = mode === 'USD';
 
       const orderValues = {
         ...result.values,
-        euro: usingEuro ? totals.euro : null,
-        usd: usingUsd ? totals.usd : null,
+        euro: euroValue,
+        usd: usdValue,
         items,
       };
 
       if (!editId && !String(orderValues.source || '').trim()) {
         orderValues.source = 'Form Submission';
       }
-
-      const year = getActiveBudgetYear();
 
       if (editId) {
         const existing = getOrderById(editId, year);
@@ -10219,6 +10493,7 @@
         const preferReconciliation = form.dataset.reconciliationEdit === '1' || params.get('return') === 'reconciliation';
         const baseOrder = preferReconciliation && existingRec ? existingRec : (existing || existingRec);
         const isReconciliationEdit = Boolean(preferReconciliation && existingRec);
+        editedReconciliationEntry = isReconciliationEdit;
 
         // If this user cannot edit Budget Nr., preserve the existing value.
         if (!canEditBudgetNumber) {
@@ -10309,6 +10584,12 @@
 
         // Show the same token after Save Changes (displayed on Payment Orders page)
         setFlashToken('Thank you, your update has been saved.');
+
+        const targetHref = editedReconciliationEntry
+          ? `reconciliation.html?year=${encodeURIComponent(String(year))}`
+          : `menu.html?year=${encodeURIComponent(String(year))}`;
+        window.location.href = withWpEmbedParams(targetHref);
+        return;
       } else {
         if (isPublicSubmit) {
           try {
@@ -10379,19 +10660,16 @@
         showSubmitToken('Thank you, your request has been submitted.');
       }
 
-      // Return to list after editing
-      if (getEditOrderId() === null) {
-        // no-op
-      }
-        if (editId) {
-          if (isReconciliationEdit) {
-            window.location.href = `reconciliation.html?year=${encodeURIComponent(String(year))}`;
-          } else {
-            window.location.href = `menu.html?year=${encodeURIComponent(String(year))}`;
-          }
-        }
-
       // Optional: you can navigate to the menu page manually using the header link.
+      } catch (err) {
+        const msg = err && err.message ? String(err.message) : String(err || 'Unknown error');
+        showItemsError(`Save failed: ${msg}`);
+        try {
+          console.error('Save Changes failed', err);
+        } catch {
+          // ignore
+        }
+      }
     });
 
     if (resetBtn) {
@@ -10621,7 +10899,8 @@
 
       const year = getActiveBudgetYear();
       const orders = loadOrders(year);
-      const order = orders.find((o) => o.id === id);
+      const targetId = String(id || '').trim();
+      const order = orders.find((o) => String((o && o.id) || '').trim() === targetId);
       if (!order) return;
 
       if (action === 'downloadPdf') {
@@ -10773,16 +11052,7 @@
 
   // [bundle-fix:request-auth-wiring] The request bundle strips workflow wiring
   // above, but index page still needs header auth and popout link handlers.
-  if (authHeaderBtn) {
-    syncAuthHeaderBtn();
-    if (!authHeaderBtn.dataset.bound) {
-      authHeaderBtn.dataset.bound = 'true';
-      authHeaderBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        openAuthLoginOverlay();
-      });
-    }
-  }
+  bindAuthHeaderBtn();
 
   // Populate the side-nav tree (stripped with workflow wiring block).
   initBudgetYearNav();

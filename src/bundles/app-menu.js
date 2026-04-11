@@ -1641,7 +1641,7 @@
   }
 
   function canOrdersViewEdit(user) {
-    return canWrite(user, 'orders');
+    return canWriteOrCreate(user, 'orders');
   }
 
   function canOrdersItemizeRead(user) {
@@ -4931,6 +4931,28 @@
     } catch {
       return [];
     }
+  }
+
+  function getOrderById(id, year) {
+    const target = String(id || '').trim();
+    if (!target) return null;
+    const orders = loadOrders(year);
+    return orders.find((o) => String((o && o.id) || '').trim() === target) || null;
+  }
+
+  function upsertOrder(updatedOrder, year) {
+    if (!updatedOrder) return;
+    const target = String(updatedOrder.id || '').trim();
+    if (!target) return;
+
+    const orders = loadOrders(year);
+    const existing = orders.find((o) => String((o && o.id) || '').trim() === target) || null;
+    if (!existing) return;
+
+    const next = orders.map((o) => (
+      String((o && o.id) || '').trim() === target ? updatedOrder : o
+    ));
+    saveOrders(next, year);
   }
 
   /** @param {Array<Object>} orders */
@@ -9783,8 +9805,9 @@
   function deleteOrderById(id) {
     const year = getActiveBudgetYear();
     const orders = loadOrders(year);
-    const target = orders.find((o) => o && o.id === id);
-    const next = orders.filter((o) => o.id !== id);
+    const targetId = String(id || '').trim();
+    const target = orders.find((o) => String((o && o.id) || '').trim() === targetId);
+    const next = orders.filter((o) => String((o && o.id) || '').trim() !== targetId);
     saveOrders(next, year);
     if (target) {
       const po = formatPaymentOrderNoForDisplay(target.paymentOrderNo);
@@ -10749,6 +10772,211 @@
       }
     });
   }
+
+  function bindOrderDetailsModalCloseHandlers() {
+    if (!modal || modal.dataset.boundCloseClick === '1') return;
+    modal.dataset.boundCloseClick = '1';
+    modal.addEventListener('click', (e) => {
+      const closeTarget = e.target && e.target.closest ? e.target.closest('[data-modal-close]') : null;
+      if (closeTarget) closeModal();
+    });
+  }
+
+  function bindOrderModalFooterButtons() {
+    if (editOrderBtn && !editOrderBtn.dataset.boundClick) {
+      editOrderBtn.dataset.boundClick = '1';
+      editOrderBtn.addEventListener('click', () => {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
+        if (!id) return;
+        const year = getActiveBudgetYear();
+        const order = getOrderById(id, year);
+        if (!order) return;
+        beginEditingOrder(order);
+        closeModal();
+        window.location.href = withWpEmbedParams(`index.html?year=${encodeURIComponent(String(year))}`);
+      });
+    }
+
+    if (saveOrderBtn && !saveOrderBtn.dataset.boundClick) {
+      saveOrderBtn.dataset.boundClick = '1';
+      saveOrderBtn.addEventListener('click', () => {
+        if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;
+        const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
+        const year = getActiveBudgetYear();
+        const latest = id ? getOrderById(id, year) : null;
+
+        const withSelect = modalBody ? modalBody.querySelector('#modalWithSelect') : null;
+        const statusSelect = modalBody ? modalBody.querySelector('#modalStatusSelect') : null;
+        const budgetNumberSelect = modalBody ? modalBody.querySelector('#modalBudgetNumberSelect') : null;
+        const sourceSelect = modalBody ? modalBody.querySelector('#modalSourceSelect') : null;
+        const commentsEl = modalBody ? modalBody.querySelector('#modalComments') : null;
+        const commentsErrEl = modalBody ? modalBody.querySelector('#error-modalComments') : null;
+
+        if (latest && withSelect && statusSelect) {
+          const comment = commentsEl ? String(commentsEl.value || '').trim() : '';
+          if (commentsErrEl) commentsErrEl.textContent = '';
+
+          const prevWith = getOrderWithLabel(latest);
+          const prevStatus = normalizeOrderStatus(getOrderStatusLabel(latest));
+          const prevBudgetNumber = extractOutCodeFromBudgetNumberText(latest.budgetNumber);
+
+          const rawWith = String(withSelect.value || '').trim();
+          const requestedWith = rawWith ? normalizeWith(rawWith) : '';
+          const requestedStatus = normalizeOrderStatus(statusSelect.value);
+          const requestedBudgetNumber = budgetNumberSelect
+            ? extractOutCodeFromBudgetNumberText(budgetNumberSelect.value)
+            : prevBudgetNumber;
+
+          const currentUserForSave = getCurrentUser();
+          const withChanging = Boolean(requestedWith && requestedWith !== prevWith);
+          const statusChanging = requestedStatus !== prevStatus;
+          if (withChanging && !canChangeWithField(currentUserForSave, prevWith)) {
+            window.alert('You do not have permission to change the "With" field for the current workflow stage.');
+            return;
+          }
+          if (statusChanging && !canChangeStatusField(currentUserForSave, prevWith)) {
+            window.alert('You do not have permission to change the "Status" field for the current workflow stage.');
+            return;
+          }
+
+          const actorWithPreWorkflow = modal ? normalizeWith(modal.getAttribute('data-pending-actor-with') || '') : '';
+          const actorStatusPreWorkflow = modal ? normalizeOrderStatus(modal.getAttribute('data-pending-actor-status') || '') : '';
+
+          const originalWith = modal ? normalizeWith(modal.getAttribute('data-original-with') || '') : '';
+          const originalStatus = modal ? normalizeOrderStatus(modal.getAttribute('data-original-status') || '') : '';
+
+          const actorWithForLog = actorWithPreWorkflow || originalWith || prevWith || requestedWith;
+          const actorStatusForLog = actorStatusPreWorkflow || originalStatus || prevStatus || requestedStatus;
+
+          let nextWith = requestedWith;
+          let nextStatus = requestedStatus;
+          const becameApproved = prevStatus !== 'Approved' && nextStatus === 'Approved';
+
+          if (!nextWith && nextStatus !== 'Returned') nextWith = prevWith;
+
+          if (nextStatus === 'Rejected') {
+            nextWith = 'Requestor';
+          } else if (nextStatus === 'Paid') {
+            nextWith = 'Archives';
+          } else {
+            if (nextWith === 'Grand Secretary' && becameApproved) {
+              nextWith = 'Grand Master';
+              nextStatus = 'Review';
+            } else if (nextWith === 'Grand Secretary' && nextStatus !== 'Review' && nextStatus !== 'Approved') {
+              nextStatus = 'Review';
+            } else if (nextWith === 'Grand Master' && becameApproved) {
+              nextWith = 'Grand Treasurer';
+              nextStatus = 'Review';
+            }
+          }
+
+          if (nextStatus === 'Returned' && !String(nextWith || '').trim()) {
+            window.alert('Select who this request is returned to.');
+            try {
+              withSelect.focus();
+            } catch {
+              // ignore
+            }
+            return;
+          }
+
+          const commentRequired = nextStatus === 'Returned' || nextStatus === 'Rejected';
+          if (commentRequired && !comment) {
+            if (commentsErrEl) commentsErrEl.textContent = 'Comments are required for Returned or Rejected.';
+            try {
+              if (commentsEl) commentsEl.focus();
+            } catch {
+              // ignore
+            }
+            return;
+          }
+
+          const prevSource = normalizeOrderSource(latest.source);
+          const nextSource = sourceSelect ? (normalizeOrderSource(sourceSelect.value) || prevSource) : prevSource;
+          const nextBudgetNumber = requestedBudgetNumber || prevBudgetNumber;
+
+          const changingToImpact = (nextStatus === 'Approved' || nextStatus === 'Paid') && nextStatus !== getOrderStatusLabel(latest);
+          if (changingToImpact) {
+            const outCode = extractOutCodeFromBudgetNumberText(nextBudgetNumber || latest.budgetNumber);
+            if (!/^\d{4}$/.test(outCode)) {
+              window.alert('Budget Nr. is required before setting Status to Approved or Paid. Edit the order and set Budget Nr. first.');
+              statusSelect.value = prevStatus;
+              modal.removeAttribute('data-pending-status');
+              return;
+            }
+          }
+
+          const changed =
+            nextWith !== getOrderWithLabel(latest)
+            || nextStatus !== getOrderStatusLabel(latest)
+            || nextBudgetNumber !== prevBudgetNumber
+            || nextSource !== prevSource
+            || Boolean(comment);
+
+          if (changed) {
+            const nowIso = new Date().toISOString();
+            const draftNext = {
+              ...latest,
+              with: nextWith,
+              status: nextStatus,
+              budgetNumber: nextBudgetNumber,
+              source: nextSource || latest.source,
+              updatedAt: nowIso,
+            };
+            const changes = computeOrderAuditChanges(latest, draftNext);
+            if (comment) changes.push({ field: 'Comments', from: '—', to: comment });
+
+            let updated = {
+              ...draftNext,
+              timeline: appendTimelineEvent(latest, {
+                at: nowIso,
+                with: nextWith,
+                status: nextStatus,
+                actorWith: actorWithForLog,
+                actorStatus: actorStatusForLog,
+                user: getTimelineUsername(),
+                action: 'Edited',
+                changes,
+                comment: comment || undefined,
+              }),
+            };
+
+            if (updated && updated.budgetDeduction) {
+              const { budgetDeduction, ...rest } = updated;
+              updated = rest;
+            }
+
+            upsertOrder(updated, year);
+
+            // Fire notification events for status/with transitions from Payment Orders View save.
+            {
+              const baseVars = {
+                paymentOrderNo: String(updated.paymentOrderNo || ''),
+                year: String(year),
+                paymentOrderLink: '',
+                directLink: String(window.location.href || ''),
+              };
+              if (nextWith === 'Grand Secretary' && nextStatus === 'Review') {
+                void fireNotificationEvent('gs_review', baseVars);
+              } else if (nextWith === 'Grand Master' && nextStatus === 'Review') {
+                void fireNotificationEvent('gm_review', baseVars);
+              } else if (nextWith === 'Grand Treasurer' && nextStatus === 'Approved') {
+                void fireNotificationEvent('gt_processing', baseVars);
+              }
+            }
+
+            applyPaymentOrdersView();
+          }
+        }
+
+        closeModal();
+      });
+    }
+  }
+
+  bindOrderDetailsModalCloseHandlers();
+  bindOrderModalFooterButtons();
 
   // Ensure request form nav/hamburger always reflects auth state (even if the header auth button markup changes).
   syncRequestFormHamburgerVisibility();
@@ -11813,37 +12041,232 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-
-    const milageViewModal = document.getElementById('milageViewModal');
-    if (milageViewModal && milageViewModal.classList.contains('is-open')) {
-      closeMilageViewModal();
-      return;
-    }
-    const milageModal = document.getElementById('milageModal');
-    if (milageModal && milageModal.classList.contains('is-open')) {
-      closeMilageModal();
-      return;
-    }
-
-    const itemModal = document.getElementById('itemModal');
-    if (itemModal && itemModal.classList.contains('is-open')) {
-      closeItemModal();
-      return;
-    }
-
-    const backlogCommentModal = document.getElementById('backlogCommentModal');
-    if (backlogCommentModal && backlogCommentModal.classList.contains('is-open')) {
-      closeBacklogCommentModal();
-      return;
-    }
-    const backlogItemModal = document.getElementById('backlogItemModal');
-    if (backlogItemModal && backlogItemModal.classList.contains('is-open')) {
-      closeBacklogItemModal();
-      return;
-    }
-
     if (modal && modal.classList.contains('is-open')) closeModal();
   });
+
+  if (editOrderBtn && !editOrderBtn.dataset.boundClick) {
+    editOrderBtn.dataset.boundClick = '1';
+    editOrderBtn.addEventListener('click', () => {
+      if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+      const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
+      if (!id) return;
+      const year = getActiveBudgetYear();
+      const order = getOrderById(id, year);
+      if (!order) return;
+      beginEditingOrder(order);
+      closeModal();
+      window.location.href = withWpEmbedParams(`index.html?year=${encodeURIComponent(String(year))}`);
+    });
+  }
+
+  if (saveOrderBtn && !saveOrderBtn.dataset.boundClick) {
+    saveOrderBtn.dataset.boundClick = '1';
+    saveOrderBtn.addEventListener('click', () => {
+      if (!requireOrdersViewEditAccess('Payment Orders is read only for your account.')) return;
+      const id = currentViewedOrderId || (modal ? modal.getAttribute('data-order-id') : null);
+      const year = getActiveBudgetYear();
+      const latest = id ? getOrderById(id, year) : null;
+
+      const withSelect = modalBody ? modalBody.querySelector('#modalWithSelect') : null;
+      const statusSelect = modalBody ? modalBody.querySelector('#modalStatusSelect') : null;
+      const budgetNumberSelect = modalBody ? modalBody.querySelector('#modalBudgetNumberSelect') : null;
+      const sourceSelect = modalBody ? modalBody.querySelector('#modalSourceSelect') : null;
+      const commentsEl = modalBody ? modalBody.querySelector('#modalComments') : null;
+      const commentsErrEl = modalBody ? modalBody.querySelector('#error-modalComments') : null;
+
+      if (latest && withSelect && statusSelect) {
+        const comment = commentsEl ? String(commentsEl.value || '').trim() : '';
+        if (commentsErrEl) commentsErrEl.textContent = '';
+
+        const prevWith = getOrderWithLabel(latest);
+        const prevStatus = normalizeOrderStatus(getOrderStatusLabel(latest));
+        const prevBudgetNumber = extractOutCodeFromBudgetNumberText(latest.budgetNumber);
+
+        const rawWith = String(withSelect.value || '').trim();
+        const requestedWith = rawWith ? normalizeWith(rawWith) : '';
+        const requestedStatus = normalizeOrderStatus(statusSelect.value);
+        const requestedBudgetNumber = budgetNumberSelect
+          ? extractOutCodeFromBudgetNumberText(budgetNumberSelect.value)
+          : prevBudgetNumber;
+
+        const currentUserForSave = getCurrentUser();
+        const withChanging = Boolean(requestedWith && requestedWith !== prevWith);
+        const statusChanging = requestedStatus !== prevStatus;
+        if (withChanging && !canChangeWithField(currentUserForSave, prevWith)) {
+          window.alert('You do not have permission to change the "With" field for the current workflow stage.');
+          return;
+        }
+        if (statusChanging && !canChangeStatusField(currentUserForSave, prevWith)) {
+          window.alert('You do not have permission to change the "Status" field for the current workflow stage.');
+          return;
+        }
+
+        const actorWithPreWorkflow = modal ? normalizeWith(modal.getAttribute('data-pending-actor-with') || '') : '';
+        const actorStatusPreWorkflow = modal ? normalizeOrderStatus(modal.getAttribute('data-pending-actor-status') || '') : '';
+
+        const originalWith = modal ? normalizeWith(modal.getAttribute('data-original-with') || '') : '';
+        const originalStatus = modal ? normalizeOrderStatus(modal.getAttribute('data-original-status') || '') : '';
+
+        const actorWithForLog = actorWithPreWorkflow || originalWith || prevWith || requestedWith;
+        const actorStatusForLog = actorStatusPreWorkflow || originalStatus || prevStatus || requestedStatus;
+
+        let nextWith = requestedWith;
+        let nextStatus = requestedStatus;
+        const becameApproved = prevStatus !== 'Approved' && nextStatus === 'Approved';
+
+        if (!nextWith && nextStatus !== 'Returned') nextWith = prevWith;
+
+        if (nextStatus === 'Rejected') {
+          nextWith = 'Requestor';
+        } else if (nextStatus === 'Paid') {
+          nextWith = 'Archives';
+        } else {
+          if (nextWith === 'Grand Secretary' && becameApproved) {
+            nextWith = 'Grand Master';
+            nextStatus = 'Review';
+          } else if (nextWith === 'Grand Secretary' && nextStatus !== 'Review' && nextStatus !== 'Approved') {
+            nextStatus = 'Review';
+          } else if (nextWith === 'Grand Master' && becameApproved) {
+            nextWith = 'Grand Treasurer';
+            nextStatus = 'Review';
+          }
+        }
+
+        if (nextStatus === 'Returned' && !String(nextWith || '').trim()) {
+          window.alert('Select who this request is returned to.');
+          try {
+            withSelect.focus();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
+        const commentRequired = nextStatus === 'Returned' || nextStatus === 'Rejected';
+        if (commentRequired && !comment) {
+          if (commentsErrEl) commentsErrEl.textContent = 'Comments are required for Returned or Rejected.';
+          try {
+            if (commentsEl) commentsEl.focus();
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
+        const prevSource = normalizeOrderSource(latest.source);
+        const nextSource = sourceSelect ? (normalizeOrderSource(sourceSelect.value) || prevSource) : prevSource;
+        const nextBudgetNumber = requestedBudgetNumber || prevBudgetNumber;
+
+        const changingToImpact = (nextStatus === 'Approved' || nextStatus === 'Paid') && nextStatus !== getOrderStatusLabel(latest);
+        if (changingToImpact) {
+          const outCode = extractOutCodeFromBudgetNumberText(nextBudgetNumber || latest.budgetNumber);
+          if (!/^\d{4}$/.test(outCode)) {
+            window.alert('Budget Nr. is required before setting Status to Approved or Paid. Edit the order and set Budget Nr. first.');
+            statusSelect.value = prevStatus;
+            modal.removeAttribute('data-pending-status');
+            return;
+          }
+        }
+
+        const changed =
+          nextWith !== getOrderWithLabel(latest)
+          || nextStatus !== getOrderStatusLabel(latest)
+          || nextBudgetNumber !== prevBudgetNumber
+          || nextSource !== prevSource
+          || Boolean(comment);
+
+        if (changed) {
+          const nowIso = new Date().toISOString();
+          const draftNext = {
+            ...latest,
+            with: nextWith,
+            status: nextStatus,
+            budgetNumber: nextBudgetNumber,
+            source: nextSource || latest.source,
+            updatedAt: nowIso,
+          };
+          const changes = computeOrderAuditChanges(latest, draftNext);
+          if (comment) changes.push({ field: 'Comments', from: '—', to: comment });
+
+          let updated = {
+            ...draftNext,
+            timeline: appendTimelineEvent(latest, {
+              at: nowIso,
+              with: nextWith,
+              status: nextStatus,
+              actorWith: actorWithForLog,
+              actorStatus: actorStatusForLog,
+              user: getTimelineUsername(),
+              action: 'Edited',
+              changes,
+              comment: comment || undefined,
+            }),
+          };
+
+          if (updated && updated.budgetDeduction) {
+            const { budgetDeduction, ...rest } = updated;
+            updated = rest;
+          }
+
+          upsertOrder(updated, year);
+          applyPaymentOrdersView();
+        }
+      }
+
+      closeModal();
+    });
+  }
+
+  if (tbody && !tbody.dataset.boundRowActions) {
+    tbody.dataset.boundRowActions = '1';
+    tbody.addEventListener('click', (e) => {
+      const actionEl = e.target.closest('[data-action]');
+      if (!actionEl) return;
+      if (actionEl.tagName === 'A') e.preventDefault();
+
+      const row = actionEl.closest('tr[data-id]');
+      if (!row) return;
+
+      const id = row.getAttribute('data-id');
+      const action = actionEl.getAttribute('data-action');
+
+      const year = getActiveBudgetYear();
+      const orders = loadOrders(year);
+      const targetId = String(id || '').trim();
+      const order = orders.find((o) => String((o && o.id) || '').trim() === targetId);
+      if (!order) return;
+
+      if (action === 'downloadPdf') {
+        if (hasOrderMissingRequiredValues(order)) {
+          window.alert('Complete all required fields before downloading a PDF.');
+          return;
+        }
+        generatePaymentOrderPdfFromTemplate({ order });
+      } else if (action === 'view') {
+        openModalWithOrder(order);
+      } else if (action === 'items') {
+        const u = getCurrentUser();
+        if (!u) {
+          window.alert('Please sign in.');
+          return;
+        }
+        if (!canOrdersItemizeRead(u)) {
+          window.alert('Itemize Payment Order is read only for your account.');
+          return;
+        }
+        window.location.href = withWpEmbedParams(`itemize.html?orderId=${encodeURIComponent(targetId)}&year=${encodeURIComponent(String(year))}`);
+      } else if (action === 'edit') {
+        if (!requireWriteAccess('orders', 'Payment Orders is read only for your account.')) return;
+        beginEditingOrder(order);
+        window.location.href = withWpEmbedParams(`index.html?year=${encodeURIComponent(String(year))}`);
+      } else if (action === 'delete') {
+        if (!requireDeleteAccess('orders', 'Delete access is required for Payment Orders.')) return;
+        const ok = window.confirm('Delete this request?');
+        if (!ok) return;
+        deleteOrderById(targetId);
+      }
+    });
+  }
 
   // Initial render for list page
   if (tbody) {
@@ -11900,6 +12323,36 @@
 
   if (mtBuilderTbody) {
     initMoneyTransferBuilderPage();
+  }
+
+  function refreshVisibleDataViews() {
+    // Rehydrate visible list pages from latest storage state without full reload.
+    if (tbody) applyPaymentOrdersView();
+    if (reconcileTbody) applyReconciliationView();
+    if (incomeTbody) applyIncomeView();
+    if (wiseEurTbody) applyWiseEurView();
+    if (wiseUsdTbody) applyWiseUsdView();
+    if (gsLedgerTbody) applyGsLedgerView();
+    if (moneyTransfersTbody) applyMoneyTransfersView();
+    if (mtBuilderTbody) applyMtBuilderView();
+  }
+
+  // Keep table views current when users switch back to this tab or when
+  // another tab/session writes shared storage.
+  if (!document.body.dataset.boundLiveViewRefresh) {
+    document.body.dataset.boundLiveViewRefresh = '1';
+
+    window.addEventListener('focus', () => {
+      refreshVisibleDataViews();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refreshVisibleDataViews();
+    });
+
+    window.addEventListener('storage', () => {
+      refreshVisibleDataViews();
+    });
   }
 
   await initSharedTableEnhancements();

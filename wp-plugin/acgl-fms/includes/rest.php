@@ -52,6 +52,67 @@ function acgl_fms_authorize_settings_notifications($isWrite) {
     return true;
 }
 
+function acgl_fms_notifications_event_permission_key($typeId) {
+    $id = trim((string) $typeId);
+    if ($id === '') return 'settings_email_notifications';
+
+    $map = [
+        'new_payment_order' => 'orders',
+        'gs_review' => 'orders',
+        'gm_review' => 'orders',
+        'gt_processing' => 'orders',
+        'budget_update' => 'budget',
+        'new_bank_eur' => 'income_bankeur',
+        'new_wise_eur' => 'ledger_wiseeur',
+        'new_wise_usd' => 'ledger_wiseusd',
+        'mt_gs_verification' => 'ledger_money_transfers',
+        'mt_gt_verification' => 'ledger_money_transfers',
+        'new_backlog' => 'settings_backlog',
+    ];
+
+    return isset($map[$id]) ? (string) $map[$id] : 'settings_email_notifications';
+}
+
+function acgl_fms_authorize_notifications_event_send($request) {
+    // Allow WordPress users with write capability.
+    if (acgl_fms_require_write()) return true;
+
+    // Token mode: require write access to the workflow area that emitted the event.
+    $token = acgl_fms_get_bearer_token();
+    if (!$token) return false;
+    $payload = acgl_fms_verify_token($token);
+    if (!$payload) return false;
+
+    if (function_exists('acgl_fms_payload_is_admin') && acgl_fms_payload_is_admin($payload)) {
+        return true;
+    }
+
+    $typeId = '';
+    if ($request instanceof WP_REST_Request) {
+        $data = $request->get_json_params();
+        if (!is_array($data)) {
+            $data = $request->get_params();
+        }
+        if (is_array($data)) {
+            $typeId = isset($data['type']) ? trim((string) $data['type']) : '';
+        }
+    }
+
+    $permKey = acgl_fms_notifications_event_permission_key($typeId);
+    $perms = acgl_fms_normalize_permissions($payload['p'] ?? []);
+    $lvl = isset($perms[$permKey]) ? (string) $perms[$permKey] : 'none';
+
+    if ($lvl === 'none' && $permKey !== 'settings_email_notifications') {
+        $fallbackLvl = isset($perms['settings_email_notifications']) ? (string) $perms['settings_email_notifications'] : 'none';
+        if ($fallbackLvl !== 'none') {
+            return acgl_fms_level_allows_write($fallbackLvl);
+        }
+    }
+
+    if ($lvl === 'none') return false;
+    return acgl_fms_level_allows_write($lvl);
+}
+
 function acgl_fms_notifications_is_valid_email($value) {
     $email = trim((string) $value);
     if ($email === '') return false;
@@ -195,14 +256,21 @@ function acgl_fms_notifications_send_instance_email($settings, $instanceConfig, 
         $headers[] = 'Reply-To: ' . $replyTo;
     }
 
-    $ok = wp_mail($to, $subject, $body, $headers);
-    if (!$ok) {
+    $sentTo = [];
+    foreach ($to as $recipient) {
+        $email = strtolower(trim((string) $recipient));
+        if ($email === '' || !acgl_fms_notifications_is_valid_email($email)) continue;
+        $ok = wp_mail($email, $subject, $body, $headers);
+        if ($ok) $sentTo[] = $email;
+    }
+
+    if (count($sentTo) === 0) {
         return [ 'ok' => false, 'error' => 'mail_send_failed' ];
     }
 
     return [
         'ok' => true,
-        'to' => $to,
+        'to' => $sentTo,
         'subject' => $subject,
         'instance_id' => (string) ($instance['instance_id'] ?? ''),
         'type_id' => (string) ($instance['type_id'] ?? ''),
@@ -353,6 +421,27 @@ function acgl_fms_notifications_build_order_link($year, $orderId) {
 
     return (string) add_query_arg($params, $url);
 
+}
+
+function acgl_fms_notifications_build_app_direct_link($pageFile) {
+    if (!defined('ACGL_FMS_PLUGIN_FILE')) return '';
+
+    $page = trim((string) $pageFile);
+    if ($page === '') $page = 'index.html';
+
+    $url = plugins_url('app/' . ltrim($page, '/'), ACGL_FMS_PLUGIN_FILE);
+    $params = [
+        'restUrl' => rest_url(),
+        'wp' => '1',
+        'v' => defined('ACGL_FMS_APP_VERSION') ? ACGL_FMS_APP_VERSION : '0',
+    ];
+
+    if (function_exists('wp_create_nonce')) {
+        $nonce = (string) wp_create_nonce('wp_rest');
+        if ($nonce !== '') $params['restNonce'] = $nonce;
+    }
+
+    return (string) add_query_arg($params, $url);
 }
 
 function acgl_fms_notifications_send_public_submit($year, $order) {
@@ -1179,81 +1268,130 @@ function acgl_fms_register_rest_routes() {
             return acgl_fms_authorize_settings_notifications(true);
         },
         'callback' => function (WP_REST_Request $request) {
-            if (!function_exists('acgl_fms_admin_get_notification_settings')) {
-                return new WP_REST_Response([ 'ok' => false, 'error' => 'not_available' ], 500);
+            try {
+                if (!function_exists('acgl_fms_admin_get_notification_settings')) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'not_available' ], 500);
+                }
+
+                $saved = acgl_fms_admin_get_notification_settings();
+                if (!is_array($saved)) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error' ], 500);
+                }
+
+                $data = $request->get_json_params();
+                if (!is_array($data)) {
+                    $data = $request->get_params();
+                }
+
+                $settingsOverride = is_array($data) && isset($data['settings']) && is_array($data['settings'])
+                    ? $data['settings']
+                    : [];
+                $typeId = is_array($data) ? trim((string) ($data['type'] ?? 'new_payment_order')) : 'new_payment_order';
+                $instanceId = is_array($data) ? trim((string) ($data['instance_id'] ?? '')) : '';
+                if ($typeId === '') $typeId = 'new_payment_order';
+
+                $settings = acgl_fms_notifications_normalize_runtime_settings($saved, $settingsOverride);
+                $typeConfig = $instanceId !== ''
+                    ? acgl_fms_notifications_get_instance_config($settings, $instanceId)
+                    : acgl_fms_notifications_get_type_config($settings, $typeId);
+                if (!is_array($typeConfig)) {
+                    return new WP_REST_Response([ 'ok' => false, 'error' => 'event_unknown' ], 400);
+                }
+
+                $effectiveSettings = acgl_fms_notifications_settings_for_instance($settings, $typeConfig);
+                $forcedToPreview = is_array($data) ? trim((string) ($data['to'] ?? '')) : '';
+                if ($forcedToPreview === '' && function_exists('wp_get_current_user')) {
+                    $u = wp_get_current_user();
+                    $candidate = trim((string) ($u->user_email ?? ''));
+                    if ($candidate !== '' && acgl_fms_notifications_is_valid_email($candidate)) {
+                        $forcedToPreview = $candidate;
+                    }
+                }
+                $resolvedTo = acgl_fms_notifications_resolve_recipients($effectiveSettings, $forcedToPreview);
+                $headersPreview = [ 'Content-Type: text/html; charset=UTF-8' ];
+                $replyToPreview = trim((string) ($settings['reply_to'] ?? ''));
+                if ($replyToPreview !== '' && acgl_fms_notifications_is_valid_email($replyToPreview)) {
+                    $headersPreview[] = 'Reply-To: ' . $replyToPreview;
+                }
+                $debugPreview = [
+                    'type' => $typeId,
+                    'instance_id' => (string) ($typeConfig['instance_id'] ?? ''),
+                    'forced_to' => $forcedToPreview,
+                    'resolved_to' => is_array($resolvedTo) ? array_values($resolvedTo) : [],
+                    'headers' => $headersPreview,
+                ];
+
+                $forcedTo = $forcedToPreview;
+                $vars = [
+                    'paymentOrderNo' => 'PO 00-00',
+                    'year' => (string) gmdate('Y'),
+                    'createdAt' => gmdate('c'),
+                    'id' => 'test-' . (string) wp_rand(100000, 999999),
+                    'paymentOrderLink' => acgl_fms_notifications_build_order_link((string) gmdate('Y'), 'test-' . (string) wp_rand(100000, 999999)),
+                    'user' => function_exists('wp_get_current_user') ? (string) (wp_get_current_user()->user_login ?? '') : '',
+                    'date' => gmdate('Y-m-d'),
+                    'description' => 'Test description',
+                    'amount' => '123.45',
+                    'party' => 'Test party',
+                    'moneyTransferNo' => 'MT 00-00',
+                    'comments' => 'Test comments',
+                    'directLink' => acgl_fms_notifications_build_app_direct_link('index.html'),
+                    'refNo' => 'BL-00-00',
+                    'subject' => 'Test subject',
+                    'priority' => 'Medium',
+                    'createdBy' => function_exists('wp_get_current_user') ? (string) (wp_get_current_user()->user_login ?? '') : '',
+                ];
+
+                $result = acgl_fms_notifications_send_instance_email($settings, $typeConfig, $vars, $forcedTo);
+                if (!is_array($result) || empty($result['ok'])) {
+                    $error = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
+                    $status = $error === 'mail_send_failed' ? 500 : 400;
+                    $out = [ 'ok' => false, 'error' => $error ];
+                    if (isset($result['mail_error_code'])) {
+                        $out['mail_error_code'] = (string) $result['mail_error_code'];
+                    }
+                    if (isset($result['mail_error_message'])) {
+                        $out['mail_error_message'] = (string) $result['mail_error_message'];
+                    }
+                    if (isset($result['debug']) && is_array($result['debug'])) {
+                        $out['debug'] = $result['debug'];
+                    } else {
+                        $out['debug'] = $debugPreview;
+                    }
+                    return new WP_REST_Response($out, $status);
+                }
+
+                $to = isset($result['to']) && is_array($result['to']) ? $result['to'] : [];
+
+                return [
+                    'ok' => true,
+                    'sent' => count($to),
+                    'to' => $to,
+                    'subject' => isset($result['subject']) ? (string) $result['subject'] : '',
+                    'type' => $typeId,
+                    'instance_id' => (string) ($typeConfig['instance_id'] ?? ''),
+                    'debug' => $debugPreview,
+                ];
+            } catch (\Throwable $e) {
+                return new WP_REST_Response([
+                    'ok' => false,
+                    'error' => 'endpoint_exception',
+                    'message' => $e->getMessage(),
+                    'debug' => [
+                        'exception_class' => get_class($e),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                    ],
+                ], 500);
             }
-
-            $saved = acgl_fms_admin_get_notification_settings();
-            if (!is_array($saved)) {
-                return new WP_REST_Response([ 'ok' => false, 'error' => 'server_error' ], 500);
-            }
-
-            $data = $request->get_json_params();
-            if (!is_array($data)) {
-                $data = $request->get_params();
-            }
-
-            $settingsOverride = is_array($data) && isset($data['settings']) && is_array($data['settings'])
-                ? $data['settings']
-                : [];
-            $typeId = is_array($data) ? trim((string) ($data['type'] ?? 'new_payment_order')) : 'new_payment_order';
-            $instanceId = is_array($data) ? trim((string) ($data['instance_id'] ?? '')) : '';
-            if ($typeId === '') $typeId = 'new_payment_order';
-
-            $settings = acgl_fms_notifications_normalize_runtime_settings($saved, $settingsOverride);
-            $typeConfig = $instanceId !== ''
-                ? acgl_fms_notifications_get_instance_config($settings, $instanceId)
-                : acgl_fms_notifications_get_type_config($settings, $typeId);
-            if (!is_array($typeConfig)) {
-                return new WP_REST_Response([ 'ok' => false, 'error' => 'event_unknown' ], 400);
-            }
-
-            $forcedTo = is_array($data) ? (string) ($data['to'] ?? '') : '';
-            $vars = [
-                'paymentOrderNo' => 'PO 00-00',
-                'year' => (string) gmdate('Y'),
-                'createdAt' => gmdate('c'),
-                'id' => 'test-' . (string) wp_rand(100000, 999999),
-                'paymentOrderLink' => acgl_fms_notifications_build_order_link((string) gmdate('Y'), 'test-' . (string) wp_rand(100000, 999999)),
-                'user' => function_exists('wp_get_current_user') ? (string) (wp_get_current_user()->user_login ?? '') : '',
-                'date' => gmdate('Y-m-d'),
-                'description' => 'Test description',
-                'amount' => '123.45',
-                'party' => 'Test party',
-                'moneyTransferNo' => 'MT 00-00',
-                'comments' => 'Test comments',
-                'directLink' => acgl_fms_notifications_build_app_direct_link('index.html'),
-                'refNo' => 'BL-00-00',
-                'subject' => 'Test subject',
-                'priority' => 'Medium',
-                'createdBy' => function_exists('wp_get_current_user') ? (string) (wp_get_current_user()->user_login ?? '') : '',
-            ];
-
-            $result = acgl_fms_notifications_send_instance_email($settings, $typeConfig, $vars, $forcedTo);
-            if (!is_array($result) || empty($result['ok'])) {
-                $error = isset($result['error']) ? (string) $result['error'] : 'mail_send_failed';
-                $status = $error === 'mail_send_failed' ? 500 : 400;
-                return new WP_REST_Response([ 'ok' => false, 'error' => $error ], $status);
-            }
-
-            $to = isset($result['to']) && is_array($result['to']) ? $result['to'] : [];
-
-            return [
-                'ok' => true,
-                'sent' => count($to),
-                'to' => $to,
-                'subject' => isset($result['subject']) ? (string) $result['subject'] : '',
-                'type' => $typeId,
-                'instance_id' => (string) ($typeConfig['instance_id'] ?? ''),
-            ];
         },
     ]);
 
     // Admin helper: send a configured notification event by type.
     register_rest_route('acgl-fms/v1', '/admin/notifications-send-event', [
         'methods' => 'POST',
-        'permission_callback' => function () {
-            return acgl_fms_authorize_settings_notifications(true);
+        'permission_callback' => function (WP_REST_Request $request) {
+            return acgl_fms_authorize_notifications_event_send($request);
         },
         'callback' => function (WP_REST_Request $request) {
             if (!function_exists('acgl_fms_admin_get_notification_settings')) {

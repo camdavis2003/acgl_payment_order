@@ -14,6 +14,40 @@
     return parts.length ? parts[parts.length - 1] : 'index.html';
   }
 
+  const KNOWN_DATASET_PAGES = [
+    'menu.html',
+    'reconciliation.html',
+    'income.html',
+    'wise_eur.html',
+    'wise_usd.html',
+    'money_transfers.html',
+    'money_transfer.html',
+    'grand_secretary_ledger.html',
+    'budget_dashboard.html',
+    'settings.html',
+  ];
+
+  function extractKnownDatasetPage(input) {
+    const raw = String(input || '').trim().toLowerCase();
+    if (!raw) return '';
+    for (const page of KNOWN_DATASET_PAGES) {
+      if (raw === page) return page;
+      if (raw.endsWith(`/${page}`)) return page;
+      if (raw.includes(page)) return page;
+    }
+    return '';
+  }
+
+  function safeDecode(value) {
+    const raw = String(value || '');
+    if (!raw) return '';
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+
   async function initWpSharedStorageBridge(config) {
     const cfg = config && typeof config === 'object' ? config : {};
     const isWpSharedMode = Boolean(cfg.isWpSharedMode);
@@ -52,10 +86,12 @@
     const pendingDeletes = new Set();
     let flushTimer = 0;
     let flushing = false;
+    let activeFlushPromise = null;
 
     const itemUrl = (key) => wpJoin(`acgl-fms/v1/kv/${encodeURIComponent(String(key || ''))}`);
 
     const DEFAULT_STALE_MS = 45 * 1000;
+    const BOOTSTRAP_STALE_MS = 2 * 60 * 1000;
     const BOOTSTRAP_KEYS = [
       'payment_order_users_v1',
       'payment_order_active_budget_year_v1',
@@ -63,6 +99,7 @@
       'payment_order_numbering',
       'payment_order_grand_lodge_info_v1',
       'payment_order_notifications_settings_v1',
+      'payment_order_backlog_v1',
     ];
 
     function debugStoreLog(message, extra) {
@@ -77,19 +114,9 @@
 
     function getKeyStaleMs(keyRaw) {
       const key = String(keyRaw || '');
-      if (
-        key === 'payment_order_users_v1'
-        || key === 'payment_order_numbering'
-        || key === 'payment_order_grand_lodge_info_v1'
-        || key === 'payment_order_budget_years_v1'
-        || key === 'payment_order_active_budget_year_v1'
-        || key === 'payment_order_notifications_settings_v1'
-      ) {
-        return 2 * 60 * 1000;
-      }
+      if (BOOTSTRAP_KEYS.includes(key)) return BOOTSTRAP_STALE_MS;
       return DEFAULT_STALE_MS;
     }
-
     function markLoadedKey(key, value) {
       const k = String(key || '').trim();
       if (!k) return;
@@ -201,13 +228,56 @@
       if (base === 'income.html') {
         return [incomeKey, ordersKey, reconciliationKey];
       }
+      if (base === 'wise_eur.html') {
+        return [wiseEurKey, ordersKey, reconciliationKey];
+      }
+      if (base === 'wise_usd.html') {
+        return [wiseUsdKey, ordersKey, reconciliationKey];
+      }
       if (base === 'money_transfers.html' || base === 'money_transfer.html') {
         return [moneyTransfersKey, incomeKey, wiseEurKey, wiseUsdKey, ordersKey, reconciliationKey, gsLedgerVerifiedKey];
       }
       if (base === 'grand_secretary_ledger.html') {
         return [incomeKey, wiseEurKey, wiseUsdKey, ordersKey, reconciliationKey, moneyTransfersKey, gsLedgerVerifiedKey];
       }
+      if (base === 'budget_dashboard.html') {
+        return [incomeKey, wiseEurKey, wiseUsdKey, ordersKey, reconciliationKey, moneyTransfersKey, gsLedgerVerifiedKey];
+      }
+      if (base === 'settings.html') {
+        return [ordersKey, incomeKey];
+      }
       return [];
+    }
+
+    function resolveCurrentPageName(options) {
+      const direct = extractKnownDatasetPage(options && options.page);
+      if (direct) return direct;
+
+      const fromPath = extractKnownDatasetPage(getBasename(window.location.pathname));
+      if (fromPath) return fromPath;
+
+      const candidates = [];
+      try {
+        const href = String(window.location.href || '');
+        const u = new URL(href);
+        candidates.push(u.pathname, u.search, u.hash, href);
+        const params = u.searchParams;
+        const keys = ['view', 'app', 'route', 'path', 'page_file', 'pageFile', 'target', 'src', 'next', 'redirect_to'];
+        for (const k of keys) candidates.push(params.get(k));
+      } catch {
+        candidates.push(window.location.pathname, window.location.search, window.location.hash);
+      }
+
+      for (const c of candidates) {
+        const hit = extractKnownDatasetPage(c);
+        if (hit) return hit;
+        const decodedHit = extractKnownDatasetPage(safeDecode(c));
+        if (decodedHit) return decodedHit;
+      }
+
+      return String(options && options.page ? options.page : getBasename(window.location.pathname) || '')
+        .trim()
+        .toLowerCase();
     }
 
     async function preloadBootstrapEssentials({ force = false } = {}) {
@@ -216,7 +286,7 @@
 
     async function preloadCurrentPageDatasets(opts = {}) {
       const options = opts && typeof opts === 'object' ? opts : {};
-      const page = String(options.page || getBasename(window.location.pathname) || '').trim().toLowerCase();
+      const page = resolveCurrentPageName(options);
 
       let pageYear = Number(options.year);
       if (!Number.isInteger(pageYear)) {
@@ -233,6 +303,23 @@
         pageYear = Number(String(activeRaw || '').trim());
       }
 
+      if (!Number.isInteger(pageYear)) {
+        try {
+          const yearsRaw = mem.get('payment_order_budget_years_v1') || nativeGet('payment_order_budget_years_v1') || '[]';
+          const years = JSON.parse(String(yearsRaw || '[]'));
+          if (Array.isArray(years)) {
+            const numericYears = years
+              .map((v) => Number(v))
+              .filter((v) => Number.isInteger(v));
+            if (numericYears.length > 0) pageYear = Math.max(...numericYears);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Final fallback keeps year-scoped pages from rendering empty when no
+      // active year has been configured yet.
       if (!Number.isInteger(pageYear)) pageYear = new Date().getFullYear();
       const keys = getPageDatasetKeys(page, pageYear);
       if (keys.length < 1) return;
@@ -254,33 +341,41 @@
         flushTimer = 0;
         if (flushing) return;
         flushing = true;
-        try {
-          for (const key of Array.from(pendingDeletes)) {
-            pendingDeletes.delete(key);
-            pendingUpserts.delete(key);
-            try {
-              await wpFetchJson(itemUrl(key), { method: 'DELETE' });
-            } catch {
-              // ignore
-            }
+        activeFlushPromise = (async () => {
+          try {
+            await runFlush();
+          } finally {
+            flushing = false;
+            activeFlushPromise = null;
           }
-
-          for (const [key, value] of Array.from(pendingUpserts.entries())) {
-            pendingUpserts.delete(key);
-            try {
-              await wpFetchJson(itemUrl(key), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ value: String(value) }),
-              });
-            } catch {
-              // ignore
-            }
-          }
-        } finally {
-          flushing = false;
-        }
+        })();
+        await activeFlushPromise;
       }, 350);
+    }
+
+    async function runFlush() {
+      for (const key of Array.from(pendingDeletes)) {
+        pendingDeletes.delete(key);
+        pendingUpserts.delete(key);
+        try {
+          await wpFetchJson(itemUrl(key), { method: 'DELETE' });
+        } catch {
+          // ignore
+        }
+      }
+
+      for (const [key, value] of Array.from(pendingUpserts.entries())) {
+        pendingUpserts.delete(key);
+        try {
+          await wpFetchJson(itemUrl(key), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: String(value) }),
+          });
+        } catch {
+          // ignore
+        }
+      }
     }
 
     async function flushNow() {
@@ -288,34 +383,25 @@
         window.clearTimeout(flushTimer);
         flushTimer = 0;
       }
-      if (flushing) return;
-      flushing = true;
-      try {
-        for (const key of Array.from(pendingDeletes)) {
-          pendingDeletes.delete(key);
-          pendingUpserts.delete(key);
-          try {
-            await wpFetchJson(itemUrl(key), { method: 'DELETE' });
-          } catch {
-            // ignore
-          }
-        }
 
-        for (const [key, value] of Array.from(pendingUpserts.entries())) {
-          pendingUpserts.delete(key);
-          try {
-            await wpFetchJson(itemUrl(key), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ value: String(value) }),
-            });
-          } catch {
-            // ignore
-          }
-        }
-      } finally {
-        flushing = false;
+      // If a flush is already running, wait for it to finish, then flush any
+      // ops that were queued while it was in-flight (e.g., from a delete
+      // handler that fires just as the 350ms timer was draining).
+      if (flushing && activeFlushPromise) {
+        try { await activeFlushPromise; } catch { /* ignore */ }
       }
+      if (flushing) return;
+
+      flushing = true;
+      activeFlushPromise = (async () => {
+        try {
+          await runFlush();
+        } finally {
+          flushing = false;
+          activeFlushPromise = null;
+        }
+      })();
+      await activeFlushPromise;
     }
 
     storage.getItem = (key) => {
@@ -381,6 +467,263 @@
       preloadCurrentPageDatasets,
       preloadKeys,
       fetchSharedKeyFromWp,
+    };
+  }
+
+  // Fallback helpers keep split bundles resilient when a page-local helper
+  // block is stripped during generation.
+  if (typeof window.isIsoDateOnly !== 'function') {
+    window.isIsoDateOnly = function isIsoDateOnly(value) {
+      const s = String(value || '').trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(s);
+    };
+  }
+
+  if (typeof window.normalizeMoneyTransferId !== 'function') {
+    window.normalizeMoneyTransferId = function normalizeMoneyTransferId(value) {
+      return String(value || '').trim();
+    };
+  }
+
+  if (typeof window.normalizeMoneyTransferEntryLedgerIds !== 'function') {
+    window.normalizeMoneyTransferEntryLedgerIds = function normalizeMoneyTransferEntryLedgerIds(row) {
+      const parseRaw = (value) => {
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') {
+          const s = String(value || '').trim();
+          if (!s) return [];
+          if (s.startsWith('[') && s.endsWith(']')) {
+            try {
+              const parsed = JSON.parse(s);
+              if (Array.isArray(parsed)) return parsed;
+            } catch {
+              // ignore and try CSV fallback
+            }
+          }
+          return s.split(',').map((x) => String(x || '').trim()).filter(Boolean);
+        }
+        return [];
+      };
+
+      const raw = row && row.entryLedgerIds !== undefined && row.entryLedgerIds !== null
+        ? parseRaw(row.entryLedgerIds)
+        : parseRaw(row && row.selectedLedgerIds);
+
+      const out = [];
+      const seen = new Set();
+      for (const v of raw || []) {
+        const id = String(v || '').trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out.push(id);
+      }
+      return out;
+    };
+  }
+
+  if (typeof window.ensureMoneyTransfersHaveIdsForYear !== 'function') {
+    window.ensureMoneyTransfersHaveIdsForYear = function ensureMoneyTransfersHaveIdsForYear(year) {
+      const parseYear = () => {
+        const explicit = Number(year);
+        if (Number.isInteger(explicit)) return explicit;
+
+        try {
+          const activeRaw = String(localStorage.getItem('payment_order_active_budget_year_v1') || '').trim();
+          const active = Number(activeRaw);
+          if (Number.isInteger(active)) return active;
+        } catch {
+          // ignore
+        }
+
+        return new Date().getFullYear();
+      };
+
+      const y = parseYear();
+      const key = `money_transfers_${y}_v1`;
+
+      let all = [];
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : [];
+        all = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        all = [];
+      }
+
+      if (all.length === 0) return all;
+
+      let changed = false;
+      const next = all.map((row, idx) => {
+        const safe = row && typeof row === 'object' ? { ...row } : {};
+        const id = String(safe.id || '').trim();
+        if (!id) {
+          safe.id = (crypto && typeof crypto.randomUUID === 'function')
+            ? crypto.randomUUID()
+            : `mt_${Date.now()}_${idx}_${Math.random().toString(16).slice(2)}`;
+          changed = true;
+        }
+        return safe;
+      });
+
+      if (changed) {
+        try {
+          localStorage.setItem(key, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+      }
+
+      return next;
+    };
+  }
+
+  if (typeof window.normalizeMoneyTransferDate !== 'function') {
+    window.normalizeMoneyTransferDate = function normalizeMoneyTransferDate(row) {
+      const s = String((row && (row.mtDate || row.date || row.transferDate)) || '').trim();
+      if (window.isIsoDateOnly(s)) return s;
+
+      const legacyEnd = String((row && (row.rangeEnd || row.endDate || row.end)) || '').trim();
+      if (window.isIsoDateOnly(legacyEnd)) return legacyEnd;
+      const legacyStart = String((row && (row.rangeStart || row.startDate || row.start)) || '').trim();
+      return window.isIsoDateOnly(legacyStart) ? legacyStart : '';
+    };
+  }
+
+  if (typeof window.hasExplicitMoneyTransferSelection !== 'function') {
+    window.hasExplicitMoneyTransferSelection = function hasExplicitMoneyTransferSelection(row) {
+      if (!row || typeof row !== 'object') return false;
+      return Object.prototype.hasOwnProperty.call(row, 'entryLedgerIds')
+        || Object.prototype.hasOwnProperty.call(row, 'selectedLedgerIds');
+    };
+  }
+
+  if (typeof window.isMtEligibleLedgerIncomeRow !== 'function') {
+    window.isMtEligibleLedgerIncomeRow = function isMtEligibleLedgerIncomeRow(row) {
+      const ledgerId = String(row && row.ledgerId ? row.ledgerId : '').trim();
+      if (!ledgerId || ledgerId.startsWith('po:')) return false;
+      const d = String(row && row.date ? row.date : '').trim();
+      if (!window.isIsoDateOnly(d)) return false;
+      const e = Number(row && row.euro);
+      const u = Number(row && row.usd);
+      return (Number.isFinite(e) && e > 0) || (Number.isFinite(u) && u > 0);
+    };
+  }
+
+  if (typeof window.getAssignedMoneyTransferLedgerIdsForYear !== 'function') {
+    window.getAssignedMoneyTransferLedgerIdsForYear = function getAssignedMoneyTransferLedgerIdsForYear(year, opts = {}) {
+      const exclude = window.normalizeMoneyTransferId(opts && opts.excludeTransferId);
+      const allTransfers = window.ensureMoneyTransfersHaveIdsForYear(year);
+      const out = new Set();
+
+      for (const t of Array.isArray(allTransfers) ? allTransfers : []) {
+        const transferId = window.normalizeMoneyTransferId(t && t.id);
+        if (exclude && transferId === exclude) continue;
+        const explicit = window.normalizeMoneyTransferEntryLedgerIds(t);
+        for (const id of explicit) out.add(id);
+      }
+
+      return out;
+    };
+  }
+
+  if (typeof window.getWiseEurReceipts !== 'function') {
+    window.getWiseEurReceipts = function getWiseEurReceipts(entry) {
+      const n = Number(entry && entry.receipts);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+  }
+
+  if (typeof window.getWiseEurDisburse !== 'function') {
+    window.getWiseEurDisburse = function getWiseEurDisburse(entry) {
+      const n = Number(entry && entry.disburse);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+  }
+
+  if (typeof window.getWiseUsdReceipts !== 'function') {
+    window.getWiseUsdReceipts = function getWiseUsdReceipts(entry) {
+      const n = Number(entry && entry.receipts);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+  }
+
+  if (typeof window.getWiseUsdDisburse !== 'function') {
+    window.getWiseUsdDisburse = function getWiseUsdDisburse(entry) {
+      const n = Number(entry && entry.disburse);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+  }
+
+  if (typeof window.initIncomeColumnSorting !== 'function') {
+    window.initIncomeColumnSorting = function initIncomeColumnSorting() {
+      // no-op fallback for split bundles missing the income sort initializer
+    };
+  }
+
+  if (typeof window.backfillWiseUsdIdTrackFromOrders !== 'function') {
+    window.backfillWiseUsdIdTrackFromOrders = function backfillWiseUsdIdTrackFromOrders() {
+      return false;
+    };
+  }
+
+  if (typeof window.backfillWiseUsdBudgetNoFromOrders !== 'function') {
+    window.backfillWiseUsdBudgetNoFromOrders = function backfillWiseUsdBudgetNoFromOrders() {
+      return false;
+    };
+  }
+
+  if (typeof window.backfillWiseEurIdTrackFromOrders !== 'function') {
+    window.backfillWiseEurIdTrackFromOrders = function backfillWiseEurIdTrackFromOrders() {
+      return false;
+    };
+  }
+
+  if (typeof window.backfillWiseEurBudgetNoFromOrders !== 'function') {
+    window.backfillWiseEurBudgetNoFromOrders = function backfillWiseEurBudgetNoFromOrders() {
+      return false;
+    };
+  }
+
+  if (typeof window.spellOutMoneyTransferNo !== 'function') {
+    window.spellOutMoneyTransferNo = function spellOutMoneyTransferNo(noRaw) {
+      const s = String(noRaw || '').trim();
+      if (!s) return 'Money Transfer';
+      return s.replace(/^MT\s*/i, 'Money Transfer ');
+    };
+  }
+
+  if (!window.incomeViewState || typeof window.incomeViewState !== 'object') {
+    window.incomeViewState = {
+      globalFilter: '',
+      sortKey: 'date',
+      sortDir: 'desc',
+      defaultEmptyText: null,
+      canDelete: false,
+    };
+  }
+
+  if (typeof window.getDerivedBudgetCreatedDateOnlyForYear !== 'function') {
+    window.getDerivedBudgetCreatedDateOnlyForYear = function getDerivedBudgetCreatedDateOnlyForYear(year) {
+      const y = Number.isInteger(Number(year)) ? Number(year) : new Date().getFullYear();
+
+      // If ledger rows are available on this page, derive the earliest row date.
+      try {
+        if (typeof window.buildGsLedgerRowsForYear === 'function') {
+          const rows = window.buildGsLedgerRowsForYear(y);
+          let minDate = '';
+          for (const r of Array.isArray(rows) ? rows : []) {
+            const d = String(r && r.date ? r.date : '').trim();
+            if (!window.isIsoDateOnly(d)) continue;
+            if (!minDate || d < minDate) minDate = d;
+          }
+          if (minDate) return minDate;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Safe fallback used across pages when ledger data is unavailable.
+      return `${y - 1}-04-01`;
     };
   }
 

@@ -203,6 +203,9 @@ function transformAppJs(srcText) {
 function transformDatastoreJs(srcText) {
   let out = String(srcText);
 
+  // Keep tab title branded for demo across split JS bundles.
+  out = replaceAll(out, "const APP_TAB_TITLE = 'ACGL - FMS';", "const APP_TAB_TITLE = 'ACGL - FMS (DEMO)';");
+
   // Keep all JS identifiers/routes isolated from production.
   out = replaceAll(out, 'acgl_fms_', 'acgl_fms_demo_');
   out = replaceAll(out, 'acgl-fms', 'acgl-fms-demo');

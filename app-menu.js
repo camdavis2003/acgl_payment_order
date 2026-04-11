@@ -698,16 +698,24 @@
   ];
 
   const fireNotificationEvent = async (type, vars) => {
-    if (!IS_WP_SHARED_MODE || !getWpToken()) return;
+    if (!IS_WP_SHARED_MODE || !getWpToken()) {
+      try { console.warn("[FMS] fireNotificationEvent skipped: WP_SHARED_MODE=" + IS_WP_SHARED_MODE + ", token=" + !!getWpToken()); } catch { /* ignore */ }
+      return;
+    }
     try {
       const url = wpJoin('acgl-fms/v1/admin/notifications-send-event');
-      await wpFetchJson(url, {
+      const res = await wpFetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: String(type), vars: vars || {} }),
       });
-    } catch {
-      // fire and forget — notification failures should not surface to user
+      if (!res.ok) {
+        let errBody = '';
+        try { errBody = await res.text(); } catch { /* ignore */ }
+        console.warn("[FMS] Notification event " + type + " failed: HTTP " + res.status, errBody);
+      }
+    } catch (err) {
+      console.warn("[FMS] Notification event " + type + " error:", err);
     }
   };
 
@@ -9889,6 +9897,20 @@
     }
   }
 
+  function loadIncome(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
   // ---- wiseEUR (year-scoped) ----
 
   const WISE_EUR_DEFAULT_YEAR = 2026;
@@ -12208,6 +12230,24 @@
           }
 
           upsertOrder(updated, year);
+
+          // Fire notification events for status/with transitions (fallback handler).
+          {
+            const baseVars = {
+              paymentOrderNo: String(updated.paymentOrderNo || ''),
+              year: String(year),
+              paymentOrderLink: '',
+              directLink: String(window.location.href || ''),
+            };
+            if (nextWith === 'Grand Secretary' && nextStatus === 'Review') {
+              void fireNotificationEvent('gs_review', baseVars);
+            } else if (nextWith === 'Grand Master' && nextStatus === 'Review') {
+              void fireNotificationEvent('gm_review', baseVars);
+            } else if (nextWith === 'Grand Treasurer' && nextStatus === 'Approved') {
+              void fireNotificationEvent('gt_processing', baseVars);
+            }
+          }
+
           applyPaymentOrdersView();
         }
       }

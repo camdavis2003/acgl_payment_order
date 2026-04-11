@@ -698,16 +698,24 @@
   ];
 
   const fireNotificationEvent = async (type, vars) => {
-    if (!IS_WP_SHARED_MODE || !getWpToken()) return;
+    if (!IS_WP_SHARED_MODE || !getWpToken()) {
+      try { console.warn("[FMS] fireNotificationEvent skipped: WP_SHARED_MODE=" + IS_WP_SHARED_MODE + ", token=" + !!getWpToken()); } catch { /* ignore */ }
+      return;
+    }
     try {
       const url = wpJoin('acgl-fms/v1/admin/notifications-send-event');
-      await wpFetchJson(url, {
+      const res = await wpFetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: String(type), vars: vars || {} }),
       });
-    } catch {
-      // fire and forget — notification failures should not surface to user
+      if (!res.ok) {
+        let errBody = '';
+        try { errBody = await res.text(); } catch { /* ignore */ }
+        console.warn("[FMS] Notification event " + type + " failed: HTTP " + res.status, errBody);
+      }
+    } catch (err) {
+      console.warn("[FMS] Notification event " + type + " error:", err);
     }
   };
 
@@ -6848,7 +6856,6 @@
               <button type="button" class="btn btn--ghost" data-attachment-action="download">Download</button>
               <button type="button" class="btn btn--danger" data-attachment-action="delete">Remove</button>
             </td>
-              <button type="button" class="btn btn--editIcon" data-notifications-open-edit="${escapeHtml(instanceId)}" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
         `.trim();
       })
       .join('');
@@ -6863,8 +6870,6 @@
       .map((a) => {
         const safeId = escapeHtml(a.id);
         const safeName = escapeHtml(a.name || 'attachment');
-        const passwordPlain = String(u && typeof u.passwordPlain === 'string' ? u.passwordPlain : '')
-          || extractLegacyPasswordPlain(u && u.passwordHash, u && u.salt);
         const safeSize = escapeHtml(formatBytes(a.size));
         return `
           <div class="modalAttRow" data-attachment-id="${safeId}">

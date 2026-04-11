@@ -698,16 +698,24 @@
   ];
 
   const fireNotificationEvent = async (type, vars) => {
-    if (!IS_WP_SHARED_MODE || !getWpToken()) return;
+    if (!IS_WP_SHARED_MODE || !getWpToken()) {
+      try { console.warn("[FMS] fireNotificationEvent skipped: WP_SHARED_MODE=" + IS_WP_SHARED_MODE + ", token=" + !!getWpToken()); } catch { /* ignore */ }
+      return;
+    }
     try {
       const url = wpJoin('acgl-fms/v1/admin/notifications-send-event');
-      await wpFetchJson(url, {
+      const res = await wpFetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: String(type), vars: vars || {} }),
       });
-    } catch {
-      // fire and forget — notification failures should not surface to user
+      if (!res.ok) {
+        let errBody = '';
+        try { errBody = await res.text(); } catch { /* ignore */ }
+        console.warn("[FMS] Notification event " + type + " failed: HTTP " + res.status, errBody);
+      }
+    } catch (err) {
+      console.warn("[FMS] Notification event " + type + " error:", err);
     }
   };
 
@@ -3481,6 +3489,69 @@
     if (!raw) return '';
     const m = raw.match(/\b(\d{4})\b/);
     return m ? String(m[1]) : '';
+  }
+
+  // [bundle-fix:load-helpers] These load helpers are needed by budget sync
+  // (syncBudgetFromLedger → buildGsLedgerRowsForYear) but the full income/wise
+  // sections are stripped from this bundle.
+  function getIncomeKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_income_${y}_v1`;
+  }
+
+  function loadIncome(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getWiseEurKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_wise_eur_${y}_v1`;
+  }
+
+  function loadWiseEur(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getWiseEurKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getWiseUsdKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_wise_usd_${y}_v1`;
+  }
+
+  function loadWiseUsd(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getWiseUsdKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   // One-time/idempotent: for Income entries created before Budget linkage existed

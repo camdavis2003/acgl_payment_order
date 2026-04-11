@@ -698,16 +698,24 @@
   ];
 
   const fireNotificationEvent = async (type, vars) => {
-    if (!IS_WP_SHARED_MODE || !getWpToken()) return;
+    if (!IS_WP_SHARED_MODE || !getWpToken()) {
+      try { console.warn("[FMS] fireNotificationEvent skipped: WP_SHARED_MODE=" + IS_WP_SHARED_MODE + ", token=" + !!getWpToken()); } catch { /* ignore */ }
+      return;
+    }
     try {
       const url = wpJoin('acgl-fms/v1/admin/notifications-send-event');
-      await wpFetchJson(url, {
+      const res = await wpFetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: String(type), vars: vars || {} }),
       });
-    } catch {
-      // fire and forget — notification failures should not surface to user
+      if (!res.ok) {
+        let errBody = '';
+        try { errBody = await res.text(); } catch { /* ignore */ }
+        console.warn("[FMS] Notification event " + type + " failed: HTTP " + res.status, errBody);
+      }
+    } catch (err) {
+      console.warn("[FMS] Notification event " + type + " error:", err);
     }
   };
 
@@ -1641,7 +1649,7 @@
   }
 
   function canOrdersViewEdit(user) {
-    return canWrite(user, 'orders');
+    return canWriteOrCreate(user, 'orders');
   }
 
   function canOrdersItemizeRead(user) {
@@ -1649,7 +1657,10 @@
   }
 
   function canOrdersItemizeWrite(user) {
-    return hasModuleAccessLevel(user, 'orders_itemize', 'write') || hasModuleAccessLevel(user, 'orders', 'write');
+    return hasModuleAccessLevel(user, 'orders_itemize', 'write')
+      || hasModuleAccessLevel(user, 'orders_itemize', 'create')
+      || hasModuleAccessLevel(user, 'orders', 'write')
+      || hasModuleAccessLevel(user, 'orders', 'create');
   }
 
   // Returns the role/position of a user, looking up from the stored users list when needed
@@ -3478,6 +3489,69 @@
     if (!raw) return '';
     const m = raw.match(/\b(\d{4})\b/);
     return m ? String(m[1]) : '';
+  }
+
+  // [bundle-fix:load-helpers] These load helpers are needed by budget sync
+  // (syncBudgetFromLedger → buildGsLedgerRowsForYear) but the full income/wise
+  // sections are stripped from this bundle.
+  function getIncomeKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_income_${y}_v1`;
+  }
+
+  function loadIncome(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getIncomeKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getWiseEurKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_wise_eur_${y}_v1`;
+  }
+
+  function loadWiseEur(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getWiseEurKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getWiseUsdKeyForYear(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y)) return null;
+    return `payment_order_wise_usd_${y}_v1`;
+  }
+
+  function loadWiseUsd(year) {
+    const resolvedYear = Number.isInteger(Number(year)) ? Number(year) : getActiveBudgetYear();
+    const key = getWiseUsdKeyForYear(resolvedYear);
+    if (!key) return [];
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   // One-time/idempotent: for Income entries created before Budget linkage existed
@@ -6848,7 +6922,6 @@
               <button type="button" class="btn btn--ghost" data-attachment-action="download">Download</button>
               <button type="button" class="btn btn--danger" data-attachment-action="delete">Remove</button>
             </td>
-              <button type="button" class="btn btn--editIcon" data-notifications-open-edit="${escapeHtml(instanceId)}" aria-label="Edit"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/><path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/></svg></button>
         `.trim();
       })
       .join('');
@@ -6863,8 +6936,6 @@
       .map((a) => {
         const safeId = escapeHtml(a.id);
         const safeName = escapeHtml(a.name || 'attachment');
-        const passwordPlain = String(u && typeof u.passwordPlain === 'string' ? u.passwordPlain : '')
-          || extractLegacyPasswordPlain(u && u.passwordHash, u && u.salt);
         const safeSize = escapeHtml(formatBytes(a.size));
         return `
           <div class="modalAttRow" data-attachment-id="${safeId}">
@@ -10286,6 +10357,28 @@
     return true;
   }
 
+  function syncModalPageScrollLock() {
+    const hasOpenModal = Boolean(document.querySelector('.modal.is-open'));
+    document.body.classList.toggle('is-modal-open', hasOpenModal);
+    document.documentElement.classList.toggle('is-modal-open', hasOpenModal);
+  }
+
+  function openSimpleModal(modalEl, focusSelector) {
+    if (!modalEl) return;
+    modalEl.classList.add('is-open');
+    modalEl.setAttribute('aria-hidden', 'false');
+    syncModalPageScrollLock();
+    const focusTarget = focusSelector ? modalEl.querySelector(focusSelector) : null;
+    if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+  }
+
+  function closeSimpleModal(modalEl) {
+    if (!modalEl) return;
+    modalEl.classList.remove('is-open');
+    modalEl.setAttribute('aria-hidden', 'true');
+    syncModalPageScrollLock();
+  }
+
   function updateWiseEntryIdTrackFromReconciliation(order, paymentOrderNo, year, nowIso) {
     const source = String(order && order.source ? order.source : '').trim();
     if (source !== 'wiseEUR' && source !== 'wiseUSD') return;
@@ -10852,8 +10945,6 @@
     renderItems(items, { readOnly: itemizeReadOnly });
     if (itemizeReadOnly) {
       if (saveItemsBtn) saveItemsBtn.hidden = true;
-      if (openItemModalBtn) openItemModalBtn.hidden = true;
-      if (addMilageBtn) addMilageBtn.hidden = true;
     } else {
       resetItemEditor();
     }
@@ -10907,10 +10998,8 @@
 
     if (openItemModalBtn && !openItemModalBtn.dataset.bound) {
       openItemModalBtn.dataset.bound = '1';
-      openItemModalBtn.disabled = itemizeReadOnly;
       if (itemizeReadOnly) openItemModalBtn.setAttribute('data-tooltip', 'Read only access.');
       openItemModalBtn.addEventListener('click', () => {
-        if (itemizeReadOnly) return;
         if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
         openItemModalForAdd();
       });
@@ -11094,10 +11183,8 @@
 
     if (addMilageBtn && !addMilageBtn.dataset.bound) {
       addMilageBtn.dataset.bound = '1';
-      addMilageBtn.disabled = itemizeReadOnly;
       if (itemizeReadOnly) addMilageBtn.setAttribute('data-tooltip', 'Read only access.');
       addMilageBtn.addEventListener('click', () => {
-        if (itemizeReadOnly) return;
         if (!requireItemizeEditAccess('Payment Orders is read only for your account.')) return;
         openMilageModalForAdd();
       });

@@ -9,8 +9,12 @@
     "test": "node --test",
     "sync:wp": "node sync-wp-app.js",
     "build:wp": "node build-wp-plugin.js",
+    "build:wp:local": "node build-wp-plugin.js && node restore-wp-generated.js",
     "package:wp": "node package-wp-plugin.js --slug acgl-fms-wp --out acgl-fms-wp.zip",
-    "package:demo": "node package-wp-plugin-demo.js"
+    "package:wp:local": "node package-wp-plugin.js --slug acgl-fms-wp --out acgl-fms-wp.zip && node restore-wp-generated.js",
+    "package:demo": "node package-wp-plugin-demo.js",
+    "package:demo:local": "node package-wp-plugin-demo.js && node restore-wp-generated.js",
+    "package:all:local": "node package-wp-plugin.js --slug acgl-fms-wp --out acgl-fms-wp.zip && node package-wp-plugin-demo.js && node restore-wp-generated.js"
   },
   "devDependencies": {
     "archiver": "^7.0.1"

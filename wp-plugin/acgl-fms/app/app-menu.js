@@ -10971,6 +10971,8 @@
         }
 
         closeModal();
+        // Always refresh immediately after save/close so table reflects latest state.
+        applyPaymentOrdersView();
       });
     }
   }
@@ -12214,6 +12216,7 @@
       }
 
       closeModal();
+      applyPaymentOrdersView();
     });
   }
 
